@@ -3,6 +3,12 @@
   "name": "304-peptides",
   "main": "./worker/index.js",
   "compatibility_date": "2026-07-11",
+
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
