@@ -11,25 +11,46 @@ const defaultSettings = {
 };
 
 const paymentOptions = [
-  { id: "zelle", label: "Zelle", logo: zelleLogo },
-  { id: "venmo", label: "Venmo", logo: venmoLogo },
-  { id: "cash-app", label: "Cash App", logo: cashAppLogo },
+  {
+    id: "zelle",
+    label: "Zelle",
+    logo: zelleLogo,
+  },
+  {
+    id: "venmo",
+    label: "Venmo",
+    logo: venmoLogo,
+  },
+  {
+    id: "cash-app",
+    label: "Cash App",
+    logo: cashAppLogo,
+  },
 ];
 
 function loadSettings() {
   try {
-    const savedSettings = window.localStorage.getItem(storageKey);
+    const savedSettings =
+      window.localStorage.getItem(storageKey);
 
     return savedSettings
-      ? { ...defaultSettings, ...JSON.parse(savedSettings) }
+      ? {
+          ...defaultSettings,
+          ...JSON.parse(savedSettings),
+        }
       : defaultSettings;
   } catch {
     return defaultSettings;
   }
 }
 
-function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
-  const [settings, setSettings] = useState(loadSettings);
+function Checkout({
+  cartItems = [],
+  onNavigate,
+  onPlaceOrder,
+}) {
+  const [settings, setSettings] =
+    useState(loadSettings);
 
   const [formData, setFormData] = useState({
     firstName: "",
@@ -41,9 +62,22 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
     zip: "",
   });
 
-  const [paymentMethod, setPaymentMethod] = useState("");
-  const [researchAgreement, setResearchAgreement] = useState(false);
-  const [ageAgreement, setAgeAgreement] = useState(false);
+  const [paymentMethod, setPaymentMethod] =
+    useState("");
+
+  const [
+    researchAgreement,
+    setResearchAgreement,
+  ] = useState(false);
+
+  const [ageAgreement, setAgeAgreement] =
+    useState(false);
+
+  const [isSubmitting, setIsSubmitting] =
+    useState(false);
+
+  const [submitError, setSubmitError] =
+    useState("");
 
   useEffect(() => {
     function updateSettings(event) {
@@ -91,7 +125,8 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
   const totalQuantity = useMemo(
     () =>
       cartItems.reduce(
-        (total, item) => total + item.quantity,
+        (total, item) =>
+          total + Number(item.quantity || 0),
         0
       ),
     [cartItems]
@@ -104,7 +139,11 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
           ? item.price
           : 0;
 
-        return total + price * item.quantity;
+        const quantity = Number(
+          item.quantity || 0
+        );
+
+        return total + price * quantity;
       }, 0),
     [cartItems]
   );
@@ -127,6 +166,11 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
       formData.zip.trim()
   );
 
+  const emailValid =
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+      formData.email.trim()
+    );
+
   const purchasingEnabled =
     settings.storeStatus === "open";
 
@@ -135,17 +179,20 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
     purchasingEnabled &&
     invalidPriceItems.length === 0;
 
-  const selectedPaymentOption = paymentOptions.find(
-    (option) => option.id === paymentMethod
-  );
+  const selectedPaymentOption =
+    paymentOptions.find(
+      (option) => option.id === paymentMethod
+    );
 
   const canPlaceOrder =
     cartItems.length > 0 &&
     checkoutAvailable &&
     formComplete &&
+    emailValid &&
     Boolean(paymentMethod) &&
     researchAgreement &&
-    ageAgreement;
+    ageAgreement &&
+    !isSubmitting;
 
   const storeStatusLabel =
     settings.storeStatus === "open"
@@ -157,23 +204,124 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
   function handleChange(event) {
     const { name, value } = event.target;
 
+    setSubmitError("");
+
     setFormData((currentData) => ({
       ...currentData,
       [name]: value,
     }));
   }
 
-  function handlePlaceOrder() {
-    if (!canPlaceOrder) {
+  function handlePaymentChange(value) {
+    setSubmitError("");
+    setPaymentMethod(value);
+  }
+
+  async function handlePlaceOrder() {
+    if (!canPlaceOrder || isSubmitting) {
       return;
     }
 
-    onPlaceOrder({
-      ...formData,
-      preferredPaymentMethod: paymentMethod,
+    setSubmitError("");
+    setIsSubmitting(true);
+
+    const orderPayload = {
+      firstName: formData.firstName.trim(),
+      lastName: formData.lastName.trim(),
+      email: formData.email.trim(),
+      address: formData.address.trim(),
+      city: formData.city.trim(),
+      state: formData.state.trim(),
+      zip: formData.zip.trim(),
+
+      preferredPaymentMethod:
+        paymentMethod,
+
       preferredPaymentLabel:
         selectedPaymentOption?.label || "",
-    });
+
+      items: cartItems.map((item) => ({
+        name: item.name || "",
+        codeName: item.codeName || "",
+        strength: item.strength || "",
+        quantity: Number(
+          item.quantity || 1
+        ),
+        price: Number(item.price || 0),
+      })),
+    };
+
+    try {
+      const response = await fetch(
+        "/api/order",
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+
+          body: JSON.stringify(
+            orderPayload
+          ),
+        }
+      );
+
+      const responseText =
+        await response.text();
+
+      let result;
+
+      try {
+        result = JSON.parse(responseText);
+      } catch {
+        throw new Error(
+          "The order service returned an invalid response. Please try again."
+        );
+      }
+
+      if (
+        !response.ok ||
+        !result.success
+      ) {
+        throw new Error(
+          result.error ||
+            "The order request could not be submitted."
+        );
+      }
+
+      setIsSubmitting(false);
+
+      onPlaceOrder({
+        ...formData,
+
+        id: result.orderId,
+        orderId: result.orderId,
+
+        status:
+          "Order Request Received",
+
+        preferredPaymentMethod:
+          paymentMethod,
+
+        preferredPaymentLabel:
+          selectedPaymentOption?.label ||
+          "",
+      });
+    } catch (error) {
+      console.error(
+        "Checkout submission error:",
+        error
+      );
+
+      setSubmitError(
+        error?.message ||
+          "The order request could not be submitted. Please try again."
+      );
+
+      setIsSubmitting(false);
+    }
   }
 
   function formatPrice(price) {
@@ -190,10 +338,14 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
         message="Checkout is unavailable because the research product catalog is currently disabled."
         notice="For Research Use Only. Not intended for human consumption."
         primaryLabel="Return Home"
-        onPrimary={() => onNavigate("home")}
+        onPrimary={() =>
+          onNavigate("home")
+        }
         secondaryLabel="Research Agreement"
         onSecondary={() =>
-          onNavigate("researchAgreement")
+          onNavigate(
+            "researchAgreement"
+          )
         }
       />
     );
@@ -207,10 +359,14 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
         message="Add research-use products to your cart before continuing to checkout."
         notice={storeStatusLabel}
         primaryLabel="Browse Products"
-        onPrimary={() => onNavigate("products")}
+        onPrimary={() =>
+          onNavigate("products")
+        }
         secondaryLabel="Research Agreement"
         onSecondary={() =>
-          onNavigate("researchAgreement")
+          onNavigate(
+            "researchAgreement"
+          )
         }
       />
     );
@@ -224,9 +380,13 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
         message={`Your cart has been preserved, but orders cannot be placed while the store status is ${storeStatusLabel}.`}
         notice={storeStatusLabel}
         primaryLabel="Return To Cart"
-        onPrimary={() => onNavigate("cart")}
+        onPrimary={() =>
+          onNavigate("cart")
+        }
         secondaryLabel="Browse Products"
-        onSecondary={() => onNavigate("products")}
+        onSecondary={() =>
+          onNavigate("products")
+        }
       />
     );
   }
@@ -235,37 +395,51 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
     return (
       <main style={pageStyle}>
         <section style={emptyStyle}>
-          <p className="eyebrow">CHECKOUT</p>
+          <p className="eyebrow">
+            CHECKOUT
+          </p>
 
           <h1 style={titleStyle}>
             Cart Update Required
           </h1>
 
           <p style={subtitleStyle}>
-            One or more products in your cart no longer have
-            valid pricing. Return to the cart and remove those
-            products before continuing.
+            One or more products in your
+            cart no longer have valid
+            pricing. Return to the cart and
+            remove those products before
+            continuing.
           </p>
 
           <div style={invalidListStyle}>
-            {invalidPriceItems.map((item) => (
-              <div
-                key={`${item.codeName}-${item.strength}`}
-                style={invalidItemStyle}
-              >
-                <strong>{item.name}</strong>
+            {invalidPriceItems.map(
+              (item) => (
+                <div
+                  key={`${item.codeName}-${item.strength}`}
+                  style={invalidItemStyle}
+                >
+                  <strong>
+                    {item.name}
+                  </strong>
 
-                <span>
-                  {item.codeName} · {item.strength}
-                </span>
-              </div>
-            ))}
+                  <span>
+                    {item.codeName} ·{" "}
+                    {item.strength}
+                  </span>
+                </div>
+              )
+            )}
           </div>
 
           <button
+            type="button"
             className="primary-btn"
-            style={{ marginTop: "26px" }}
-            onClick={() => onNavigate("cart")}
+            style={{
+              marginTop: "26px",
+            }}
+            onClick={() =>
+              onNavigate("cart")
+            }
           >
             Return To Cart
           </button>
@@ -279,7 +453,9 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
       <section style={pageInnerStyle}>
         <div style={heroPanelStyle}>
           <div style={heroStatusRowStyle}>
-            <p className="eyebrow">CHECKOUT</p>
+            <p className="eyebrow">
+              CHECKOUT
+            </p>
 
             <span style={openStatusStyle}>
               {storeStatusLabel}
@@ -291,10 +467,11 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
           </h1>
 
           <p style={subtitleStyle}>
-            Enter your shipping details, choose your
-            preferred payment method, and complete the
-            required confirmations before submitting your
-            order request.
+            Enter your shipping details,
+            choose your preferred payment
+            method, and complete the required
+            confirmations before submitting
+            your order request.
           </p>
         </div>
 
@@ -313,18 +490,24 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
                 name="firstName"
                 label="First Name"
                 placeholder="First Name"
-                value={formData.firstName}
+                value={
+                  formData.firstName
+                }
                 onChange={handleChange}
                 autoComplete="given-name"
+                disabled={isSubmitting}
               />
 
               <InputField
                 name="lastName"
                 label="Last Name"
                 placeholder="Last Name"
-                value={formData.lastName}
+                value={
+                  formData.lastName
+                }
                 onChange={handleChange}
                 autoComplete="family-name"
+                disabled={isSubmitting}
               />
 
               <InputField
@@ -335,6 +518,7 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
                 value={formData.email}
                 onChange={handleChange}
                 autoComplete="email"
+                disabled={isSubmitting}
                 fullWidth
               />
 
@@ -342,9 +526,12 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
                 name="address"
                 label="Shipping Address"
                 placeholder="Shipping Address"
-                value={formData.address}
+                value={
+                  formData.address
+                }
                 onChange={handleChange}
                 autoComplete="street-address"
+                disabled={isSubmitting}
                 fullWidth
               />
 
@@ -355,6 +542,7 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
                 value={formData.city}
                 onChange={handleChange}
                 autoComplete="address-level2"
+                disabled={isSubmitting}
               />
 
               <InputField
@@ -364,6 +552,7 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
                 value={formData.state}
                 onChange={handleChange}
                 autoComplete="address-level1"
+                disabled={isSubmitting}
               />
 
               <InputField
@@ -373,6 +562,7 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
                 value={formData.zip}
                 onChange={handleChange}
                 autoComplete="postal-code"
+                disabled={isSubmitting}
                 fullWidth
               />
             </div>
@@ -387,70 +577,105 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
               </h2>
 
               <p style={paymentIntroStyle}>
-                Select the payment method you would prefer
-                to use for this order.
+                Select the payment method
+                you would prefer to use for
+                this order.
               </p>
 
-              <div style={paymentOptionsGridStyle}>
-                {paymentOptions.map((option) => {
-                  const selected =
-                    paymentMethod === option.id;
+              <div
+                style={
+                  paymentOptionsGridStyle
+                }
+              >
+                {paymentOptions.map(
+                  (option) => {
+                    const selected =
+                      paymentMethod ===
+                      option.id;
 
-                  return (
-                    <label
-                      key={option.id}
-                      style={{
-                        ...paymentOptionStyle,
-                        ...(selected
-                          ? selectedPaymentOptionStyle
-                          : {}),
-                      }}
-                    >
-                      <input
-                        type="radio"
-                        name="paymentMethod"
-                        value={option.id}
-                        checked={selected}
-                        onChange={(event) =>
-                          setPaymentMethod(
-                            event.target.value
-                          )
-                        }
-                        style={paymentRadioStyle}
-                      />
-
-                      <span
+                    return (
+                      <label
+                        key={option.id}
                         style={{
-                          ...paymentSelectionStyle,
+                          ...paymentOptionStyle,
+
                           ...(selected
-                            ? selectedPaymentSelectionStyle
+                            ? selectedPaymentOptionStyle
+                            : {}),
+
+                          ...(isSubmitting
+                            ? disabledPaymentOptionStyle
                             : {}),
                         }}
                       >
-                        ✓
-                      </span>
+                        <input
+                          type="radio"
+                          name="paymentMethod"
+                          value={option.id}
+                          checked={selected}
+                          disabled={
+                            isSubmitting
+                          }
+                          onChange={(
+                            event
+                          ) =>
+                            handlePaymentChange(
+                              event.target
+                                .value
+                            )
+                          }
+                          style={
+                            paymentRadioStyle
+                          }
+                        />
 
-                      <img
-                        src={option.logo}
-                        alt={`${option.label} logo`}
-                        style={paymentLogoStyle}
-                      />
+                        <span
+                          style={{
+                            ...paymentSelectionStyle,
 
-                      <strong style={paymentNameStyle}>
-                        {option.label}
-                      </strong>
-                    </label>
-                  );
-                })}
+                            ...(selected
+                              ? selectedPaymentSelectionStyle
+                              : {}),
+                          }}
+                        >
+                          ✓
+                        </span>
+
+                        <img
+                          src={option.logo}
+                          alt={`${option.label} logo`}
+                          style={
+                            paymentLogoStyle
+                          }
+                        />
+
+                        <strong
+                          style={
+                            paymentNameStyle
+                          }
+                        >
+                          {option.label}
+                        </strong>
+                      </label>
+                    );
+                  }
+                )}
               </div>
 
-              <div style={invoiceMessageStyle}>
-                An invoice with payment instructions will
-                be sent to your email.
+              <div
+                style={
+                  invoiceMessageStyle
+                }
+              >
+                An invoice with payment
+                instructions will be sent to
+                your email.
               </div>
             </div>
 
-            <div style={agreementPanelStyle}>
+            <div
+              style={agreementPanelStyle}
+            >
               <p className="eyebrow">
                 REQUIRED AGREEMENTS
               </p>
@@ -459,65 +684,108 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
                 Research-Use Confirmation
               </h2>
 
-              <div style={agreementInfoBoxStyle}>
+              <div
+                style={
+                  agreementInfoBoxStyle
+                }
+              >
                 <strong>
-                  Review the Research Agreement
+                  Review the Research
+                  Agreement
                 </strong>
 
-                <p style={agreementTextStyle}>
-                  Customers should review the research-use
-                  terms before submitting an order request.
-                  This prototype is not a substitute for
-                  final legal or compliance review.
+                <p
+                  style={
+                    agreementTextStyle
+                  }
+                >
+                  Customers should review
+                  the research-use terms
+                  before submitting an order
+                  request. This prototype is
+                  not a substitute for final
+                  legal or compliance review.
                 </p>
 
                 <button
                   type="button"
                   className="secondary-btn"
-                  style={{ marginTop: "16px" }}
+                  style={{
+                    marginTop: "16px",
+                  }}
+                  disabled={isSubmitting}
                   onClick={() =>
-                    onNavigate("researchAgreement")
+                    onNavigate(
+                      "researchAgreement"
+                    )
                   }
                 >
                   View Research Agreement
                 </button>
               </div>
 
-              <label style={checkboxRowStyle}>
+              <label
+                style={{
+                  ...checkboxRowStyle,
+
+                  ...(isSubmitting
+                    ? disabledControlStyle
+                    : {}),
+                }}
+              >
                 <input
                   type="checkbox"
-                  checked={researchAgreement}
-                  onChange={(event) =>
+                  checked={
+                    researchAgreement
+                  }
+                  disabled={isSubmitting}
+                  onChange={(event) => {
+                    setSubmitError("");
+
                     setResearchAgreement(
                       event.target.checked
-                    )
-                  }
+                    );
+                  }}
                   style={checkboxStyle}
                 />
 
                 <span>
-                  I understand these products are sold for
-                  research use only and are not intended for
-                  human consumption.
+                  I understand these products
+                  are sold for research use
+                  only and are not intended
+                  for human consumption.
                 </span>
               </label>
 
-              <label style={checkboxRowStyle}>
+              <label
+                style={{
+                  ...checkboxRowStyle,
+
+                  ...(isSubmitting
+                    ? disabledControlStyle
+                    : {}),
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={ageAgreement}
-                  onChange={(event) =>
+                  disabled={isSubmitting}
+                  onChange={(event) => {
+                    setSubmitError("");
+
                     setAgeAgreement(
                       event.target.checked
-                    )
-                  }
+                    );
+                  }}
                   style={checkboxStyle}
                 />
 
                 <span>
-                  I confirm I am at least 21 years old and
-                  agree to follow all applicable rules,
-                  laws, and research-use restrictions.
+                  I confirm I am at least 21
+                  years old and agree to
+                  follow all applicable
+                  rules, laws, and
+                  research-use restrictions.
                 </span>
               </label>
             </div>
@@ -535,27 +803,49 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
             <div style={summaryItemsStyle}>
               {cartItems.map((item) => {
                 const lineTotal =
-                  item.price * item.quantity;
+                  Number(item.price || 0) *
+                  Number(
+                    item.quantity || 0
+                  );
 
                 return (
                   <div
                     key={`${item.codeName}-${item.strength}`}
                     style={summaryItemStyle}
                   >
-                    <div style={summaryItemIdentityStyle}>
-                      <strong>{item.name}</strong>
+                    <div
+                      style={
+                        summaryItemIdentityStyle
+                      }
+                    >
+                      <strong>
+                        {item.name}
+                      </strong>
 
-                      <p style={smallMutedTextStyle}>
-                        {item.codeName} · {item.strength}
+                      <p
+                        style={
+                          smallMutedTextStyle
+                        }
+                      >
+                        {item.codeName} ·{" "}
+                        {item.strength}
                       </p>
 
-                      <p style={smallMutedTextStyle}>
-                        Quantity: {item.quantity}
+                      <p
+                        style={
+                          smallMutedTextStyle
+                        }
+                      >
+                        Quantity:{" "}
+                        {item.quantity}
                       </p>
                     </div>
 
                     <strong>
-                      ${lineTotal.toFixed(2)}
+                      $
+                      {lineTotal.toFixed(
+                        2
+                      )}
                     </strong>
                   </div>
                 );
@@ -601,52 +891,115 @@ function Checkout({ cartItems = [], onNavigate, onPlaceOrder }) {
             />
 
             <div style={noticeBoxStyle}>
-              Payment is not collected on this page. After
-              the order request is reviewed, an invoice with
-              instructions for the selected payment method
+              Payment is not collected on
+              this page. After the order
+              request is reviewed, an
+              invoice with instructions for
+              the selected payment method
               will be sent by email.
             </div>
 
+            {submitError && (
+              <div
+                style={submitErrorStyle}
+                role="alert"
+                aria-live="assertive"
+              >
+                <strong>
+                  Order request not sent
+                </strong>
+
+                <span>
+                  {submitError}
+                </span>
+              </div>
+            )}
+
             <button
+              type="button"
               className="primary-btn"
               style={{
                 width: "100%",
                 marginTop: "24px",
-                opacity: canPlaceOrder ? 1 : 0.45,
-                cursor: canPlaceOrder
-                  ? "pointer"
-                  : "not-allowed",
+
+                opacity:
+                  canPlaceOrder ||
+                  isSubmitting
+                    ? 1
+                    : 0.45,
+
+                cursor:
+                  canPlaceOrder
+                    ? "pointer"
+                    : "not-allowed",
               }}
-              disabled={!canPlaceOrder}
+              disabled={
+                !canPlaceOrder ||
+                isSubmitting
+              }
               onClick={handlePlaceOrder}
             >
-              Submit Order Request
+              {isSubmitting
+                ? "Submitting Order Request..."
+                : "Submit Order Request"}
             </button>
 
             <button
+              type="button"
               className="secondary-btn"
               style={{
                 width: "100%",
                 marginTop: "14px",
+
+                opacity: isSubmitting
+                  ? 0.45
+                  : 1,
+
+                cursor: isSubmitting
+                  ? "not-allowed"
+                  : "pointer",
               }}
-              onClick={() => onNavigate("cart")}
+              disabled={isSubmitting}
+              onClick={() =>
+                onNavigate("cart")
+              }
             >
               Back To Cart
             </button>
 
-            {!canPlaceOrder && (
-              <p style={helperTextStyle}>
-                Complete every field, select a payment
-                method, and accept both required agreements
-                to submit your order request.
+            {!canPlaceOrder &&
+              !isSubmitting && (
+                <p
+                  style={
+                    helperTextStyle
+                  }
+                >
+                  Complete every field,
+                  enter a valid email,
+                  select a payment method,
+                  and accept both required
+                  agreements to submit your
+                  order request.
+                </p>
+              )}
+
+            {isSubmitting && (
+              <p
+                style={submittingTextStyle}
+                aria-live="polite"
+              >
+                Please wait. Your order
+                request is being securely
+                submitted.
               </p>
             )}
           </aside>
         </div>
 
         <div style={researchNoticeStyle}>
-          For Research Use Only. Products are not intended
-          for human consumption.
+          For Research Use Only. Products
+          are not intended for human
+          consumption.
         </div>
       </section>
     </main>
@@ -684,6 +1037,7 @@ function EmptyState({
 
         <div style={buttonRowStyle}>
           <button
+            type="button"
             className="primary-btn"
             onClick={onPrimary}
           >
@@ -691,6 +1045,7 @@ function EmptyState({
           </button>
 
           <button
+            type="button"
             className="secondary-btn"
             onClick={onSecondary}
           >
@@ -711,13 +1066,21 @@ function InputField({
   type = "text",
   autoComplete,
   fullWidth = false,
+  disabled = false,
 }) {
   return (
     <label
       style={{
         ...fieldStyle,
+
         ...(fullWidth
-          ? { gridColumn: "1 / -1" }
+          ? {
+              gridColumn: "1 / -1",
+            }
+          : {}),
+
+        ...(disabled
+          ? disabledControlStyle
           : {}),
       }}
     >
@@ -732,16 +1095,27 @@ function InputField({
         value={value}
         onChange={onChange}
         autoComplete={autoComplete}
-        style={inputStyle}
+        disabled={disabled}
+        style={{
+          ...inputStyle,
+
+          ...(disabled
+            ? disabledInputStyle
+            : {}),
+        }}
       />
     </label>
   );
 }
 
-function SummaryRow({ label, value }) {
+function SummaryRow({
+  label,
+  value,
+}) {
   return (
     <div style={summaryRowStyle}>
       <span>{label}</span>
+
       <strong>{value}</strong>
     </div>
   );
@@ -761,10 +1135,15 @@ const heroPanelStyle = {
   marginBottom: "34px",
   padding: "52px",
   borderRadius: "30px",
-  border: "1px solid rgba(255,255,255,0.09)",
+
+  border:
+    "1px solid rgba(255,255,255,0.09)",
+
   background:
     "radial-gradient(circle at top, rgba(61,165,255,0.2), transparent 42%), rgba(255,255,255,0.035)",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
+
+  boxShadow:
+    "0 30px 80px rgba(0,0,0,0.45)",
 };
 
 const heroStatusRowStyle = {
@@ -776,13 +1155,18 @@ const heroStatusRowStyle = {
 };
 
 const titleStyle = {
-  fontSize: "clamp(42px, 6vw, 62px)",
+  fontSize:
+    "clamp(42px, 6vw, 62px)",
+
   lineHeight: "1.05",
   marginBottom: "20px",
+
   background:
     "linear-gradient(180deg, #ffffff, #9d9d9d)",
+
   WebkitBackgroundClip: "text",
-  WebkitTextFillColor: "transparent",
+  WebkitTextFillColor:
+    "transparent",
 };
 
 const subtitleStyle = {
@@ -797,12 +1181,18 @@ const emptyStyle = {
   maxWidth: "900px",
   margin: "0 auto",
   textAlign: "center",
+
   background:
     "radial-gradient(circle at top, rgba(61,165,255,0.18), transparent 40%), rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.09)",
+
+  border:
+    "1px solid rgba(255,255,255,0.09)",
+
   borderRadius: "30px",
   padding: "60px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
+
+  boxShadow:
+    "0 30px 80px rgba(0,0,0,0.45)",
 };
 
 const buttonRowStyle = {
@@ -819,8 +1209,13 @@ const openStatusStyle = {
   margin: "18px auto 0",
   padding: "9px 13px",
   borderRadius: "999px",
-  border: "1px solid rgba(61,165,255,0.42)",
-  background: "rgba(61,165,255,0.17)",
+
+  border:
+    "1px solid rgba(61,165,255,0.42)",
+
+  background:
+    "rgba(61,165,255,0.17)",
+
   color: "#9ed8ff",
   fontSize: "11px",
   fontWeight: "900",
@@ -834,8 +1229,13 @@ const closedStatusStyle = {
   margin: "18px auto 0",
   padding: "9px 13px",
   borderRadius: "999px",
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(255,255,255,0.06)",
+
+  border:
+    "1px solid rgba(255,255,255,0.12)",
+
+  background:
+    "rgba(255,255,255,0.06)",
+
   color: "#c8c8c8",
   fontSize: "11px",
   fontWeight: "900",
@@ -857,15 +1257,22 @@ const invalidItemStyle = {
   flexWrap: "wrap",
   padding: "15px",
   borderRadius: "15px",
-  border: "1px solid rgba(255,255,255,0.09)",
-  background: "rgba(0,0,0,0.23)",
+
+  border:
+    "1px solid rgba(255,255,255,0.09)",
+
+  background:
+    "rgba(0,0,0,0.23)",
+
   color: "#c8c8c8",
 };
 
 const checkoutLayoutStyle = {
   display: "grid",
+
   gridTemplateColumns:
     "repeat(auto-fit, minmax(340px, 1fr))",
+
   gap: "30px",
   alignItems: "start",
 };
@@ -873,26 +1280,38 @@ const checkoutLayoutStyle = {
 const checkoutPanelStyle = {
   background:
     "radial-gradient(circle at top left, rgba(61,165,255,0.14), transparent 35%), rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.09)",
+
+  border:
+    "1px solid rgba(255,255,255,0.09)",
+
   borderRadius: "28px",
   padding: "38px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
+
+  boxShadow:
+    "0 30px 80px rgba(0,0,0,0.45)",
 };
 
 const sectionTitleStyle = {
-  fontSize: "clamp(28px, 4vw, 36px)",
+  fontSize:
+    "clamp(28px, 4vw, 36px)",
+
   lineHeight: "1.12",
   marginBottom: "24px",
+
   background:
     "linear-gradient(180deg, #ffffff, #9d9d9d)",
+
   WebkitBackgroundClip: "text",
-  WebkitTextFillColor: "transparent",
+  WebkitTextFillColor:
+    "transparent",
 };
 
 const formGridStyle = {
   display: "grid",
+
   gridTemplateColumns:
     "repeat(auto-fit, minmax(220px, 1fr))",
+
   gap: "16px",
 };
 
@@ -913,17 +1332,37 @@ const inputStyle = {
   width: "100%",
   padding: "16px",
   borderRadius: "14px",
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(255,255,255,0.055)",
+
+  border:
+    "1px solid rgba(255,255,255,0.12)",
+
+  background:
+    "rgba(255,255,255,0.055)",
+
   color: "#ffffff",
   fontSize: "15px",
   outline: "none",
 };
 
+const disabledInputStyle = {
+  opacity: 0.55,
+  cursor: "not-allowed",
+};
+
+const disabledControlStyle = {
+  opacity: 0.65,
+  cursor: "not-allowed",
+};
+
 const paymentPanelStyle = {
   marginTop: "32px",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
+
+  background:
+    "rgba(255,255,255,0.045)",
+
+  border:
+    "1px solid rgba(255,255,255,0.09)",
+
   borderRadius: "22px",
   padding: "26px",
 };
@@ -937,8 +1376,10 @@ const paymentIntroStyle = {
 
 const paymentOptionsGridStyle = {
   display: "grid",
+
   gridTemplateColumns:
     "repeat(auto-fit, minmax(140px, 1fr))",
+
   gap: "14px",
 };
 
@@ -952,18 +1393,36 @@ const paymentOptionStyle = {
   gap: "10px",
   padding: "18px 14px",
   borderRadius: "18px",
-  border: "1px solid rgba(255,255,255,0.11)",
-  background: "rgba(0,0,0,0.2)",
+
+  border:
+    "1px solid rgba(255,255,255,0.11)",
+
+  background:
+    "rgba(0,0,0,0.2)",
+
   cursor: "pointer",
+
   transition:
     "border-color 0.2s ease, background 0.2s ease, transform 0.2s ease",
 };
 
 const selectedPaymentOptionStyle = {
-  border: "1px solid rgba(61,165,255,0.72)",
-  background: "rgba(61,165,255,0.14)",
+  border:
+    "1px solid rgba(61,165,255,0.72)",
+
+  background:
+    "rgba(61,165,255,0.14)",
+
   transform: "translateY(-2px)",
-  boxShadow: "0 14px 30px rgba(0,0,0,0.25)",
+
+  boxShadow:
+    "0 14px 30px rgba(0,0,0,0.25)",
+};
+
+const disabledPaymentOptionStyle = {
+  opacity: 0.55,
+  cursor: "not-allowed",
+  transform: "none",
 };
 
 const paymentRadioStyle = {
@@ -993,15 +1452,22 @@ const paymentSelectionStyle = {
   display: "grid",
   placeItems: "center",
   borderRadius: "999px",
-  border: "1px solid rgba(255,255,255,0.16)",
-  background: "rgba(255,255,255,0.05)",
+
+  border:
+    "1px solid rgba(255,255,255,0.16)",
+
+  background:
+    "rgba(255,255,255,0.05)",
+
   color: "transparent",
   fontSize: "14px",
   fontWeight: "900",
 };
 
 const selectedPaymentSelectionStyle = {
-  border: "1px solid rgba(61,165,255,0.82)",
+  border:
+    "1px solid rgba(61,165,255,0.82)",
+
   background: "#3da5ff",
   color: "#06111a",
 };
@@ -1010,8 +1476,13 @@ const invoiceMessageStyle = {
   marginTop: "20px",
   padding: "17px",
   borderRadius: "16px",
-  border: "1px solid rgba(61,165,255,0.28)",
-  background: "rgba(61,165,255,0.12)",
+
+  border:
+    "1px solid rgba(61,165,255,0.28)",
+
+  background:
+    "rgba(61,165,255,0.12)",
+
   color: "#bfe7ff",
   fontWeight: "900",
   lineHeight: "1.6",
@@ -1020,15 +1491,24 @@ const invoiceMessageStyle = {
 
 const agreementPanelStyle = {
   marginTop: "32px",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
+
+  background:
+    "rgba(255,255,255,0.045)",
+
+  border:
+    "1px solid rgba(255,255,255,0.09)",
+
   borderRadius: "22px",
   padding: "26px",
 };
 
 const agreementInfoBoxStyle = {
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
+  background:
+    "rgba(61,165,255,0.12)",
+
+  border:
+    "1px solid rgba(61,165,255,0.28)",
+
   color: "#c8eaff",
   borderRadius: "18px",
   padding: "18px",
@@ -1062,22 +1542,31 @@ const checkboxStyle = {
 const summaryPanelStyle = {
   position: "sticky",
   top: "110px",
+
   background:
     "radial-gradient(circle at top left, rgba(61,165,255,0.16), transparent 35%), rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.09)",
+
+  border:
+    "1px solid rgba(255,255,255,0.09)",
+
   borderRadius: "28px",
   padding: "32px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
+
+  boxShadow:
+    "0 30px 80px rgba(0,0,0,0.45)",
 };
 
 const summaryTitleStyle = {
   fontSize: "34px",
   lineHeight: "1.12",
   marginBottom: "24px",
+
   background:
     "linear-gradient(180deg, #ffffff, #9d9d9d)",
+
   WebkitBackgroundClip: "text",
-  WebkitTextFillColor: "transparent",
+  WebkitTextFillColor:
+    "transparent",
 };
 
 const summaryItemsStyle = {
@@ -1091,8 +1580,13 @@ const summaryItemStyle = {
   justifyContent: "space-between",
   alignItems: "flex-start",
   gap: "16px",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
+
+  background:
+    "rgba(255,255,255,0.045)",
+
+  border:
+    "1px solid rgba(255,255,255,0.09)",
+
   borderRadius: "16px",
   padding: "16px",
   color: "#ffffff",
@@ -1113,8 +1607,13 @@ const summaryRowStyle = {
   display: "flex",
   justifyContent: "space-between",
   gap: "18px",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
+
+  background:
+    "rgba(255,255,255,0.045)",
+
+  border:
+    "1px solid rgba(255,255,255,0.09)",
+
   borderRadius: "14px",
   padding: "15px",
   color: "#c8c8c8",
@@ -1123,13 +1622,36 @@ const summaryRowStyle = {
 
 const noticeBoxStyle = {
   marginTop: "20px",
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
+
+  background:
+    "rgba(61,165,255,0.12)",
+
+  border:
+    "1px solid rgba(61,165,255,0.28)",
+
   color: "#9ed8ff",
   borderRadius: "16px",
   padding: "16px",
   fontSize: "14px",
   fontWeight: "800",
+  lineHeight: "1.6",
+};
+
+const submitErrorStyle = {
+  display: "grid",
+  gap: "6px",
+  marginTop: "18px",
+  padding: "16px",
+  borderRadius: "16px",
+
+  border:
+    "1px solid rgba(255,95,95,0.45)",
+
+  background:
+    "rgba(255,70,70,0.12)",
+
+  color: "#ffd1d1",
+  fontSize: "14px",
   lineHeight: "1.6",
 };
 
@@ -1141,11 +1663,25 @@ const helperTextStyle = {
   textAlign: "center",
 };
 
+const submittingTextStyle = {
+  color: "#9ed8ff",
+  fontSize: "13px",
+  fontWeight: "800",
+  lineHeight: "1.6",
+  marginTop: "14px",
+  textAlign: "center",
+};
+
 const researchNoticeStyle = {
   marginTop: "30px",
   textAlign: "center",
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
+
+  background:
+    "rgba(61,165,255,0.12)",
+
+  border:
+    "1px solid rgba(61,165,255,0.28)",
+
   color: "#9ed8ff",
   borderRadius: "20px",
   padding: "20px",
