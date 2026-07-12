@@ -1,7 +1,12 @@
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useState,
+} from "react";
+
 import logo from "../assets/images/logo.jpeg";
 
-const storageKey = "304-site-settings";
+const storageKey =
+  "304-site-settings";
 
 const defaultSettings = {
   catalogEnabled: true,
@@ -10,7 +15,10 @@ const defaultSettings = {
 
 function loadSettings() {
   try {
-    const savedSettings = window.localStorage.getItem(storageKey);
+    const savedSettings =
+      window.localStorage.getItem(
+        storageKey
+      );
 
     if (!savedSettings) {
       return defaultSettings;
@@ -18,7 +26,9 @@ function loadSettings() {
 
     return {
       ...defaultSettings,
-      ...JSON.parse(savedSettings),
+      ...JSON.parse(
+        savedSettings
+      ),
     };
   } catch {
     return defaultSettings;
@@ -30,28 +40,52 @@ function Navbar({
   onNavigate,
   isLoggedIn,
   onLogout,
-  cartCount,
+  cartCount = 0,
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [settings, setSettings] = useState(loadSettings);
+  const [
+    menuOpen,
+    setMenuOpen,
+  ] = useState(false);
+
+  const [
+    settings,
+    setSettings,
+  ] = useState(
+    loadSettings
+  );
 
   useEffect(() => {
-    function updateSettings(event) {
+    function updateSettings(
+      event
+    ) {
       if (event.detail) {
-        setSettings((currentSettings) => ({
-          ...currentSettings,
-          ...event.detail,
-        }));
+        setSettings(
+          (
+            currentSettings
+          ) => ({
+            ...currentSettings,
+            ...event.detail,
+          })
+        );
 
         return;
       }
 
-      setSettings(loadSettings());
+      setSettings(
+        loadSettings()
+      );
     }
 
-    function handleStorageChange(event) {
-      if (event.key === storageKey) {
-        setSettings(loadSettings());
+    function handleStorageChange(
+      event
+    ) {
+      if (
+        event.key ===
+        storageKey
+      ) {
+        setSettings(
+          loadSettings()
+        );
       }
     }
 
@@ -78,24 +112,135 @@ function Navbar({
     };
   }, []);
 
+  useEffect(() => {
+    function handleEscape(
+      event
+    ) {
+      if (
+        event.key ===
+        "Escape"
+      ) {
+        setMenuOpen(false);
+      }
+    }
+
+    window.addEventListener(
+      "keydown",
+      handleEscape
+    );
+
+    return () => {
+      window.removeEventListener(
+        "keydown",
+        handleEscape
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    function handleResize() {
+      if (
+        window.innerWidth >
+        900
+      ) {
+        setMenuOpen(false);
+      }
+    }
+
+    window.addEventListener(
+      "resize",
+      handleResize
+    );
+
+    return () => {
+      window.removeEventListener(
+        "resize",
+        handleResize
+      );
+    };
+  }, []);
+
   function go(page) {
     onNavigate(page);
     setMenuOpen(false);
   }
 
-  function navButton(page, label) {
+  function isPageActive(
+    page
+  ) {
+    if (
+      page ===
+        "products" &&
+      currentPage ===
+        "productDetails"
+    ) {
+      return true;
+    }
+
+    if (
+      page ===
+        "dashboard" &&
+      [
+        "dashboard",
+        "partnerApplication",
+      ].includes(
+        currentPage
+      )
+    ) {
+      return true;
+    }
+
+    if (
+      page ===
+        "cart" &&
+      [
+        "cart",
+        "checkout",
+        "orderConfirmation",
+      ].includes(
+        currentPage
+      )
+    ) {
+      return true;
+    }
+
+    return (
+      currentPage === page
+    );
+  }
+
+  function navButton(
+    page,
+    label
+  ) {
     return (
       <button
         type="button"
         className={`nav-link-button ${
-          currentPage === page ? "active" : ""
+          isPageActive(page)
+            ? "active"
+            : ""
         }`}
-        onClick={() => go(page)}
+        onClick={() =>
+          go(page)
+        }
       >
         {label}
       </button>
     );
   }
+
+  function handleLogout() {
+    onLogout();
+    setMenuOpen(false);
+  }
+
+  const safeCartCount =
+    Number.isFinite(
+      Number(cartCount)
+    )
+      ? Number(cartCount)
+      : 0;
 
   return (
     <header className="site-navbar">
@@ -103,7 +248,9 @@ function Navbar({
         <button
           type="button"
           className="navbar-brand"
-          onClick={() => go("home")}
+          onClick={() =>
+            go("home")
+          }
           aria-label="Go to 304 Peptides home page"
         >
           <div
@@ -114,13 +261,19 @@ function Navbar({
               minHeight: "58px",
               maxWidth: "58px",
               maxHeight: "58px",
-              borderRadius: "15px",
-              overflow: "hidden",
+              borderRadius:
+                "15px",
+              overflow:
+                "hidden",
               display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "rgba(255,255,255,0.04)",
-              border: "1px solid rgba(61,165,255,0.25)",
+              alignItems:
+                "center",
+              justifyContent:
+                "center",
+              background:
+                "rgba(255,255,255,0.04)",
+              border:
+                "1px solid rgba(61,165,255,0.25)",
             }}
           >
             <img
@@ -129,19 +282,30 @@ function Navbar({
               style={{
                 width: "58px",
                 height: "58px",
-                minWidth: "58px",
-                minHeight: "58px",
-                maxWidth: "58px",
-                maxHeight: "58px",
-                objectFit: "cover",
-                display: "block",
+                minWidth:
+                  "58px",
+                minHeight:
+                  "58px",
+                maxWidth:
+                  "58px",
+                maxHeight:
+                  "58px",
+                objectFit:
+                  "cover",
+                display:
+                  "block",
               }}
             />
           </div>
 
           <div className="navbar-brand-text">
-            <strong>304 Peptides</strong>
-            <span>Research Use Only</span>
+            <strong>
+              304 Peptides
+            </strong>
+
+            <span>
+              Research Use Only
+            </span>
           </div>
         </button>
 
@@ -149,32 +313,67 @@ function Navbar({
           type="button"
           className="mobile-menu-button"
           onClick={() =>
-            setMenuOpen((currentValue) => !currentValue)
+            setMenuOpen(
+              (
+                currentValue
+              ) =>
+                !currentValue
+            )
           }
           aria-label={
             menuOpen
               ? "Close navigation menu"
               : "Open navigation menu"
           }
-          aria-expanded={menuOpen}
+          aria-expanded={
+            menuOpen
+          }
+          aria-controls="primary-navigation"
         >
-          {menuOpen ? "✕" : "☰"}
+          {menuOpen
+            ? "✕"
+            : "☰"}
         </button>
 
         <nav
+          id="primary-navigation"
+          aria-label="Primary navigation"
           className={`navbar-links ${
-            menuOpen ? "open" : ""
+            menuOpen
+              ? "open"
+              : ""
           }`}
         >
-          {navButton("home", "Home")}
+          {navButton(
+            "home",
+            "Home"
+          )}
 
           {settings.catalogEnabled &&
-            navButton("products", "Products")}
+            navButton(
+              "products",
+              "Products"
+            )}
 
-          {navButton("quality", "Quality")}
-          {navButton("partners", "Partners")}
-          {navButton("faq", "FAQ")}
-          {navButton("contact", "Contact")}
+          {navButton(
+            "quality",
+            "Quality"
+          )}
+
+          {navButton(
+            "partners",
+            "Partners"
+          )}
+
+          {navButton(
+            "faq",
+            "FAQ"
+          )}
+
+          {navButton(
+            "contact",
+            "Contact"
+          )}
 
           {isLoggedIn ? (
             <>
@@ -183,44 +382,64 @@ function Navbar({
                 "Research Hub"
               )}
 
-              <button
-                type="button"
-                className={`nav-link-button ${
-                  currentPage === "cart"
-                    ? "active"
-                    : ""
-                }`}
-                onClick={() => go("cart")}
-              >
-                Cart ({cartCount})
-              </button>
-
-              {navButton(
-                "missionControl",
-                "Mission Control"
+              {settings.catalogEnabled && (
+                <button
+                  type="button"
+                  className={`nav-link-button ${
+                    isPageActive(
+                      "cart"
+                    )
+                      ? "active"
+                      : ""
+                  }`}
+                  onClick={() =>
+                    go("cart")
+                  }
+                  aria-label={`Open cart with ${safeCartCount} item${
+                    safeCartCount ===
+                    1
+                      ? ""
+                      : "s"
+                  }`}
+                >
+                  Cart (
+                  {
+                    safeCartCount
+                  }
+                  )
+                </button>
               )}
 
               <button
                 type="button"
                 className="nav-logout-button"
-                onClick={() => {
-                  onLogout();
-                  setMenuOpen(false);
-                }}
+                onClick={
+                  handleLogout
+                }
               >
                 Logout
               </button>
             </>
           ) : (
             <>
-              {navButton("login", "Login")}
+              {navButton(
+                "login",
+                "Login"
+              )}
 
               {settings.accountCreationEnabled && (
                 <button
                   type="button"
-                  className="nav-create-button"
+                  className={`nav-create-button ${
+                    currentPage ===
+                    "createAccount"
+                      ? "active"
+                      : ""
+                  }`}
                   onClick={() =>
-                    go("createAccount")
+                    go(
+                      "createAccount"
+                    )
                   }
                 >
                   Create Account
