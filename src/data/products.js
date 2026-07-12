@@ -110,20 +110,31 @@ const pendingStatus = {
   qrStatus: "QR Pending",
 };
 
+const researchMetadata = {
+  researchUseOnly: true,
+  researchNotice:
+    "For Research Use Only. Not intended for human consumption.",
+};
+
 function variant(
   strength,
   codeName,
   price,
   image = null,
-  composition = ""
+  composition = "",
+  options = {}
 ) {
   return {
+    ...pendingStatus,
+    ...researchMetadata,
     strength,
     codeName,
     price,
     image,
-    ...pendingStatus,
-    ...(composition ? { composition } : {}),
+    ...(composition
+      ? { composition }
+      : {}),
+    ...options,
   };
 }
 
@@ -136,26 +147,60 @@ function product({
   isBestSeller = false,
   purity = "≥ 99% Purity",
   variants = [],
+  options = {},
 }) {
-  const firstVariant = variants[0] || null;
-  const hasSingleVariant = variants.length === 1;
+  const firstVariant =
+    variants[0] || null;
 
-  return {
+  const hasSingleVariant =
+    variants.length === 1;
+
+  const productData = {
+    ...pendingStatus,
+    ...researchMetadata,
     name,
-    image: firstVariant?.image || null,
+
+    image:
+      firstVariant?.image || null,
+
     codeName: hasSingleVariant
       ? firstVariant.codeName
       : codeName,
+
     strength: hasSingleVariant
       ? firstVariant.strength
       : strength,
+
     category,
     purity,
-    price: firstVariant?.price ?? null,
-    ...pendingStatus,
+
+    price:
+      firstVariant?.price ?? null,
+
     description,
     isBestSeller,
-    ...(variants.length > 1 ? { variants } : {}),
+    ...options,
+  };
+
+  if (hasSingleVariant) {
+    return {
+      ...productData,
+      ...firstVariant,
+      name,
+      category,
+      purity,
+      description,
+      isBestSeller,
+      ...options,
+    };
+  }
+
+  return {
+    ...productData,
+
+    ...(variants.length > 1
+      ? { variants }
+      : {}),
   };
 }
 
@@ -164,15 +209,42 @@ export const products = [
     name: "304-3R",
     codeName: "304-3R",
     strength: "10mg–60mg",
-    category: "Metabolic Research",
+    category:
+      "Metabolic Research",
+
     description:
       "Research-use product available in multiple strengths with strength-specific imagery and documentation placeholders.",
+
     isBestSeller: true,
+
     variants: [
-      variant("10mg", "304-3R-10", 50.0, r3r10),
-      variant("20mg", "304-3R-20", 80.0, r3r20),
-      variant("30mg", "304-3R-30", 120.0, r3r30),
-      variant("60mg", "304-3R-60", 160.0, r3r60),
+      variant(
+        "10mg",
+        "304-3R-10",
+        50.0,
+        r3r10
+      ),
+
+      variant(
+        "20mg",
+        "304-3R-20",
+        80.0,
+        r3r20
+      ),
+
+      variant(
+        "30mg",
+        "304-3R-30",
+        120.0,
+        r3r30
+      ),
+
+      variant(
+        "60mg",
+        "304-3R-60",
+        160.0,
+        r3r60
+      ),
     ],
   }),
 
@@ -180,17 +252,56 @@ export const products = [
     name: "304-TZ",
     codeName: "304-TZ",
     strength: "10mg–60mg",
-    category: "Metabolic Research",
+    category:
+      "Metabolic Research",
+
     description:
       "Research-use product available in multiple strengths with strength-specific imagery and verification placeholders.",
+
     isBestSeller: true,
+
     variants: [
-      variant("10mg", "304-TZ-10", 45.0, tz10),
-      variant("15mg", "304-TZ-15", 50.0, tz15),
-      variant("20mg", "304-TZ-20", 55.0, tz20),
-      variant("30mg", "304-TZ-30", 70.0, tz30),
-      variant("40mg", "304-TZ-40", 85.0, tz40),
-      variant("60mg", "304-TZ-60", 140.0, tz60),
+      variant(
+        "10mg",
+        "304-TZ-10",
+        45.0,
+        tz10
+      ),
+
+      variant(
+        "15mg",
+        "304-TZ-15",
+        50.0,
+        tz15
+      ),
+
+      variant(
+        "20mg",
+        "304-TZ-20",
+        55.0,
+        tz20
+      ),
+
+      variant(
+        "30mg",
+        "304-TZ-30",
+        70.0,
+        tz30
+      ),
+
+      variant(
+        "40mg",
+        "304-TZ-40",
+        85.0,
+        tz40
+      ),
+
+      variant(
+        "60mg",
+        "304-TZ-60",
+        140.0,
+        tz60
+      ),
     ],
   }),
 
@@ -198,13 +309,33 @@ export const products = [
     name: "304-SG",
     codeName: "304-SG",
     strength: "5mg–15mg",
-    category: "Metabolic Research",
+    category:
+      "Metabolic Research",
+
     description:
       "Research-use product available in multiple strengths with strength-specific imagery and documentation placeholders.",
+
     variants: [
-      variant("5mg", "304-SG-5", 35.0, sg5),
-      variant("10mg", "304-SG-10", 45.0, sg10),
-      variant("15mg", "304-SG-15", 55.0, sg15),
+      variant(
+        "5mg",
+        "304-SG-5",
+        35.0,
+        sg5
+      ),
+
+      variant(
+        "10mg",
+        "304-SG-10",
+        45.0,
+        sg10
+      ),
+
+      variant(
+        "15mg",
+        "304-SG-15",
+        55.0,
+        sg15
+      ),
     ],
   }),
 
@@ -212,11 +343,19 @@ export const products = [
     name: "AOD-9604",
     codeName: "304-AOD-5",
     strength: "5mg",
-    category: "Metabolic Research",
+    category:
+      "Metabolic Research",
+
     description:
       "Research-use catalog item with clear labeling and future documentation support.",
+
     variants: [
-      variant("5mg", "304-AOD-5", 40.0, aod5),
+      variant(
+        "5mg",
+        "304-AOD-5",
+        40.0,
+        aod5
+      ),
     ],
   }),
 
@@ -224,13 +363,33 @@ export const products = [
     name: "Cagrilintide",
     codeName: "304-CG",
     strength: "5mg–20mg",
-    category: "Metabolic Research",
+    category:
+      "Metabolic Research",
+
     description:
       "Research-use product available in multiple strengths with product-specific documentation placeholders.",
+
     variants: [
-      variant("5mg", "304-CG-5", 45.0, cagri5),
-      variant("10mg", "304-CG-10", 55.0, cagri10),
-      variant("20mg", "304-CG-20", 65.0, cagri20),
+      variant(
+        "5mg",
+        "304-CG-5",
+        45.0,
+        cagri5
+      ),
+
+      variant(
+        "10mg",
+        "304-CG-10",
+        55.0,
+        cagri10
+      ),
+
+      variant(
+        "20mg",
+        "304-CG-20",
+        65.0,
+        cagri20
+      ),
     ],
   }),
 
@@ -238,13 +397,33 @@ export const products = [
     name: "5-Amino-1MQ",
     codeName: "304-1MQ",
     strength: "5mg–50mg",
-    category: "Metabolic Research",
+    category:
+      "Metabolic Research",
+
     description:
       "Research-use product organized with multiple strength options and verification placeholders.",
+
     variants: [
-      variant("5mg", "304-1MQ-5", 35.0, amino1mq5),
-      variant("10mg", "304-1MQ-10", 40.0, amino1mq10),
-      variant("50mg", "304-1MQ-50", 60.0, amino1mq50),
+      variant(
+        "5mg",
+        "304-1MQ-5",
+        35.0,
+        amino1mq5
+      ),
+
+      variant(
+        "10mg",
+        "304-1MQ-10",
+        40.0,
+        amino1mq10
+      ),
+
+      variant(
+        "50mg",
+        "304-1MQ-50",
+        60.0,
+        amino1mq50
+      ),
     ],
   }),
 
@@ -252,11 +431,19 @@ export const products = [
     name: "Lemon",
     codeName: "304-LM-10",
     strength: "10mg",
-    category: "Metabolic Research",
+    category:
+      "Metabolic Research",
+
     description:
       "Research-use blend presented with clear product coding and documentation placeholders.",
+
     variants: [
-      variant("10mg", "304-LM-10", 55.0, lemon10),
+      variant(
+        "10mg",
+        "304-LM-10",
+        55.0,
+        lemon10
+      ),
     ],
   }),
 
@@ -264,13 +451,28 @@ export const products = [
     name: "GHK-CU",
     codeName: "304-GC",
     strength: "50mg–100mg",
-    category: "Recovery Research",
+    category:
+      "Recovery Research",
+
     description:
       "Research-use product available in multiple strengths with transparent product organization.",
+
     isBestSeller: true,
+
     variants: [
-      variant("50mg", "304-GC-50", 30.0, ghk50),
-      variant("100mg", "304-GC-100", 40.0, ghk100),
+      variant(
+        "50mg",
+        "304-GC-50",
+        30.0,
+        ghk50
+      ),
+
+      variant(
+        "100mg",
+        "304-GC-100",
+        40.0,
+        ghk100
+      ),
     ],
   }),
 
@@ -278,11 +480,19 @@ export const products = [
     name: "KLOW",
     codeName: "304-KL-80",
     strength: "80mg",
-    category: "Recovery Research",
+    category:
+      "Recovery Research",
+
     description:
       "Research-use blend with clear strength labeling and future verification support.",
+
     variants: [
-      variant("80mg", "304-KL-80", 85.0, klow80),
+      variant(
+        "80mg",
+        "304-KL-80",
+        85.0,
+        klow80
+      ),
     ],
   }),
 
@@ -290,11 +500,19 @@ export const products = [
     name: "Melanotan 1",
     codeName: "304-MT1-10",
     strength: "10mg",
-    category: "Additional Research Products",
+    category:
+      "Additional Research Products",
+
     description:
       "Research-use catalog item with clear labeling and documentation placeholders.",
+
     variants: [
-      variant("10mg", "304-MT1-10", 45.0, melanotan1),
+      variant(
+        "10mg",
+        "304-MT1-10",
+        45.0,
+        melanotan1
+      ),
     ],
   }),
 
@@ -302,11 +520,19 @@ export const products = [
     name: "Melanotan 2",
     codeName: "304-MT2-10",
     strength: "10mg",
-    category: "Additional Research Products",
+    category:
+      "Additional Research Products",
+
     description:
       "Research-use catalog item with clear labeling and documentation placeholders.",
+
     variants: [
-      variant("10mg", "304-MT2-10", 45.0, melanotan2),
+      variant(
+        "10mg",
+        "304-MT2-10",
+        45.0,
+        melanotan2
+      ),
     ],
   }),
 
@@ -314,11 +540,19 @@ export const products = [
     name: "GLOW",
     codeName: "304-GL-70",
     strength: "70mg",
-    category: "Recovery Research",
+    category:
+      "Recovery Research",
+
     description:
       "Research-use blend with clear product coding and documentation placeholders.",
+
     variants: [
-      variant("70mg", "304-GL-70", 75.0, glow70),
+      variant(
+        "70mg",
+        "304-GL-70",
+        75.0,
+        glow70
+      ),
     ],
   }),
 
@@ -326,12 +560,26 @@ export const products = [
     name: "AHK-CU",
     codeName: "304-AHK",
     strength: "50mg–100mg",
-    category: "Recovery Research",
+    category:
+      "Recovery Research",
+
     description:
       "Research-use product available in multiple strengths with organized verification placeholders.",
+
     variants: [
-      variant("50mg", "304-AHK-50", 50.0, ahk50),
-      variant("100mg", "304-AHK-100", 70.0, ahk100),
+      variant(
+        "50mg",
+        "304-AHK-50",
+        50.0,
+        ahk50
+      ),
+
+      variant(
+        "100mg",
+        "304-AHK-100",
+        70.0,
+        ahk100
+      ),
     ],
   }),
 
@@ -339,25 +587,55 @@ export const products = [
     name: "IGF-1LR3",
     codeName: "304-IGF",
     strength: "0.1mg–1mg",
-    category: "Performance Research",
+    category:
+      "Performance Research",
+
     description:
       "Research-use product available in two strengths with clear product coding.",
+
     variants: [
-      variant("0.1mg", "304-IGF-01", 30.0, igf01),
-      variant("1mg", "304-IGF-1", 65.0, igf1),
+      variant(
+        "0.1mg",
+        "304-IGF-01",
+        30.0,
+        igf01
+      ),
+
+      variant(
+        "1mg",
+        "304-IGF-1",
+        65.0,
+        igf1
+      ),
     ],
   }),
 
   product({
-    name: "Thymosin Alpha-1",
+    name:
+      "Thymosin Alpha-1",
+
     codeName: "304-TA1",
     strength: "5mg–10mg",
-    category: "Wellness Research",
+    category:
+      "Wellness Research",
+
     description:
       "Research-use product available in multiple strengths with documentation placeholders.",
+
     variants: [
-      variant("5mg", "304-TA1-5", 45.0, thymosinAlpha5),
-      variant("10mg", "304-TA1-10", 60.0, thymosinAlpha10),
+      variant(
+        "5mg",
+        "304-TA1-5",
+        45.0,
+        thymosinAlpha5
+      ),
+
+      variant(
+        "10mg",
+        "304-TA1-10",
+        60.0,
+        thymosinAlpha10
+      ),
     ],
   }),
 
@@ -365,11 +643,19 @@ export const products = [
     name: "Snap-8",
     codeName: "304-SN8-10",
     strength: "10mg",
-    category: "Cognitive Research",
+    category:
+      "Cognitive Research",
+
     description:
       "Research-use catalog item with clear strength labeling and verification placeholders.",
+
     variants: [
-      variant("10mg", "304-SN8-10", 35.0, snap8),
+      variant(
+        "10mg",
+        "304-SN8-10",
+        35.0,
+        snap8
+      ),
     ],
   }),
 
@@ -377,24 +663,48 @@ export const products = [
     name: "KPV",
     codeName: "304-KP-10",
     strength: "10mg",
-    category: "Recovery Research",
+    category:
+      "Recovery Research",
+
     description:
       "Research-use product with clear labeling and documentation placeholders.",
+
     variants: [
-      variant("10mg", "304-KP-10", 45.0, kpv10),
+      variant(
+        "10mg",
+        "304-KP-10",
+        45.0,
+        kpv10
+      ),
     ],
   }),
 
   product({
     name: "Glutathione",
     codeName: "304-GT",
-    strength: "600mg–1500mg",
-    category: "Wellness Research",
+    strength:
+      "600mg–1500mg",
+
+    category:
+      "Wellness Research",
+
     description:
       "Research-use product available in multiple strengths with organized product data.",
+
     variants: [
-      variant("600mg", "304-GT-600", 30.0, glutathione600),
-      variant("1500mg", "304-GT-1500", 60.0, glutathione1500),
+      variant(
+        "600mg",
+        "304-GT-600",
+        30.0,
+        glutathione600
+      ),
+
+      variant(
+        "1500mg",
+        "304-GT-1500",
+        60.0,
+        glutathione1500
+      ),
     ],
   }),
 
@@ -402,13 +712,33 @@ export const products = [
     name: "Tesamorelin",
     codeName: "304-TS",
     strength: "5mg–20mg",
-    category: "Hormone Research",
+    category:
+      "Hormone Research",
+
     description:
       "Research-use product available in multiple strengths with documentation placeholders.",
+
     variants: [
-      variant("5mg", "304-TS-5", 50.0, tesamorelin5),
-      variant("10mg", "304-TS-10", 75.0, tesamorelin10),
-      variant("20mg", "304-TS-20", 100.0, tesamorelin20),
+      variant(
+        "5mg",
+        "304-TS-5",
+        50.0,
+        tesamorelin5
+      ),
+
+      variant(
+        "10mg",
+        "304-TS-10",
+        75.0,
+        tesamorelin10
+      ),
+
+      variant(
+        "20mg",
+        "304-TS-20",
+        100.0,
+        tesamorelin20
+      ),
     ],
   }),
 
@@ -416,13 +746,28 @@ export const products = [
     name: "BPC-157",
     codeName: "304-BP",
     strength: "5mg–10mg",
-    category: "Recovery Research",
+    category:
+      "Recovery Research",
+
     description:
       "Research-use product available in multiple strengths with strength-specific imagery and verification placeholders.",
+
     isBestSeller: true,
+
     variants: [
-      variant("5mg", "304-BP-5", 20.0, bpc5),
-      variant("10mg", "304-BP-10", 40.0, bpc10),
+      variant(
+        "5mg",
+        "304-BP-5",
+        20.0,
+        bpc5
+      ),
+
+      variant(
+        "10mg",
+        "304-BP-10",
+        40.0,
+        bpc10
+      ),
     ],
   }),
 
@@ -430,13 +775,28 @@ export const products = [
     name: "MOTS-C",
     codeName: "304-MC",
     strength: "10mg–40mg",
-    category: "Performance Research",
+    category:
+      "Performance Research",
+
     description:
       "Research-use product available in multiple strengths with strength-specific imagery and documentation placeholders.",
+
     isBestSeller: true,
+
     variants: [
-      variant("10mg", "304-MC-10", 45.0, mots10),
-      variant("40mg", "304-MC-40", 70.0, mots40),
+      variant(
+        "10mg",
+        "304-MC-10",
+        45.0,
+        mots10
+      ),
+
+      variant(
+        "40mg",
+        "304-MC-40",
+        70.0,
+        mots40
+      ),
     ],
   }),
 
@@ -444,13 +804,28 @@ export const products = [
     name: "TB-500",
     codeName: "304-TB",
     strength: "5mg–10mg",
-    category: "Recovery Research",
+    category:
+      "Recovery Research",
+
     description:
       "Research-use product available in multiple strengths with documentation placeholders.",
+
     isBestSeller: true,
+
     variants: [
-      variant("5mg", "304-TB-5", 30.0, tb5005),
-      variant("10mg", "304-TB-10", 40.0, tb50010),
+      variant(
+        "5mg",
+        "304-TB-5",
+        30.0,
+        tb5005
+      ),
+
+      variant(
+        "10mg",
+        "304-TB-10",
+        40.0,
+        tb50010
+      ),
     ],
   }),
 
@@ -458,10 +833,14 @@ export const products = [
     name: "Wolverine",
     codeName: "304-WV",
     strength: "10mg–20mg",
-    category: "Recovery Research",
+    category:
+      "Recovery Research",
+
     description:
       "Research-use combination product with clearly defined component strengths.",
+
     isBestSeller: true,
+
     variants: [
       variant(
         "10mg",
@@ -470,6 +849,7 @@ export const products = [
         wolverine10,
         "BPC-157 5mg + TB-500 5mg"
       ),
+
       variant(
         "20mg",
         "304-WV-20",
@@ -484,12 +864,26 @@ export const products = [
     name: "Selank",
     codeName: "304-SL",
     strength: "5mg–10mg",
-    category: "Cognitive Research",
+    category:
+      "Cognitive Research",
+
     description:
       "Research-use product available in multiple strengths with clear product coding.",
+
     variants: [
-      variant("5mg", "304-SL-5", 30.0, selank5),
-      variant("10mg", "304-SL-10", 45.0, selank10),
+      variant(
+        "5mg",
+        "304-SL-5",
+        30.0,
+        selank5
+      ),
+
+      variant(
+        "10mg",
+        "304-SL-10",
+        45.0,
+        selank10
+      ),
     ],
   }),
 
@@ -497,12 +891,26 @@ export const products = [
     name: "Semax",
     codeName: "304-SX",
     strength: "5mg–10mg",
-    category: "Cognitive Research",
+    category:
+      "Cognitive Research",
+
     description:
       "Research-use product available in multiple strengths with clear product coding.",
+
     variants: [
-      variant("5mg", "304-SX-5", 40.0, semax5),
-      variant("10mg", "304-SX-10", 50.0, semax10),
+      variant(
+        "5mg",
+        "304-SX-5",
+        40.0,
+        semax5
+      ),
+
+      variant(
+        "10mg",
+        "304-SX-10",
+        50.0,
+        semax10
+      ),
     ],
   }),
 
@@ -510,12 +918,26 @@ export const products = [
     name: "DSIP",
     codeName: "304-DS",
     strength: "5mg–10mg",
-    category: "Cognitive Research",
+    category:
+      "Cognitive Research",
+
     description:
       "Research-use product available in multiple strengths with documentation placeholders.",
+
     variants: [
-      variant("5mg", "304-DS-5", 25.0, dsip5),
-      variant("10mg", "304-DS-10", 45.0, dsip10),
+      variant(
+        "5mg",
+        "304-DS-5",
+        25.0,
+        dsip5
+      ),
+
+      variant(
+        "10mg",
+        "304-DS-10",
+        45.0,
+        dsip10
+      ),
     ],
   }),
 
@@ -523,12 +945,26 @@ export const products = [
     name: "Ipamorelin",
     codeName: "304-IP",
     strength: "5mg–10mg",
-    category: "Hormone Research",
+    category:
+      "Hormone Research",
+
     description:
       "Research-use product available in multiple strengths with organized product data.",
+
     variants: [
-      variant("5mg", "304-IP-5", 35.0, ipamorelin5),
-      variant("10mg", "304-IP-10", 45.0, ipamorelin10),
+      variant(
+        "5mg",
+        "304-IP-5",
+        35.0,
+        ipamorelin5
+      ),
+
+      variant(
+        "10mg",
+        "304-IP-10",
+        45.0,
+        ipamorelin10
+      ),
     ],
   }),
 
@@ -536,36 +972,72 @@ export const products = [
     name: "Sermorelin",
     codeName: "304-SM",
     strength: "5mg–10mg",
-    category: "Hormone Research",
+    category:
+      "Hormone Research",
+
     description:
       "Research-use product available in multiple strengths with documentation placeholders.",
+
     variants: [
-      variant("5mg", "304-SM-5", 45.0, sermorelin5),
-      variant("10mg", "304-SM-10", 55.0, sermorelin10),
+      variant(
+        "5mg",
+        "304-SM-5",
+        45.0,
+        sermorelin5
+      ),
+
+      variant(
+        "10mg",
+        "304-SM-10",
+        55.0,
+        sermorelin10
+      ),
     ],
   }),
 
   product({
-    name: "CJC-1295 Without DAC",
+    name:
+      "CJC-1295 Without DAC",
+
     codeName: "304-CJ",
     strength: "5mg–10mg",
-    category: "Hormone Research",
+    category:
+      "Hormone Research",
+
     description:
       "Research-use product available in multiple strengths with clear product coding.",
+
     variants: [
-      variant("5mg", "304-CJ-5", 40.0, cjcNoDac5),
-      variant("10mg", "304-CJ-10", 60.0, cjcNoDac10),
+      variant(
+        "5mg",
+        "304-CJ-5",
+        40.0,
+        cjcNoDac5
+      ),
+
+      variant(
+        "10mg",
+        "304-CJ-10",
+        60.0,
+        cjcNoDac10
+      ),
     ],
   }),
 
   product({
-    name: "CJC-1295 Without DAC + Ipamorelin",
+    name:
+      "CJC-1295 Without DAC + Ipamorelin",
+
     codeName: "304-CI",
     strength: "10mg–20mg",
-    category: "Hormone Research",
+    category:
+      "Hormone Research",
+
     description:
       "Research-use combination product with clearly defined component strengths.",
+
     isBestSeller: true,
+
     variants: [
       variant(
         "10mg",
@@ -574,6 +1046,7 @@ export const products = [
         cjcIpa10,
         "CJC-1295 Without DAC 5mg + Ipamorelin 5mg"
       ),
+
       variant(
         "20mg",
         "304-CI-20",
@@ -588,12 +1061,26 @@ export const products = [
     name: "Kisspeptin",
     codeName: "304-KS",
     strength: "5mg–10mg",
-    category: "Hormone Research",
+    category:
+      "Hormone Research",
+
     description:
       "Research-use product available in multiple strengths with documentation placeholders.",
+
     variants: [
-      variant("5mg", "304-KS-5", 30.0, kisspeptin5),
-      variant("10mg", "304-KS-10", 45.0, kisspeptin10),
+      variant(
+        "5mg",
+        "304-KS-5",
+        30.0,
+        kisspeptin5
+      ),
+
+      variant(
+        "10mg",
+        "304-KS-10",
+        45.0,
+        kisspeptin10
+      ),
     ],
   }),
 
@@ -601,11 +1088,19 @@ export const products = [
     name: "PT-141",
     codeName: "304-PT-10",
     strength: "10mg",
-    category: "Hormone Research",
+    category:
+      "Hormone Research",
+
     description:
       "Research-use catalog item with clear labeling and verification placeholders.",
+
     variants: [
-      variant("10mg", "304-PT-10", 40.0, pt14110),
+      variant(
+        "10mg",
+        "304-PT-10",
+        40.0,
+        pt14110
+      ),
     ],
   }),
 
@@ -613,12 +1108,26 @@ export const products = [
     name: "Oxytocin",
     codeName: "304-OX",
     strength: "5mg–10mg",
-    category: "Hormone Research",
+    category:
+      "Hormone Research",
+
     description:
       "Research-use product available in multiple strengths with organized product data.",
+
     variants: [
-      variant("5mg", "304-OX-5", 35.0, oxytocin5),
-      variant("10mg", "304-OX-10", 45.0, oxytocin10),
+      variant(
+        "5mg",
+        "304-OX-5",
+        35.0,
+        oxytocin5
+      ),
+
+      variant(
+        "10mg",
+        "304-OX-10",
+        45.0,
+        oxytocin10
+      ),
     ],
   }),
 
@@ -626,12 +1135,26 @@ export const products = [
     name: "VIP",
     codeName: "304-VIP",
     strength: "5mg–10mg",
-    category: "Wellness Research",
+    category:
+      "Wellness Research",
+
     description:
       "Research-use product available in multiple strengths with documentation placeholders.",
+
     variants: [
-      variant("5mg", "304-VIP-5", 50.0, vip5),
-      variant("10mg", "304-VIP-10", 60.0, vip10),
+      variant(
+        "5mg",
+        "304-VIP-5",
+        50.0,
+        vip5
+      ),
+
+      variant(
+        "10mg",
+        "304-VIP-10",
+        60.0,
+        vip10
+      ),
     ],
   }),
 
@@ -639,11 +1162,19 @@ export const products = [
     name: "Thymalin",
     codeName: "304-TM-10",
     strength: "10mg",
-    category: "Wellness Research",
+    category:
+      "Wellness Research",
+
     description:
       "Research-use catalog item with clear labeling and verification placeholders.",
+
     variants: [
-      variant("10mg", "304-TM-10", 60.0, thymalin10),
+      variant(
+        "10mg",
+        "304-TM-10",
+        60.0,
+        thymalin10
+      ),
     ],
   }),
 
@@ -651,26 +1182,57 @@ export const products = [
     name: "Epithalon",
     codeName: "304-EP",
     strength: "10mg–50mg",
-    category: "Longevity Research",
+    category:
+      "Longevity Research",
+
     description:
       "Research-use product available in multiple strengths with organized product data.",
+
     variants: [
-      variant("10mg", "304-EP-10", 35.0, epithalon10),
-      variant("50mg", "304-EP-50", 75.0, epithalon50),
+      variant(
+        "10mg",
+        "304-EP-10",
+        35.0,
+        epithalon10
+      ),
+
+      variant(
+        "50mg",
+        "304-EP-50",
+        75.0,
+        epithalon50
+      ),
     ],
   }),
 
   product({
     name: "NAD+",
     codeName: "304-ND",
-    strength: "500mg–1000mg",
-    category: "Wellness Research",
+    strength:
+      "500mg–1000mg",
+
+    category:
+      "Wellness Research",
+
     description:
       "Research-use product available in multiple strengths with documentation placeholders.",
+
     isBestSeller: true,
+
     variants: [
-      variant("500mg", "304-ND-500", 50.0, nad500),
-      variant("1000mg", "304-ND-1000", 65.0, nad1000),
+      variant(
+        "500mg",
+        "304-ND-500",
+        50.0,
+        nad500
+      ),
+
+      variant(
+        "1000mg",
+        "304-ND-1000",
+        65.0,
+        nad1000
+      ),
     ],
   }),
 
@@ -678,12 +1240,26 @@ export const products = [
     name: "SS-31",
     codeName: "304-SS",
     strength: "10mg–50mg",
-    category: "Performance Research",
+    category:
+      "Performance Research",
+
     description:
       "Research-use product available in multiple strengths with organized product data.",
+
     variants: [
-      variant("10mg", "304-SS-10", 60.0, ss3110),
-      variant("50mg", "304-SS-50", 140.0, ss3150),
+      variant(
+        "10mg",
+        "304-SS-10",
+        60.0,
+        ss3110
+      ),
+
+      variant(
+        "50mg",
+        "304-SS-50",
+        140.0,
+        ss3150
+      ),
     ],
   }),
 
@@ -691,11 +1267,19 @@ export const products = [
     name: "ARA-290",
     codeName: "304-AR-10",
     strength: "10mg",
-    category: "Recovery Research",
+    category:
+      "Recovery Research",
+
     description:
       "Research-use catalog item with clear labeling and documentation placeholders.",
+
     variants: [
-      variant("10mg", "304-AR-10", 55.0, ara29010),
+      variant(
+        "10mg",
+        "304-AR-10",
+        55.0,
+        ara29010
+      ),
     ],
   }),
 
@@ -703,13 +1287,28 @@ export const products = [
     name: "BAC Water",
     codeName: "304-BW",
     strength: "3mL–10mL",
-    category: "Research Supplies",
+    category:
+      "Research Supplies",
+
     purity: "Research Supply",
+
     description:
       "Research supply available in multiple vial sizes.",
+
     variants: [
-      variant("3mL", "304-BW-3ML", 8.0, bac3),
-      variant("10mL", "304-BW-10ML", 15.0, bac10),
+      variant(
+        "3mL",
+        "304-BW-3ML",
+        8.0,
+        bac3
+      ),
+
+      variant(
+        "10mL",
+        "304-BW-10ML",
+        15.0,
+        bac10
+      ),
     ],
   }),
 ];
