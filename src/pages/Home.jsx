@@ -1,7 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
 import { products } from "../data/products";
 
-const storageKey = "304-site-settings";
+const storageKey =
+  "304-site-settings";
 
 const defaultSettings = {
   catalogEnabled: true,
@@ -28,104 +34,34 @@ function loadSettings() {
 
     return {
       ...defaultSettings,
-      ...JSON.parse(savedSettings),
+      ...JSON.parse(
+        savedSettings
+      ),
     };
   } catch {
     return defaultSettings;
   }
 }
 
-function buildCatalogMap() {
-  const catalogMap =
-    new Map();
-
-  products.forEach(
-    (product) => {
-      const variants =
-        product.variants?.length
-          ? product.variants
-          : [product];
-
-      variants.forEach(
-        (variant) => {
-          catalogMap.set(
-            variant.codeName,
-            {
-              ...product,
-              ...variant,
-
-              productName:
-                product.name,
-
-              category:
-                product.category,
-
-              image:
-                variant.image ||
-                product.image ||
-                null,
-            }
-          );
-        }
-      );
-    }
-  );
-
-  return catalogMap;
-}
-
-function formatDate(value) {
-  if (!value) {
-    return "Not available";
-  }
-
-  const parsedDate =
-    new Date(
-      `${value}T00:00:00`
-    );
-
+function getDisplayVariant(
+  product
+) {
   if (
-    Number.isNaN(
-      parsedDate.getTime()
-    )
+    product.variants?.length
   ) {
-    return value;
+    return {
+      ...product,
+      ...product.variants[0],
+
+      name:
+        product.name,
+
+      baseName:
+        product.name,
+    };
   }
 
-  return parsedDate.toLocaleDateString(
-    undefined,
-    {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    }
-  );
-}
-
-function formatUpdatedAt(value) {
-  if (!value) {
-    return "No records yet";
-  }
-
-  const parsedDate =
-    new Date(value);
-
-  if (
-    Number.isNaN(
-      parsedDate.getTime()
-    )
-  ) {
-    return value;
-  }
-
-  return parsedDate.toLocaleDateString(
-    undefined,
-    {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    }
-  );
+  return product;
 }
 
 function Home({
@@ -137,30 +73,19 @@ function Home({
   ] = useState(loadSettings);
 
   const [
-    records,
-    setRecords,
-  ] = useState([]);
+    publishedCoaCount,
+    setPublishedCoaCount,
+  ] = useState(0);
 
   const [
-    loading,
-    setLoading,
+    documentationLoading,
+    setDocumentationLoading,
   ] = useState(true);
 
   const [
-    error,
-    setError,
-  ] = useState("");
-
-  const [
-    refreshKey,
-    setRefreshKey,
-  ] = useState(0);
-
-  const catalogMap =
-    useMemo(
-      () => buildCatalogMap(),
-      []
-    );
+    documentationError,
+    setDocumentationError,
+  ] = useState(false);
 
   useEffect(() => {
     function updateSettings(
@@ -224,9 +149,14 @@ function Home({
     const controller =
       new AbortController();
 
-    async function loadPublishedRecords() {
-      setLoading(true);
-      setError("");
+    async function loadCoaCount() {
+      setDocumentationLoading(
+        true
+      );
+
+      setDocumentationError(
+        false
+      );
 
       try {
         const response =
@@ -248,154 +178,75 @@ function Home({
             }
           );
 
-        let result;
-
-        try {
-          result =
-            await response.json();
-        } catch {
-          throw new Error(
-            "The documentation service returned an invalid response."
-          );
-        }
+        const result =
+          await response.json();
 
         if (
           !response.ok ||
           !result.success
         ) {
           throw new Error(
-            result.error ||
-              "Published documentation could not be loaded."
+            "Documentation unavailable."
           );
         }
 
-        setRecords(
+        const records =
           Array.isArray(
             result.records
           )
             ? result.records
-            : []
+            : [];
+
+        setPublishedCoaCount(
+          records.length
         );
-      } catch (
-        requestError
-      ) {
+      } catch (error) {
         if (
-          requestError.name ===
+          error.name ===
           "AbortError"
         ) {
           return;
         }
 
-        setRecords([]);
+        setPublishedCoaCount(
+          0
+        );
 
-        setError(
-          requestError.message ||
-            "Published documentation could not be loaded."
+        setDocumentationError(
+          true
         );
       } finally {
         if (
           !controller.signal
             .aborted
         ) {
-          setLoading(false);
+          setDocumentationLoading(
+            false
+          );
         }
       }
     }
 
-    loadPublishedRecords();
+    loadCoaCount();
 
     return () => {
       controller.abort();
     };
-  }, [refreshKey]);
+  }, []);
 
-  const publishedRecords =
+  const bestSellers =
     useMemo(
       () =>
-        records
-          .map(
-            (record) => {
-              const catalogItem =
-                catalogMap.get(
-                  record.codeName
-                );
-
-              return {
-                ...record,
-
-                category:
-                  record.category ||
-                  catalogItem?.category ||
-                  "Research Product",
-
-                image:
-                  catalogItem?.image ||
-                  null,
-              };
-            }
+        products
+          .filter(
+            (product) =>
+              product.isBestSeller
           )
-          .sort(
-            (
-              left,
-              right
-            ) =>
-              new Date(
-                right.updatedAt ||
-                  0
-              ).getTime() -
-              new Date(
-                left.updatedAt ||
-                  0
-              ).getTime()
+          .slice(0, 4)
+          .map(
+            getDisplayVariant
           ),
-      [
-        catalogMap,
-        records,
-      ]
-    );
-
-  const documentationStats =
-    useMemo(() => {
-      const batchNumbers =
-        new Set(
-          publishedRecords
-            .map(
-              (record) =>
-                record.batchNumber
-            )
-            .filter(Boolean)
-        );
-
-      const laboratories =
-        new Set(
-          publishedRecords
-            .map(
-              (record) =>
-                record.labName
-            )
-            .filter(Boolean)
-        );
-
-      return {
-        recordCount:
-          publishedRecords.length,
-
-        batchCount:
-          batchNumbers.size,
-
-        laboratoryCount:
-          laboratories.size,
-
-        latestUpdate:
-          publishedRecords[0]
-            ?.updatedAt || "",
-      };
-    }, [publishedRecords]);
-
-  const recentRecords =
-    publishedRecords.slice(
-      0,
-      3
+      []
     );
 
   const storeStatusLabel =
@@ -407,26 +258,18 @@ function Home({
       ? "Maintenance Mode"
       : "Coming Soon";
 
-  const documentationLabel =
-    loading
-      ? "Checking Documentation"
-      : error
-      ? "Documentation Unavailable"
-      : `${
-          documentationStats.recordCount
-        } Published Record${
-          documentationStats.recordCount ===
-          1
+  const coaStatusLabel =
+    documentationLoading
+      ? "Checking COAs"
+      : documentationError
+      ? "View Quality"
+      : publishedCoaCount > 0
+      ? `${publishedCoaCount} COA${
+          publishedCoaCount === 1
             ? ""
             : "s"
-        }`;
-
-  function refreshRecords() {
-    setRefreshKey(
-      (currentKey) =>
-        currentKey + 1
-    );
-  }
+        } Available`
+      : "COAs Coming Soon";
 
   return (
     <>
@@ -439,34 +282,30 @@ function Home({
           <div className="home-hero">
             <p className="eyebrow">
               PRECISION •
-              TRANSPARENCY •
-              QUALITY
+              TRANSPARENCY • QUALITY
             </p>
 
             <h1 className="home-title">
               Built On Trust.
               <br />
-              Backed By
-              Documentation.
+              Backed By Quality.
             </h1>
 
             <p className="home-subtitle">
-              A documentation-first
-              research storefront
-              built around clear
-              product identity,
+              A modern research
+              storefront built around
+              clean organization,
               professional service,
-              batch-level records,
-              and transparent access
-              to published
-              documentation.
+              transparent product
+              presentation, and
+              consistent quality
+              standards.
             </p>
 
             <div className="home-hero-pills">
               <span className="home-research-pill">
-                For Research Use
-                Only. Not intended
-                for human
+                For Research Use Only.
+                Not intended for human
                 consumption.
               </span>
 
@@ -479,18 +318,6 @@ function Home({
                 }
               >
                 {storeStatusLabel}
-              </span>
-
-              <span
-                className={
-                  error
-                    ? "home-document-pill home-document-error-pill"
-                    : "home-document-pill"
-                }
-              >
-                {
-                  documentationLabel
-                }
               </span>
             </div>
 
@@ -511,19 +338,14 @@ function Home({
 
               <button
                 type="button"
-                className={
-                  settings.catalogEnabled
-                    ? "secondary-btn"
-                    : "primary-btn"
-                }
+                className="secondary-btn"
                 onClick={() =>
                   onNavigate(
                     "quality"
                   )
                 }
               >
-                View Published
-                Documentation
+                {coaStatusLabel}
               </button>
 
               {!settings.catalogEnabled && (
@@ -542,70 +364,81 @@ function Home({
             </div>
           </div>
 
-          <div className="home-stats-grid">
-            <MetricCard
-              label="Published Records"
-              value={
-                loading
-                  ? "—"
-                  : documentationStats.recordCount
-              }
-              detail="Completed public documentation records"
-            />
-
-            <MetricCard
-              label="Published Batches"
-              value={
-                loading
-                  ? "—"
-                  : documentationStats.batchCount
-              }
-              detail="Unique batch numbers represented"
-            />
-
-            <MetricCard
-              label="Testing Laboratories"
-              value={
-                loading
-                  ? "—"
-                  : documentationStats.laboratoryCount
-              }
-              detail="Laboratories named in public records"
-            />
-
-            <MetricCard
-              label="Latest Update"
-              value={
-                loading
-                  ? "Checking"
-                  : formatUpdatedAt(
-                      documentationStats.latestUpdate
-                    )
-              }
-              detail="Most recent published record change"
-              compact
-            />
-          </div>
-
           <div className="home-trust-grid">
             <TrustCard
               icon="✓"
-              title="Documentation First"
-              description="Published records are tied to a specific product code, strength, batch number, laboratory, and test date."
+              title="Quality Focused"
+              description="Products are organized with clear names, strengths, product codes, research categories, and documentation status."
             />
 
             <TrustCard
               icon="⚡"
               title="Professional Service"
-              description="A brand experience focused on clear communication, organized order handling, and responsive support."
+              description="A brand experience focused on clear communication, responsive support, and organized order handling."
             />
 
             <TrustCard
               icon="🔒"
-              title="Transparent Access"
-              description="Completed public records can provide direct certificate and verification links without exposing private administrative notes."
+              title="Transparent Experience"
+              description="Published batch documentation and COAs remain available through the dedicated Quality section."
             />
           </div>
+
+          {settings.catalogEnabled &&
+            bestSellers.length >
+              0 && (
+              <section className="home-best-sellers">
+                <div className="home-section-heading">
+                  <div>
+                    <p className="eyebrow">
+                      FEATURED PRODUCTS
+                    </p>
+
+                    <h2 className="home-section-title">
+                      Best Sellers
+                    </h2>
+
+                    <p className="home-section-text">
+                      Explore highlighted
+                      products from
+                      across the current
+                      304 Peptides
+                      research catalog.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    onClick={() =>
+                      onNavigate(
+                        "products"
+                      )
+                    }
+                  >
+                    View Full Catalog
+                  </button>
+                </div>
+
+                <div className="home-best-seller-grid">
+                  {bestSellers.map(
+                    (product) => (
+                      <BestSellerCard
+                        key={
+                          product.codeName
+                        }
+                        product={
+                          product
+                        }
+                        onNavigate={
+                          onNavigate
+                        }
+                      />
+                    )
+                  )}
+                </div>
+              </section>
+            )}
 
           <div className="home-split-panel">
             <div className="home-why-panel">
@@ -619,43 +452,39 @@ function Home({
               </h2>
 
               <p className="home-section-text">
-                304 Peptides is
-                being built as a
-                modern, organized
+                The goal of 304
+                Peptides is to create a
+                modern, organized, and
+                trustworthy
                 research-use brand.
-                Product identity,
-                published
-                documentation,
-                store controls, and
-                customer
-                communication are
-                designed to work
-                together as one
-                consistent
-                experience.
+                Every part of the
+                experience is built
+                around consistency,
+                transparency,
+                professional
+                presentation, and
+                customer service.
               </p>
 
               <div className="home-bullet-grid">
                 <div>
-                  Clear product and
-                  strength
-                  identification
+                  Clean product
+                  presentation
                 </div>
 
                 <div>
-                  Batch-specific
-                  public records
+                  Transparent product
+                  organization
                 </div>
 
                 <div>
-                  Professional
-                  customer support
+                  Professional customer
+                  support
                 </div>
 
                 <div>
-                  Research-use
-                  language across
-                  the storefront
+                  Dedicated quality and
+                  COA access
                 </div>
               </div>
             </div>
@@ -664,23 +493,19 @@ function Home({
               {settings.catalogEnabled ? (
                 <>
                   <p className="eyebrow">
-                    RESEARCH
-                    CATEGORIES
+                    RESEARCH CATEGORIES
                   </p>
 
                   <h2 className="home-showcase-title">
-                    Explore The
-                    Catalog
+                    Explore The Catalog
                   </h2>
 
                   <p className="home-section-text">
-                    Browse the
-                    organized catalog
-                    and select product
-                    strengths to see
-                    live published
-                    documentation
-                    status.
+                    Browse organized
+                    product categories,
+                    select available
+                    strengths, and view
+                    product details.
                   </p>
 
                   <div className="home-category-list">
@@ -720,29 +545,25 @@ function Home({
                   </p>
 
                   <h2 className="home-showcase-title">
-                    Catalog
-                    Temporarily
+                    Catalog Temporarily
                     Unavailable
                   </h2>
 
                   <p className="home-section-text">
-                    Product browsing
-                    is currently
-                    disabled.
-                    Published quality
-                    records,
-                    research-use
-                    terms, frequently
-                    asked questions,
-                    and customer
-                    support remain
-                    available.
+                    Product browsing is
+                    currently disabled.
+                    Quality information,
+                    research-use terms,
+                    frequently asked
+                    questions, and
+                    customer support
+                    remain available.
                   </p>
 
                   <div className="home-disabled-notice">
-                    Catalog access
-                    has been disabled
-                    in Site Settings.
+                    Catalog access has
+                    been disabled in
+                    Site Settings.
                   </div>
 
                   <div className="home-side-buttons">
@@ -756,7 +577,7 @@ function Home({
                       }
                     >
                       View Quality
-                      Page
+                      Standard
                     </button>
 
                     <button
@@ -776,169 +597,56 @@ function Home({
             </div>
           </div>
 
-          <section className="home-documents-panel">
-            <div className="home-documents-heading">
-              <div>
-                <p className="eyebrow">
-                  LIVE
-                  DOCUMENTATION
-                </p>
+          <section className="home-quality-panel">
+            <div>
+              <p className="eyebrow">
+                QUALITY &amp;
+                DOCUMENTATION
+              </p>
 
-                <h2 className="home-section-title">
-                  Recently
+              <h2 className="home-section-title">
+                COAs Available In The
+                Quality Tab
+              </h2>
+
+              <p className="home-section-text">
+                Published certificates,
+                batch numbers, testing
+                laboratories, test
+                dates, and verification
+                links are kept together
+                in the Quality section
+                so the homepage stays
+                focused on the brand and
+                products.
+              </p>
+
+              <div className="home-quality-status">
+                <span>
                   Published Records
-                </h2>
+                </span>
 
-                <p className="home-section-text">
-                  The records below
-                  are loaded directly
-                  from the public
-                  Cloudflare
-                  documentation API.
-                  Only completed,
-                  reviewed, and
-                  published records
-                  appear here.
-                </p>
-              </div>
-
-              <div className="home-document-heading-actions">
-                <button
-                  type="button"
-                  className="secondary-btn"
-                  disabled={loading}
-                  onClick={
-                    refreshRecords
-                  }
-                >
-                  {loading
-                    ? "Refreshing..."
-                    : "Refresh Records"}
-                </button>
-
-                <button
-                  type="button"
-                  className="primary-btn"
-                  onClick={() =>
-                    onNavigate(
-                      "quality"
-                    )
-                  }
-                >
-                  View All Records
-                </button>
+                <strong>
+                  {documentationLoading
+                    ? "Checking..."
+                    : documentationError
+                    ? "Temporarily unavailable"
+                    : publishedCoaCount}
+                </strong>
               </div>
             </div>
 
-            {loading && (
-              <div className="home-state-panel">
-                <div className="home-loader" />
-
-                <h3>
-                  Loading Published
-                  Records
-                </h3>
-
-                <p>
-                  Connecting to the
-                  public
-                  documentation
-                  service.
-                </p>
-              </div>
-            )}
-
-            {!loading &&
-              error && (
-                <div className="home-error-panel">
-                  <p className="eyebrow">
-                    DOCUMENTATION
-                    UNAVAILABLE
-                  </p>
-
-                  <h3>
-                    Records Could Not
-                    Be Loaded
-                  </h3>
-
-                  <p>
-                    {error}
-                  </p>
-
-                  <button
-                    type="button"
-                    className="primary-btn"
-                    onClick={
-                      refreshRecords
-                    }
-                  >
-                    Try Again
-                  </button>
-                </div>
-              )}
-
-            {!loading &&
-              !error &&
-              recentRecords.length ===
-                0 && (
-                <div className="home-state-panel">
-                  <p className="eyebrow">
-                    DOCUMENTATION
-                    LIBRARY
-                  </p>
-
-                  <h3>
-                    Published Records
-                    Coming Soon
-                  </h3>
-
-                  <p>
-                    Completed records
-                    will appear here
-                    after matching
-                    batch details,
-                    laboratory
-                    documentation,
-                    verification
-                    links, and
-                    internal review
-                    are complete.
-                  </p>
-
-                  <button
-                    type="button"
-                    className="secondary-btn"
-                    onClick={() =>
-                      onNavigate(
-                        "quality"
-                      )
-                    }
-                  >
-                    View Quality
-                    Standards
-                  </button>
-                </div>
-              )}
-
-            {!loading &&
-              !error &&
-              recentRecords.length >
-                0 && (
-                <div className="home-document-grid">
-                  {recentRecords.map(
-                    (record) => (
-                      <DocumentCard
-                        key={
-                          record.codeName
-                        }
-                        record={
-                          record
-                        }
-                      />
-                    )
-                  )}
-                </div>
-              )}
+            <button
+              type="button"
+              className="primary-btn"
+              onClick={() =>
+                onNavigate(
+                  "quality"
+                )
+              }
+            >
+              View Quality &amp; COAs
+            </button>
           </section>
 
           {settings.catalogEnabled ? (
@@ -953,15 +661,13 @@ function Home({
               </h2>
 
               <p className="home-cta-text">
-                Browse the current
-                research catalog,
-                choose product
-                strengths, review
-                pricing access, and
-                see live
-                documentation
-                status for each
-                product code.
+                Browse the research
+                catalog, review product
+                details, select
+                available strengths,
+                and see which products
+                have published
+                documentation.
               </p>
 
               <button
@@ -979,25 +685,21 @@ function Home({
           ) : (
             <div className="home-cta-panel">
               <p className="eyebrow">
-                QUALITY BEFORE
-                LAUNCH
+                QUALITY BEFORE LAUNCH
               </p>
 
               <h2 className="home-cta-title">
-                Trust Is
-                Earned—Not
+                Trust Is Earned—Not
                 Claimed.
               </h2>
 
               <p className="home-cta-text">
-                While the catalog
-                is unavailable,
-                review the
-                published
-                documentation,
+                While the catalog is
+                unavailable, review the
                 quality standards,
-                and research-use
-                policies
+                published
+                documentation, and
+                research-use policies
                 supporting 304
                 Peptides.
               </p>
@@ -1022,35 +724,6 @@ function Home({
   );
 }
 
-function MetricCard({
-  label,
-  value,
-  detail,
-  compact = false,
-}) {
-  return (
-    <div className="home-metric-card">
-      <span>
-        {label}
-      </span>
-
-      <strong
-        className={
-          compact
-            ? "home-metric-compact"
-            : ""
-        }
-      >
-        {value}
-      </strong>
-
-      <small>
-        {detail}
-      </small>
-    </div>
-  );
-}
-
 function TrustCard({
   icon,
   title,
@@ -1062,155 +735,131 @@ function TrustCard({
         {icon}
       </div>
 
-      <h3>
-        {title}
-      </h3>
+      <h3>{title}</h3>
 
-      <p>
-        {description}
-      </p>
+      <p>{description}</p>
     </article>
   );
 }
 
-function DocumentCard({
-  record,
+function BestSellerCard({
+  product,
+  onNavigate,
 }) {
+  const variantCount =
+    product.variants?.length ||
+    0;
+
   return (
-    <article className="home-document-card">
-      <div className="home-document-card-header">
-        <div className="home-document-image">
-          {record.image ? (
+    <article className="home-best-seller-card">
+      <div className="home-best-seller-badges">
+        <span className="home-category-badge">
+          {product.category}
+        </span>
+
+        <span className="home-best-seller-badge">
+          Best Seller
+        </span>
+      </div>
+
+      <button
+        type="button"
+        className="home-product-image-button"
+        onClick={() =>
+          onNavigate(
+            "products"
+          )
+        }
+        aria-label={`Browse ${product.name}`}
+      >
+        {product.image ? (
+          <div className="home-product-image">
             <img
-              src={
-                record.image
-              }
-              alt={`${record.productName} ${record.strength}`}
+              src={product.image}
+              alt={`${product.name} ${product.strength} research product`}
             />
-          ) : (
-            <div className="home-document-placeholder">
-              <strong>
-                304
-              </strong>
 
-              <span>
-                {
-                  record.codeName
-                }
-              </span>
+            <div className="home-product-glow" />
+          </div>
+        ) : (
+          <div className="home-product-placeholder">
+            <strong>
+              304
+            </strong>
 
-              <small>
-                {
-                  record.strength
-                }
-              </small>
-            </div>
-          )}
-        </div>
-
-        <div className="home-document-identity">
-          <div className="home-document-badges">
             <span>
               {
-                record.category
+                product.codeName
               }
             </span>
 
-            <span>
-              Published
-            </span>
+            <small>
+              {
+                product.strength
+              }
+            </small>
+
+            <small>
+              Research Use Only
+            </small>
           </div>
+        )}
+      </button>
 
-          <h3>
-            {
-              record.productName
-            }
-          </h3>
+      <h3>
+        {product.name}
+      </h3>
 
-          <p>
-            {
-              record.codeName
-            }{" "}
-            ·{" "}
-            {
-              record.strength
-            }
-          </p>
+      <p className="home-product-code">
+        {product.codeName} ·{" "}
+        {product.strength}
+      </p>
+
+      <p className="home-product-description">
+        {product.description}
+      </p>
+
+      <div className="home-product-meta">
+        <div>
+          <span>
+            Strengths
+          </span>
+
+          <strong>
+            {variantCount > 1
+              ? `${variantCount} Options`
+              : product.strength}
+          </strong>
+        </div>
+
+        <div>
+          <span>
+            Purity
+          </span>
+
+          <strong>
+            {product.purity ||
+              "See Details"}
+          </strong>
         </div>
       </div>
 
-      <div className="home-document-details">
-        <RecordDetail
-          label="Batch Number"
-          value={
-            record.batchNumber
-          }
-        />
+      <button
+        type="button"
+        className="primary-btn home-product-button"
+        onClick={() =>
+          onNavigate(
+            "products"
+          )
+        }
+      >
+        View In Catalog
+      </button>
 
-        <RecordDetail
-          label="Testing Laboratory"
-          value={
-            record.labName
-          }
-        />
-
-        <RecordDetail
-          label="Test Date"
-          value={formatDate(
-            record.testDate
-          )}
-        />
-
-        <RecordDetail
-          label="Updated"
-          value={formatUpdatedAt(
-            record.updatedAt
-          )}
-        />
-      </div>
-
-      <div className="home-document-links">
-        <a
-          className="primary-btn home-document-link"
-          href={
-            record.coaUrl
-          }
-          target="_blank"
-          rel="noreferrer"
-        >
-          Open COA
-        </a>
-
-        <a
-          className="secondary-btn home-document-link"
-          href={
-            record.verificationUrl
-          }
-          target="_blank"
-          rel="noreferrer"
-        >
-          Verify Record
-        </a>
+      <div className="home-product-notice">
+        For Research Use Only
       </div>
     </article>
-  );
-}
-
-function RecordDetail({
-  label,
-  value,
-}) {
-  return (
-    <div>
-      <span>
-        {label}
-      </span>
-
-      <strong>
-        {value ||
-          "Not available"}
-      </strong>
-    </div>
   );
 }
 
@@ -1254,12 +903,7 @@ const homeCss = `
 
   .home-title {
     margin-bottom: 24px;
-    font-size:
-      clamp(
-        46px,
-        7vw,
-        74px
-      );
+    font-size: clamp(46px, 7vw, 74px);
     line-height: 1.02;
     background:
       linear-gradient(
@@ -1267,10 +911,8 @@ const homeCss = `
         #ffffff,
         #909090
       );
-    -webkit-background-clip:
-      text;
-    -webkit-text-fill-color:
-      transparent;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
   }
 
   .home-subtitle {
@@ -1283,283 +925,92 @@ const homeCss = `
 
   .home-hero-pills {
     display: flex;
-    justify-content:
-      center;
-    align-items:
-      center;
+    justify-content: center;
+    align-items: center;
     gap: 12px;
     flex-wrap: wrap;
     margin-top: 28px;
   }
 
   .home-research-pill,
-  .home-status-pill,
-  .home-document-pill {
-    display:
-      inline-flex;
+  .home-status-pill {
+    display: inline-flex;
     padding: 12px 18px;
-    border-radius:
-      999px;
+    border-radius: 999px;
     font-size: 11px;
     font-weight: 900;
     line-height: 1.45;
-    text-transform:
-      uppercase;
-    letter-spacing:
-      0.8px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
   }
 
-  .home-research-pill,
-  .home-document-pill {
-    border:
-      1px solid
-      rgba(
-        61,
-        165,
-        255,
-        0.28
-      );
-    background:
-      rgba(
-        61,
-        165,
-        255,
-        0.12
-      );
+  .home-research-pill {
+    border: 1px solid rgba(61,165,255,0.28);
+    background: rgba(61,165,255,0.12);
     color: #9ed8ff;
   }
 
   .home-status-pill {
-    border:
-      1px solid
-      rgba(
-        255,
-        255,
-        255,
-        0.12
-      );
-    background:
-      rgba(
-        255,
-        255,
-        255,
-        0.055
-      );
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.055);
     color: #c8c8c8;
   }
 
   .home-status-open {
-    border-color:
-      rgba(
-        61,
-        165,
-        255,
-        0.38
-      );
-    background:
-      rgba(
-        61,
-        165,
-        255,
-        0.14
-      );
+    border-color: rgba(61,165,255,0.38);
+    background: rgba(61,165,255,0.14);
     color: #9ed8ff;
   }
 
-  .home-document-error-pill {
-    border-color:
-      rgba(
-        255,
-        120,
-        120,
-        0.28
-      );
-    background:
-      rgba(
-        255,
-        70,
-        70,
-        0.08
-      );
-    color: #ffd1d1;
-  }
-
-  .home-button-row,
-  .home-document-heading-actions {
+  .home-button-row {
     display: flex;
-    justify-content:
-      center;
+    justify-content: center;
     gap: 16px;
     flex-wrap: wrap;
     margin-top: 28px;
   }
 
-  .home-stats-grid {
-    display: grid;
-    grid-template-columns:
-      repeat(
-        4,
-        minmax(
-          0,
-          1fr
-        )
-      );
-    gap: 16px;
-    margin-bottom:
-      28px;
-  }
-
-  .home-metric-card {
-    min-width: 0;
-    display: grid;
-    gap: 8px;
-    padding: 22px;
-    border:
-      1px solid
-      rgba(
-        255,
-        255,
-        255,
-        0.09
-      );
-    border-radius:
-      22px;
-    background:
-      rgba(
-        255,
-        255,
-        255,
-        0.035
-      );
-    box-shadow:
-      0 24px 65px
-      rgba(
-        0,
-        0,
-        0,
-        0.32
-      );
-    overflow-wrap:
-      anywhere;
-  }
-
-  .home-metric-card > span {
-    color: #9ed8ff;
-    font-size: 11px;
-    font-weight: 900;
-    text-transform:
-      uppercase;
-    letter-spacing:
-      0.6px;
-  }
-
-  .home-metric-card > strong {
-    color: #ffffff;
-    font-size: 36px;
-  }
-
-  .home-metric-card
-    > .home-metric-compact {
-    font-size: 19px;
-    line-height: 1.35;
-  }
-
-  .home-metric-card > small {
-    color: #8f9ba7;
-    line-height: 1.5;
-  }
-
   .home-trust-grid {
     display: grid;
     grid-template-columns:
-      repeat(
-        3,
-        minmax(
-          0,
-          1fr
-        )
-      );
+      repeat(3, minmax(0, 1fr));
     gap: 20px;
-    margin-bottom:
-      28px;
+    margin-bottom: 28px;
   }
 
   .home-trust-card {
     min-width: 0;
     padding: 28px;
-    border:
-      1px solid
-      rgba(
-        255,
-        255,
-        255,
-        0.09
-      );
-    border-radius:
-      28px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 28px;
     background:
       radial-gradient(
-        circle at
-          top left,
-        rgba(
-          61,
-          165,
-          255,
-          0.12
-        ),
+        circle at top left,
+        rgba(61,165,255,0.12),
         transparent 35%
       ),
-      rgba(
-        255,
-        255,
-        255,
-        0.035
-      );
+      rgba(255,255,255,0.035);
     box-shadow:
-      0 28px 70px
-      rgba(
-        0,
-        0,
-        0,
-        0.38
-      );
+      0 28px 70px rgba(0,0,0,0.38);
   }
 
   .home-trust-icon {
     width: 54px;
     height: 54px;
     display: flex;
-    align-items:
-      center;
-    justify-content:
-      center;
-    margin-bottom:
-      18px;
-    border:
-      1px solid
-      rgba(
-        61,
-        165,
-        255,
-        0.28
-      );
-    border-radius:
-      16px;
-    background:
-      rgba(
-        61,
-        165,
-        255,
-        0.14
-      );
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 18px;
+    border: 1px solid rgba(61,165,255,0.28);
+    border-radius: 16px;
+    background: rgba(61,165,255,0.14);
     color: #9ed8ff;
     font-size: 24px;
     font-weight: 900;
   }
 
   .home-trust-card h3 {
-    margin-bottom:
-      12px;
+    margin-bottom: 12px;
     color: #ffffff;
     font-size: 24px;
   }
@@ -1569,95 +1020,38 @@ const homeCss = `
     line-height: 1.8;
   }
 
-  .home-split-panel {
-    display: grid;
-    grid-template-columns:
-      minmax(
-        0,
-        1.2fr
-      )
-      minmax(
-        300px,
-        0.8fr
-      );
-    gap: 28px;
-    margin-bottom:
-      28px;
-  }
-
-  .home-why-panel,
-  .home-category-panel,
-  .home-documents-panel {
-    min-width: 0;
+  .home-best-sellers {
+    margin-bottom: 28px;
     padding: 36px;
-    border:
-      1px solid
-      rgba(
-        255,
-        255,
-        255,
-        0.09
-      );
-    border-radius:
-      30px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 30px;
     background:
       radial-gradient(
-        circle at
-          top left,
-        rgba(
-          61,
-          165,
-          255,
-          0.12
-        ),
+        circle at top left,
+        rgba(61,165,255,0.14),
         transparent 35%
       ),
-      rgba(
-        255,
-        255,
-        255,
-        0.035
-      );
+      rgba(255,255,255,0.035);
     box-shadow:
-      0 30px 80px
-      rgba(
-        0,
-        0,
-        0,
-        0.4
-      );
+      0 30px 80px rgba(0,0,0,0.4);
   }
 
-  .home-category-panel {
-    background:
-      radial-gradient(
-        circle at
-          top left,
-        rgba(
-          61,
-          165,
-          255,
-          0.14
-        ),
-        transparent 35%
-      ),
-      rgba(
-        255,
-        255,
-        255,
-        0.035
-      );
+  .home-section-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-bottom: 26px;
+  }
+
+  .home-section-heading > div {
+    max-width: 780px;
   }
 
   .home-section-title {
-    margin-bottom:
-      18px;
-    font-size:
-      clamp(
-        32px,
-        5vw,
-        42px
-      );
+    margin-bottom: 18px;
+    font-size: clamp(32px, 5vw, 42px);
     line-height: 1.1;
     background:
       linear-gradient(
@@ -1665,21 +1059,242 @@ const homeCss = `
         #ffffff,
         #9d9d9d
       );
-    -webkit-background-clip:
-      text;
-    -webkit-text-fill-color:
-      transparent;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .home-section-text {
+    margin-bottom: 24px;
+    color: #c8c8c8;
+    line-height: 1.85;
+  }
+
+  .home-section-heading .home-section-text {
+    margin-bottom: 0;
+  }
+
+  .home-best-seller-grid {
+    display: grid;
+    grid-template-columns:
+      repeat(4, minmax(0, 1fr));
+    gap: 18px;
+  }
+
+  .home-best-seller-card {
+    min-width: 0;
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 23px;
+    background:
+      radial-gradient(
+        circle at top left,
+        rgba(61,165,255,0.11),
+        transparent 34%
+      ),
+      rgba(0,0,0,0.2);
+    overflow: hidden;
+  }
+
+  .home-best-seller-badges {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+
+  .home-category-badge,
+  .home-best-seller-badge {
+    display: inline-flex;
+    width: fit-content;
+    padding: 6px 9px;
+    border-radius: 999px;
+    font-size: 9px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .home-category-badge {
+    border: 1px solid rgba(61,165,255,0.28);
+    background: rgba(61,165,255,0.11);
+    color: #9ed8ff;
+  }
+
+  .home-best-seller-badge {
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.07);
+    color: #ffffff;
+  }
+
+  .home-product-image-button {
+    display: block;
+    width: 100%;
+    padding: 0;
+    margin: 0 0 18px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .home-product-image,
+  .home-product-placeholder {
+    width: 100%;
+    height: 230px;
+    overflow: hidden;
+    border: 1px solid rgba(61,165,255,0.17);
+    border-radius: 18px;
+    background:
+      radial-gradient(
+        circle,
+        rgba(61,165,255,0.18),
+        rgba(0,0,0,0.75)
+      );
+  }
+
+  .home-product-image {
+    position: relative;
+  }
+
+  .home-product-image img {
+    position: relative;
+    z-index: 1;
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .home-product-glow {
+    position: absolute;
+    left: 20%;
+    right: 20%;
+    bottom: 8px;
+    height: 25px;
+    border-radius: 50%;
+    background: rgba(61,165,255,0.24);
+    filter: blur(16px);
+  }
+
+  .home-product-placeholder {
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    gap: 8px;
+    color: #ffffff;
+    text-align: center;
+  }
+
+  .home-product-placeholder strong {
+    font-size: 42px;
+  }
+
+  .home-product-placeholder span {
+    color: #9ed8ff;
+    font-weight: 900;
+  }
+
+  .home-product-placeholder small {
+    font-weight: 800;
+  }
+
+  .home-best-seller-card h3 {
+    margin-bottom: 7px;
+    color: #ffffff;
+    font-size: 23px;
+    line-height: 1.2;
+  }
+
+  .home-product-code {
+    margin-bottom: 13px;
+    color: #9ed8ff;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .home-product-description {
+    min-height: 78px;
+    color: #c8c8c8;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+
+  .home-product-meta {
+    display: grid;
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 15px;
+  }
+
+  .home-product-meta > div {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+    padding: 10px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    background: rgba(0,0,0,0.22);
+  }
+
+  .home-product-meta span {
+    color: #9ca8b3;
+    font-size: 9px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .home-product-meta strong {
+    color: #ffffff;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+
+  .home-product-button {
+    width: 100%;
+    margin-top: 15px;
+  }
+
+  .home-product-notice {
+    margin-top: 13px;
+    color: #9ed8ff;
+    font-size: 9px;
+    font-weight: 900;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+  }
+
+  .home-split-panel {
+    display: grid;
+    grid-template-columns:
+      minmax(0, 1.2fr)
+      minmax(300px, 0.8fr);
+    gap: 28px;
+    margin-bottom: 28px;
+  }
+
+  .home-why-panel,
+  .home-category-panel {
+    min-width: 0;
+    padding: 36px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 30px;
+    background:
+      radial-gradient(
+        circle at top left,
+        rgba(61,165,255,0.12),
+        transparent 35%
+      ),
+      rgba(255,255,255,0.035);
+    box-shadow:
+      0 30px 80px rgba(0,0,0,0.4);
   }
 
   .home-showcase-title {
-    margin:
-      12px 0 18px;
-    font-size:
-      clamp(
-        29px,
-        4vw,
-        34px
-      );
+    margin: 12px 0 18px;
+    font-size: clamp(29px, 4vw, 34px);
     line-height: 1.12;
     background:
       linear-gradient(
@@ -1687,53 +1302,23 @@ const homeCss = `
         #ffffff,
         #9d9d9d
       );
-    -webkit-background-clip:
-      text;
-    -webkit-text-fill-color:
-      transparent;
-  }
-
-  .home-section-text {
-    margin-bottom:
-      24px;
-    color: #c8c8c8;
-    line-height: 1.85;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
   }
 
   .home-bullet-grid {
     display: grid;
     grid-template-columns:
-      repeat(
-        2,
-        minmax(
-          0,
-          1fr
-        )
-      );
+      repeat(2, minmax(0, 1fr));
     gap: 14px;
   }
 
-  .home-bullet-grid
-    > div {
+  .home-bullet-grid > div {
     min-width: 0;
     padding: 16px;
-    border:
-      1px solid
-      rgba(
-        255,
-        255,
-        255,
-        0.09
-      );
-    border-radius:
-      18px;
-    background:
-      rgba(
-        255,
-        255,
-        255,
-        0.045
-      );
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 18px;
+    background: rgba(255,255,255,0.045);
     color: #ffffff;
     font-weight: 800;
     line-height: 1.55;
@@ -1745,33 +1330,16 @@ const homeCss = `
     margin-top: 18px;
   }
 
-  .home-category-list
-    button {
+  .home-category-list button {
     width: 100%;
     display: flex;
-    justify-content:
-      space-between;
-    align-items:
-      center;
+    justify-content: space-between;
+    align-items: center;
     gap: 16px;
     padding: 18px;
-    border:
-      1px solid
-      rgba(
-        61,
-        165,
-        255,
-        0.22
-      );
-    border-radius:
-      18px;
-    background:
-      rgba(
-        61,
-        165,
-        255,
-        0.1
-      );
+    border: 1px solid rgba(61,165,255,0.22);
+    border-radius: 18px;
+    background: rgba(61,165,255,0.1);
     color: #c8eaff;
     font: inherit;
     font-weight: 900;
@@ -1779,43 +1347,16 @@ const homeCss = `
     cursor: pointer;
   }
 
-  .home-category-list
-    button:hover {
-    border-color:
-      rgba(
-        61,
-        165,
-        255,
-        0.42
-      );
-    background:
-      rgba(
-        61,
-        165,
-        255,
-        0.16
-      );
+  .home-category-list button:hover {
+    border-color: rgba(61,165,255,0.42);
+    background: rgba(61,165,255,0.16);
   }
 
   .home-disabled-notice {
     padding: 16px;
-    border:
-      1px solid
-      rgba(
-        255,
-        255,
-        255,
-        0.09
-      );
-    border-radius:
-      16px;
-    background:
-      rgba(
-        0,
-        0,
-        0,
-        0.24
-      );
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 16px;
+    background: rgba(0,0,0,0.24);
     color: #aeb7bf;
     line-height: 1.65;
   }
@@ -1826,584 +1367,181 @@ const homeCss = `
     margin-top: 20px;
   }
 
-  .home-documents-panel {
-    margin-bottom:
-      28px;
-  }
-
-  .home-documents-heading {
-    display: flex;
-    justify-content:
-      space-between;
-    align-items:
-      flex-end;
-    gap: 24px;
-    flex-wrap: wrap;
-  }
-
-  .home-documents-heading
-    > div:first-child {
-    max-width: 780px;
-  }
-
-  .home-document-heading-actions {
-    justify-content:
-      flex-end;
-    margin-top: 0;
-  }
-
-  .home-state-panel,
-  .home-error-panel {
-    display: grid;
-    justify-items:
-      center;
-    gap: 16px;
-    margin-top: 26px;
-    padding: 42px;
-    border-radius:
-      22px;
-    text-align: center;
-  }
-
-  .home-state-panel {
-    border:
-      1px solid
-      rgba(
-        255,
-        255,
-        255,
-        0.09
-      );
-    background:
-      rgba(
-        0,
-        0,
-        0,
-        0.2
-      );
-    color: #c8c8c8;
-  }
-
-  .home-error-panel {
-    border:
-      1px solid
-      rgba(
-        255,
-        120,
-        120,
-        0.28
-      );
-    background:
-      rgba(
-        255,
-        70,
-        70,
-        0.08
-      );
-    color: #ffd1d1;
-  }
-
-  .home-state-panel h3,
-  .home-error-panel h3 {
-    color: #ffffff;
-    font-size: 28px;
-  }
-
-  .home-state-panel p,
-  .home-error-panel p {
-    max-width: 700px;
-    line-height: 1.75;
-  }
-
-  .home-loader {
-    width: 42px;
-    height: 42px;
-    border:
-      4px solid
-      rgba(
-        255,
-        255,
-        255,
-        0.12
-      );
-    border-top-color:
-      #9ed8ff;
-    border-radius: 50%;
-    animation:
-      home-spin
-      0.8s linear
-      infinite;
-  }
-
-  @keyframes home-spin {
-    to {
-      transform:
-        rotate(360deg);
-    }
-  }
-
-  .home-document-grid {
+  .home-quality-panel {
     display: grid;
     grid-template-columns:
-      repeat(
-        3,
-        minmax(
-          0,
-          1fr
-        )
-      );
-    gap: 18px;
-    margin-top: 26px;
-  }
-
-  .home-document-card {
-    min-width: 0;
-    padding: 20px;
-    border:
-      1px solid
-      rgba(
-        255,
-        255,
-        255,
-        0.09
-      );
-    border-radius:
-      22px;
+      minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 28px;
+    margin-bottom: 28px;
+    padding: 36px;
+    border: 1px solid rgba(61,165,255,0.24);
+    border-radius: 30px;
     background:
       radial-gradient(
-        circle at
-          top left,
-        rgba(
-          61,
-          165,
-          255,
-          0.1
-        ),
-        transparent 34%
+        circle at top left,
+        rgba(61,165,255,0.14),
+        transparent 40%
       ),
-      rgba(
-        0,
-        0,
-        0,
-        0.2
-      );
-    overflow-wrap:
-      anywhere;
+      rgba(255,255,255,0.035);
+    box-shadow:
+      0 30px 80px rgba(0,0,0,0.38);
   }
 
-  .home-document-card-header {
-    display: flex;
-    align-items:
-      center;
-    gap: 14px;
+  .home-quality-panel > div {
+    max-width: 850px;
   }
 
-  .home-document-image {
-    width: 88px;
-    min-width: 88px;
-    height: 88px;
-    overflow: hidden;
-    border:
-      1px solid
-      rgba(
-        61,
-        165,
-        255,
-        0.2
-      );
-    border-radius:
-      16px;
-    background:
-      radial-gradient(
-        circle,
-        rgba(
-          61,
-          165,
-          255,
-          0.18
-        ),
-        rgba(
-          0,
-          0,
-          0,
-          0.72
-        )
-      );
+  .home-quality-panel .home-section-text {
+    margin-bottom: 18px;
   }
 
-  .home-document-image img {
-    display: block;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .home-document-placeholder {
-    width: 100%;
-    height: 100%;
-    display: grid;
-    align-content:
-      center;
-    justify-items:
-      center;
+  .home-quality-status {
+    display: inline-grid;
     gap: 4px;
-    color: #ffffff;
-    font-size: 9px;
-    text-align: center;
+    padding: 13px 17px;
+    border: 1px solid rgba(61,165,255,0.25);
+    border-radius: 15px;
+    background: rgba(61,165,255,0.09);
   }
 
-  .home-document-identity {
-    min-width: 0;
-  }
-
-  .home-document-badges {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .home-document-badges
-    span {
-    display:
-      inline-flex;
-    padding: 5px 8px;
-    border:
-      1px solid
-      rgba(
-        61,
-        165,
-        255,
-        0.24
-      );
-    border-radius:
-      999px;
-    background:
-      rgba(
-        61,
-        165,
-        255,
-        0.09
-      );
+  .home-quality-status span {
     color: #9ed8ff;
-    font-size: 8px;
+    font-size: 10px;
     font-weight: 900;
-    text-transform:
-      uppercase;
+    text-transform: uppercase;
   }
 
-  .home-document-identity
-    h3 {
-    margin:
-      9px 0 5px;
+  .home-quality-status strong {
     color: #ffffff;
-    font-size: 20px;
-    line-height: 1.2;
-  }
-
-  .home-document-identity
-    p {
-    color: #9ed8ff;
-    font-size: 12px;
-    font-weight: 900;
-  }
-
-  .home-document-details {
-    display: grid;
-    grid-template-columns:
-      repeat(
-        2,
-        minmax(
-          0,
-          1fr
-        )
-      );
-    gap: 8px;
-    margin-top: 16px;
-  }
-
-  .home-document-details
-    > div {
-    min-width: 0;
-    display: grid;
-    gap: 4px;
-    padding: 11px;
-    border:
-      1px solid
-      rgba(
-        255,
-        255,
-        255,
-        0.08
-      );
-    border-radius:
-      12px;
-    background:
-      rgba(
-        0,
-        0,
-        0,
-        0.22
-      );
-  }
-
-  .home-document-details
-    span {
-    color: #9ca8b3;
-    font-size: 9px;
-    font-weight: 900;
-    text-transform:
-      uppercase;
-  }
-
-  .home-document-details
-    strong {
-    color: #ffffff;
-    font-size: 11px;
-    overflow-wrap:
-      anywhere;
-  }
-
-  .home-document-links {
-    display: grid;
-    grid-template-columns:
-      repeat(
-        2,
-        minmax(
-          0,
-          1fr
-        )
-      );
-    gap: 9px;
-    margin-top: 16px;
-  }
-
-  .home-document-link {
-    display:
-      inline-flex;
-    align-items:
-      center;
-    justify-content:
-      center;
-    min-width: 0;
-    text-align: center;
-    text-decoration:
-      none;
   }
 
   .home-cta-panel {
     padding: 42px;
-    border:
-      1px solid
-      rgba(
-        61,
-        165,
-        255,
-        0.28
-      );
-    border-radius:
-      30px;
-    background:
-      rgba(
-        61,
-        165,
-        255,
-        0.12
-      );
+    border: 1px solid rgba(61,165,255,0.28);
+    border-radius: 30px;
+    background: rgba(61,165,255,0.12);
     box-shadow:
-      0 30px 80px
-      rgba(
-        0,
-        0,
-        0,
-        0.35
-      );
+      0 30px 80px rgba(0,0,0,0.35);
     text-align: center;
   }
 
   .home-cta-title {
-    margin-bottom:
-      18px;
+    margin-bottom: 18px;
     color: #ffffff;
-    font-size:
-      clamp(
-        32px,
-        5vw,
-        42px
-      );
+    font-size: clamp(32px, 5vw, 42px);
     line-height: 1.1;
   }
 
   .home-cta-text {
     max-width: 760px;
-    margin:
-      0 auto 24px;
+    margin: 0 auto 24px;
     color: #c8eaff;
     font-weight: 700;
     line-height: 1.8;
   }
 
-  button:disabled {
-    opacity: 0.6;
-    cursor:
-      not-allowed;
-  }
-
-  @media (
-    max-width:
-      1050px
-  ) {
+  @media (max-width: 1100px) {
     .home-page {
-      padding:
-        65px 24px;
+      padding: 65px 24px;
     }
 
-    .home-stats-grid,
-    .home-document-grid {
+    .home-best-seller-grid {
       grid-template-columns:
-        repeat(
-          2,
-          minmax(
-            0,
-            1fr
-          )
-        );
+        repeat(2, minmax(0, 1fr));
     }
 
     .home-split-panel {
       grid-template-columns:
-        minmax(
-          0,
-          1fr
-        );
+        minmax(0, 1fr);
     }
   }
 
-  @media (
-    max-width:
-      800px
-  ) {
+  @media (max-width: 800px) {
     .home-trust-grid {
       grid-template-columns:
-        minmax(
-          0,
-          1fr
-        );
+        minmax(0, 1fr);
     }
 
-    .home-documents-heading {
-      align-items:
-        flex-start;
+    .home-quality-panel {
+      grid-template-columns:
+        minmax(0, 1fr);
     }
 
-    .home-document-heading-actions {
+    .home-quality-panel > button {
       width: 100%;
-      justify-content:
-        flex-start;
     }
   }
 
-  @media (
-    max-width:
-      650px
-  ) {
+  @media (max-width: 650px) {
     .home-page {
-      padding:
-        44px 12px;
+      padding: 44px 12px;
     }
 
     .home-hero {
-      padding:
-        42px 20px;
-      border-radius:
-        26px;
+      padding: 42px 20px;
+      border-radius: 26px;
     }
 
     .home-hero-pills,
-    .home-hero-pills
-      span,
+    .home-hero-pills span,
     .home-button-row,
-    .home-button-row
-      button,
-    .home-document-heading-actions,
-    .home-document-heading-actions
-      button {
+    .home-button-row button,
+    .home-section-heading > button {
       width: 100%;
     }
 
-    .home-hero-pills
-      span {
-      justify-content:
-        center;
+    .home-hero-pills span {
+      justify-content: center;
     }
 
-    .home-stats-grid,
-    .home-bullet-grid,
-    .home-document-grid,
-    .home-document-details,
-    .home-document-links {
+    .home-best-seller-grid,
+    .home-bullet-grid {
       grid-template-columns:
-        minmax(
-          0,
-          1fr
-        );
+        minmax(0, 1fr);
     }
 
+    .home-best-sellers,
     .home-why-panel,
     .home-category-panel,
-    .home-documents-panel,
+    .home-quality-panel,
     .home-cta-panel {
-      padding:
-        22px 18px;
-      border-radius:
-        23px;
+      padding: 22px 18px;
+      border-radius: 23px;
     }
 
-    .home-document-link {
-      width: 100%;
+    .home-product-description {
+      min-height: 0;
     }
   }
 
-  @media (
-    max-width:
-      430px
-  ) {
+  @media (max-width: 430px) {
     .home-page {
-      padding:
-        34px 8px;
+      padding: 34px 8px;
     }
 
     .home-hero,
+    .home-best-sellers,
     .home-why-panel,
     .home-category-panel,
-    .home-documents-panel,
+    .home-quality-panel,
     .home-cta-panel,
-    .home-trust-card,
-    .home-metric-card {
+    .home-trust-card {
       padding: 15px;
     }
 
-    .home-document-card {
+    .home-best-seller-card {
       padding: 14px;
     }
 
-    .home-document-card-header {
-      display: grid;
+    .home-product-image,
+    .home-product-placeholder {
+      height: 250px;
+    }
+
+    .home-product-meta {
       grid-template-columns:
-        minmax(
-          0,
-          1fr
-        );
-    }
-
-    .home-document-image {
-      width: 100%;
-      height: 180px;
-    }
-
-    .home-state-panel,
-    .home-error-panel {
-      padding:
-        28px 16px;
+        minmax(0, 1fr);
     }
   }
 `;
