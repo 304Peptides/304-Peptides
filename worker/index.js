@@ -8,16 +8,18 @@ const MAX_TURNSTILE_TOKEN_LENGTH = 2048;
 const MAX_DOCUMENT_REQUEST_LENGTH = 50000;
 const MAX_DOCUMENT_URL_LENGTH = 2048;
 const MAX_DOCUMENT_NOTES_LENGTH = 2000;
+
+const MAX_ORDER_ADMIN_REQUEST_LENGTH = 10000;
+const MAX_ORDER_STATUS_LENGTH = 100;
+const MAX_ORDER_ADMIN_NOTES_LENGTH = 2000;
+
 const DOCUMENT_KEY_PREFIX = "document:";
+const ORDER_KEY_PREFIX = "order:";
 
 const TURNSTILE_VERIFY_URL =
   "https://challenges.cloudflare.com/turnstile/v0/siteverify";
-
-const TURNSTILE_ACTION =
-  "checkout_order";
-
-const TURNSTILE_HOSTNAME =
-  "304peptides.com";
+const TURNSTILE_ACTION = "checkout_order";
+const TURNSTILE_HOSTNAME = "304peptides.com";
 
 export default {
   async fetch(request, env) {
@@ -62,6 +64,20 @@ export default {
     }
 
     if (
+      url.pathname ===
+        "/api/admin/orders" ||
+      url.pathname.startsWith(
+        "/api/admin/orders/"
+      )
+    ) {
+      return handleAdminOrdersRequest(
+        request,
+        env,
+        url
+      );
+    }
+
+    if (
       url.pathname.startsWith(
         "/api/"
       )
@@ -92,10 +108,13 @@ async function handlePublicDocumentsRequest(
   url
 ) {
   try {
-    validateDocumentStorage(env);
+    validateStorage(
+      env
+    );
 
     if (
-      request.method !== "GET"
+      request.method !==
+      "GET"
     ) {
       throw new ApiRequestError(
         "Method not allowed.",
@@ -104,12 +123,24 @@ async function handlePublicDocumentsRequest(
     }
 
     const codeName =
-      getRouteCode(
+      getRouteValue(
         url.pathname,
-        "/api/documents"
+        "/api/documents",
+        {
+          invalidRouteMessage:
+            "The documentation route is invalid.",
+
+          invalidValueMessage:
+            "The product code is invalid.",
+
+          normalize:
+            normalizeDocumentCode,
+        }
       );
 
-    if (codeName) {
+    if (
+      codeName
+    ) {
       const record =
         await getDocumentRecord(
           env,
@@ -128,7 +159,8 @@ async function handlePublicDocumentsRequest(
       }
 
       return jsonResponse({
-        success: true,
+        success:
+          true,
 
         record:
           toPublicDocumentRecord(
@@ -138,23 +170,40 @@ async function handlePublicDocumentsRequest(
     }
 
     const records =
-      await listDocumentRecords(
-        env
+      await listRecordsByPrefix(
+        env.DOCUMENTS_KV,
+        DOCUMENT_KEY_PREFIX
       );
 
     const publishedRecords =
       records
         .filter(
-          (record) =>
+          (
+            record
+          ) =>
             record.published &&
             record.documentationReady
         )
         .map(
           toPublicDocumentRecord
+        )
+        .sort(
+          (
+            left,
+            right
+          ) =>
+            String(
+              left.codeName
+            ).localeCompare(
+              String(
+                right.codeName
+              )
+            )
         );
 
     return jsonResponse({
-      success: true,
+      success:
+        true,
 
       records:
         publishedRecords,
@@ -162,7 +211,9 @@ async function handlePublicDocumentsRequest(
       count:
         publishedRecords.length,
     });
-  } catch (error) {
+  } catch (
+    error
+  ) {
     console.error(
       "Public documentation request error:",
       error
@@ -180,36 +231,70 @@ async function handleAdminDocumentsRequest(
   url
 ) {
   try {
-    validateDocumentStorage(env);
+    validateStorage(
+      env
+    );
 
-    await requireDocumentAdmin(
+    await requireAdmin(
       request,
       env
     );
 
     const codeName =
-      getRouteCode(
+      getRouteValue(
         url.pathname,
-        "/api/admin/documents"
+        "/api/admin/documents",
+        {
+          invalidRouteMessage:
+            "The documentation route is invalid.",
+
+          invalidValueMessage:
+            "The product code is invalid.",
+
+          normalize:
+            normalizeDocumentCode,
+        }
       );
 
     if (
       !codeName &&
-      request.method === "GET"
+      request.method ===
+        "GET"
     ) {
       const records =
-        await listDocumentRecords(
-          env
+        await listRecordsByPrefix(
+          env.DOCUMENTS_KV,
+          DOCUMENT_KEY_PREFIX
         );
 
+      records.sort(
+        (
+          left,
+          right
+        ) =>
+          String(
+            left.codeName
+          ).localeCompare(
+            String(
+              right.codeName
+            )
+          )
+      );
+
       return jsonResponse({
-        success: true,
+        success:
+          true,
+
         records,
-        count: records.length,
+
+        count:
+          records.length,
       });
     }
 
-    if (!codeName) {
+    if (
+      !codeName
+    ) {
       throw new ApiRequestError(
         "A product code is required.",
         400
@@ -217,7 +302,8 @@ async function handleAdminDocumentsRequest(
     }
 
     if (
-      request.method === "GET"
+      request.method ===
+      "GET"
     ) {
       const record =
         await getDocumentRecord(
@@ -225,7 +311,9 @@ async function handleAdminDocumentsRequest(
           codeName
         );
 
-      if (!record) {
+      if (
+        !record
+      ) {
         throw new ApiRequestError(
           "Documentation record not found.",
           404
@@ -233,13 +321,16 @@ async function handleAdminDocumentsRequest(
       }
 
       return jsonResponse({
-        success: true,
+        success:
+          true,
+
         record,
       });
     }
 
     if (
-      request.method === "PUT"
+      request.method ===
+      "PUT"
     ) {
       validateJsonContentType(
         request
@@ -261,7 +352,8 @@ async function handleAdminDocumentsRequest(
       const record =
         prepareDocumentRecord(
           codeName,
-          body.record || body,
+          body.record ||
+            body,
           existingRecord
         );
 
@@ -272,7 +364,9 @@ async function handleAdminDocumentsRequest(
 
       return jsonResponse(
         {
-          success: true,
+          success:
+            true,
+
           record,
 
           message:
@@ -285,7 +379,8 @@ async function handleAdminDocumentsRequest(
     }
 
     if (
-      request.method === "DELETE"
+      request.method ===
+      "DELETE"
     ) {
       const existingRecord =
         await getDocumentRecord(
@@ -293,7 +388,9 @@ async function handleAdminDocumentsRequest(
           codeName
         );
 
-      if (!existingRecord) {
+      if (
+        !existingRecord
+      ) {
         throw new ApiRequestError(
           "Documentation record not found.",
           404
@@ -307,7 +404,8 @@ async function handleAdminDocumentsRequest(
       );
 
       return jsonResponse({
-        success: true,
+        success:
+          true,
 
         message:
           "Documentation record deleted.",
@@ -318,7 +416,9 @@ async function handleAdminDocumentsRequest(
       "Method not allowed.",
       405
     );
-  } catch (error) {
+  } catch (
+    error
+  ) {
     console.error(
       "Admin documentation request error:",
       error
@@ -328,175 +428,6 @@ async function handleAdminDocumentsRequest(
       error
     );
   }
-}
-
-function validateDocumentStorage(
-  env
-) {
-  if (!env.DOCUMENTS_KV) {
-    throw new ApiRequestError(
-      "Documentation storage has not been configured.",
-      500
-    );
-  }
-}
-
-async function requireDocumentAdmin(
-  request,
-  env
-) {
-  if (
-    !env.DOCUMENT_ADMIN_SECRET
-  ) {
-    throw new ApiRequestError(
-      "Documentation administration has not been configured.",
-      500
-    );
-  }
-
-  const authorization =
-    request.headers.get(
-      "Authorization"
-    ) || "";
-
-  const match =
-    authorization.match(
-      /^Bearer\s+(.+)$/i
-    );
-
-  const submittedSecret =
-    match?.[1]?.trim() || "";
-
-  if (
-    !submittedSecret ||
-    !(await secretsMatch(
-      submittedSecret,
-      String(
-        env.DOCUMENT_ADMIN_SECRET
-      )
-    ))
-  ) {
-    throw new ApiRequestError(
-      "Administrator authorization is required.",
-      401
-    );
-  }
-}
-
-async function secretsMatch(
-  submittedSecret,
-  expectedSecret
-) {
-  const encoder =
-    new TextEncoder();
-
-  const [
-    submittedDigest,
-    expectedDigest,
-  ] = await Promise.all([
-    crypto.subtle.digest(
-      "SHA-256",
-
-      encoder.encode(
-        submittedSecret
-      )
-    ),
-
-    crypto.subtle.digest(
-      "SHA-256",
-
-      encoder.encode(
-        expectedSecret
-      )
-    ),
-  ]);
-
-  const submittedBytes =
-    new Uint8Array(
-      submittedDigest
-    );
-
-  const expectedBytes =
-    new Uint8Array(
-      expectedDigest
-    );
-
-  if (
-    submittedBytes.length !==
-    expectedBytes.length
-  ) {
-    return false;
-  }
-
-  let difference = 0;
-
-  for (
-    let index = 0;
-    index <
-    submittedBytes.length;
-    index += 1
-  ) {
-    difference |=
-      submittedBytes[index] ^
-      expectedBytes[index];
-  }
-
-  return difference === 0;
-}
-
-function getRouteCode(
-  pathname,
-  routeBase
-) {
-  if (
-    pathname === routeBase
-  ) {
-    return "";
-  }
-
-  const routePrefix =
-    `${routeBase}/`;
-
-  if (
-    !pathname.startsWith(
-      routePrefix
-    )
-  ) {
-    return "";
-  }
-
-  const encodedCode =
-    pathname.slice(
-      routePrefix.length
-    );
-
-  if (
-    !encodedCode ||
-    encodedCode.includes("/")
-  ) {
-    throw new ApiRequestError(
-      "The documentation route is invalid.",
-      404
-    );
-  }
-
-  let decodedCode;
-
-  try {
-    decodedCode =
-      decodeURIComponent(
-        encodedCode
-      );
-  } catch {
-    throw new ApiRequestError(
-      "The product code is invalid.",
-      400
-    );
-  }
-
-  return normalizeDocumentCode(
-    decodedCode
-  );
 }
 
 function normalizeDocumentCode(
@@ -525,7 +456,9 @@ function normalizeDocumentCode(
 function getDocumentKey(
   codeName
 ) {
-  return `${DOCUMENT_KEY_PREFIX}${codeName}`;
+  return `${DOCUMENT_KEY_PREFIX}${normalizeDocumentCode(
+    codeName
+  )}`;
 }
 
 async function getDocumentRecord(
@@ -568,57 +501,6 @@ async function putDocumentRecord(
   );
 }
 
-async function listDocumentRecords(
-  env
-) {
-  const keys = [];
-  let cursor;
-
-  do {
-    const result =
-      await env.DOCUMENTS_KV.list({
-        prefix:
-          DOCUMENT_KEY_PREFIX,
-
-        ...(cursor
-          ? { cursor }
-          : {}),
-      });
-
-    keys.push(
-      ...result.keys
-    );
-
-    cursor =
-      result.list_complete
-        ? undefined
-        : result.cursor;
-  } while (cursor);
-
-  const records =
-    await Promise.all(
-      keys.map((key) =>
-        env.DOCUMENTS_KV.get(
-          key.name,
-          "json"
-        )
-      )
-    );
-
-  return records
-    .filter(Boolean)
-    .sort(
-      (left, right) =>
-        String(
-          left.codeName
-        ).localeCompare(
-          String(
-            right.codeName
-          )
-        )
-    );
-}
-
 function prepareDocumentRecord(
   codeName,
   rawRecord,
@@ -628,7 +510,9 @@ function prepareDocumentRecord(
     !rawRecord ||
     typeof rawRecord !==
       "object" ||
-    Array.isArray(rawRecord)
+    Array.isArray(
+      rawRecord
+    )
   ) {
     throw new ApiRequestError(
       "The documentation record is invalid.",
@@ -641,7 +525,9 @@ function prepareDocumentRecord(
       codeName
     );
 
-  if (!catalogItem) {
+  if (
+    !catalogItem
+  ) {
     throw new ApiRequestError(
       `Product code ${codeName} is not available.`,
       400
@@ -691,10 +577,12 @@ function prepareDocumentRecord(
     );
 
   const reviewed =
-    rawRecord.reviewed === true;
+    rawRecord.reviewed ===
+    true;
 
   const published =
-    rawRecord.published === true;
+    rawRecord.published ===
+    true;
 
   if (
     testDate &&
@@ -711,12 +599,14 @@ function prepareDocumentRecord(
   const batchReady =
     Boolean(
       batchNumber &&
-      labName &&
-      testDate
+        labName &&
+        testDate
     );
 
   const coaReady =
-    Boolean(coaUrl);
+    Boolean(
+      coaUrl
+    );
 
   const verificationReady =
     Boolean(
@@ -726,9 +616,9 @@ function prepareDocumentRecord(
   const documentationReady =
     Boolean(
       batchReady &&
-      coaReady &&
-      verificationReady &&
-      reviewed
+        coaReady &&
+        verificationReady &&
+        reviewed
     );
 
   if (
@@ -778,7 +668,8 @@ function prepareDocumentRecord(
       existingRecord?.createdAt ||
       now,
 
-    updatedAt: now,
+    updatedAt:
+      now,
   };
 }
 
@@ -803,7 +694,8 @@ function toPublicDocumentRecord(
       : {}),
 
     category:
-      record.category || "",
+      record.category ||
+      "",
 
     batchNumber:
       record.batchNumber,
@@ -828,204 +720,441 @@ function toPublicDocumentRecord(
   };
 }
 
-function cleanUrl(
-  value,
-  label
+/* -------------------------------------------------- */
+/* ADMIN ORDER STORAGE API                            */
+/* -------------------------------------------------- */
+
+async function handleAdminOrdersRequest(
+  request,
+  env,
+  url
 ) {
-  const cleanedValue =
-    String(
-      value == null
-        ? ""
-        : value
-    ).trim();
-
-  if (!cleanedValue) {
-    return "";
-  }
-
-  if (
-    cleanedValue.length >
-    MAX_DOCUMENT_URL_LENGTH
-  ) {
-    throw new ApiRequestError(
-      `The ${label} link is too long.`,
-      400
-    );
-  }
-
-  let url;
-
   try {
-    url = new URL(
-      cleanedValue
+    validateStorage(
+      env
     );
-  } catch {
-    throw new ApiRequestError(
-      `Enter a valid ${label} link beginning with http:// or https://.`,
-      400
-    );
-  }
 
-  if (
-    url.protocol !== "http:" &&
-    url.protocol !== "https:"
+    await requireAdmin(
+      request,
+      env
+    );
+
+    const orderId =
+      getRouteValue(
+        url.pathname,
+        "/api/admin/orders",
+        {
+          invalidRouteMessage:
+            "The order route is invalid.",
+
+          invalidValueMessage:
+            "The order number is invalid.",
+
+          normalize:
+            normalizeOrderId,
+        }
+      );
+
+    if (
+      !orderId &&
+      request.method ===
+        "GET"
+    ) {
+      const records =
+        await listRecordsByPrefix(
+          env.DOCUMENTS_KV,
+          ORDER_KEY_PREFIX
+        );
+
+      records.sort(
+        (
+          left,
+          right
+        ) =>
+          String(
+            right.createdAt ||
+              right.updatedAt ||
+              ""
+          ).localeCompare(
+            String(
+              left.createdAt ||
+                left.updatedAt ||
+                ""
+            )
+          )
+      );
+
+      return jsonResponse({
+        success:
+          true,
+
+        records,
+
+        orders:
+          records,
+
+        count:
+          records.length,
+      });
+    }
+
+    if (
+      !orderId
+    ) {
+      throw new ApiRequestError(
+        "An order number is required.",
+        400
+      );
+    }
+
+    if (
+      request.method ===
+      "GET"
+    ) {
+      const record =
+        await getOrderRecord(
+          env,
+          orderId
+        );
+
+      if (
+        !record
+      ) {
+        throw new ApiRequestError(
+          "Order record not found.",
+          404
+        );
+      }
+
+      return jsonResponse({
+        success:
+          true,
+
+        record,
+
+        order:
+          record,
+      });
+    }
+
+    if (
+      request.method ===
+      "PATCH"
+    ) {
+      validateJsonContentType(
+        request
+      );
+
+      const body =
+        await readJsonRequest(
+          request,
+          MAX_ORDER_ADMIN_REQUEST_LENGTH,
+          "order update"
+        );
+
+      const existingRecord =
+        await getOrderRecord(
+          env,
+          orderId
+        );
+
+      if (
+        !existingRecord
+      ) {
+        throw new ApiRequestError(
+          "Order record not found.",
+          404
+        );
+      }
+
+      const updatedRecord =
+        prepareOrderAdminUpdate(
+          existingRecord,
+          body.order ||
+            body
+        );
+
+      await putOrderRecord(
+        env,
+        updatedRecord
+      );
+
+      return jsonResponse({
+        success:
+          true,
+
+        record:
+          updatedRecord,
+
+        order:
+          updatedRecord,
+
+        message:
+          "Order record updated.",
+      });
+    }
+
+    if (
+      request.method ===
+      "DELETE"
+    ) {
+      const existingRecord =
+        await getOrderRecord(
+          env,
+          orderId
+        );
+
+      if (
+        !existingRecord
+      ) {
+        throw new ApiRequestError(
+          "Order record not found.",
+          404
+        );
+      }
+
+      await env.DOCUMENTS_KV.delete(
+        getOrderKey(
+          orderId
+        )
+      );
+
+      return jsonResponse({
+        success:
+          true,
+
+        message:
+          "Order record deleted.",
+      });
+    }
+
+    throw new ApiRequestError(
+      "Method not allowed.",
+      405
+    );
+  } catch (
+    error
   ) {
-    throw new ApiRequestError(
-      `Enter a valid ${label} link beginning with http:// or https://.`,
-      400
+    console.error(
+      "Admin order request error:",
+      error
+    );
+
+    return handleApiError(
+      error
     );
   }
-
-  return url.toString();
 }
 
-function isValidIsoDate(
+function normalizeOrderId(
   value
 ) {
+  const orderId =
+    cleanText(
+      value,
+      100
+    ).toUpperCase();
+
   if (
-    !/^\d{4}-\d{2}-\d{2}$/.test(
-      value
+    !/^[A-Z0-9][A-Z0-9-]{2,99}$/.test(
+      orderId
     )
   ) {
-    return false;
+    throw new ApiRequestError(
+      "The order number is invalid.",
+      400
+    );
   }
 
-  const date =
-    new Date(
-      `${value}T00:00:00.000Z`
-    );
+  return orderId;
+}
 
-  return (
-    !Number.isNaN(
-      date.getTime()
-    ) &&
-    date
-      .toISOString()
-      .slice(0, 10) === value
+function getOrderKey(
+  orderId
+) {
+  return `${ORDER_KEY_PREFIX}${normalizeOrderId(
+    orderId
+  )}`;
+}
+
+async function getOrderRecord(
+  env,
+  orderId
+) {
+  return env.DOCUMENTS_KV.get(
+    getOrderKey(
+      orderId
+    ),
+    "json"
   );
 }
 
-function cleanMultilineText(
-  value,
-  maximumLength
+async function putOrderRecord(
+  env,
+  record
 ) {
-  return String(
-    value == null ? "" : value
-  )
-    .replace(
-      /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
-      " "
-    )
-    .replace(
-      /\r\n?/g,
-      "\n"
-    )
-    .trim()
-    .slice(
-      0,
-      maximumLength
+  const orderId =
+    normalizeOrderId(
+      record.orderId ||
+        record.id
     );
-}
 
-function validateJsonContentType(
-  request
-) {
-  const contentType =
-    request.headers.get(
-      "content-type"
-    ) || "";
+  const storedRecord = {
+    ...record,
 
-  if (
-    !contentType
-      .toLowerCase()
-      .includes(
-        "application/json"
-      )
-  ) {
-    throw new ApiRequestError(
-      "The request must contain JSON.",
-      415
-    );
-  }
-}
+    id:
+      orderId,
 
-async function readJsonRequest(
-  request,
-  maximumLength,
-  label
-) {
-  const declaredLength =
-    Number(
-      request.headers.get(
-        "content-length"
-      )
-    ) || 0;
+    orderId,
+  };
 
-  if (
-    declaredLength >
-    maximumLength
-  ) {
-    throw new ApiRequestError(
-      `The ${label} request is too large.`,
-      413
-    );
-  }
+  await env.DOCUMENTS_KV.put(
+    getOrderKey(
+      orderId
+    ),
 
-  const text =
-    await request.text();
+    JSON.stringify(
+      storedRecord
+    ),
 
-  if (
-    text.length >
-    maximumLength
-  ) {
-    throw new ApiRequestError(
-      `The ${label} request is too large.`,
-      413
-    );
-  }
-
-  if (!text.trim()) {
-    throw new ApiRequestError(
-      `The ${label} request is empty.`,
-      400
-    );
-  }
-
-  try {
-    return JSON.parse(
-      text
-    );
-  } catch {
-    throw new ApiRequestError(
-      "The request contains invalid JSON.",
-      400
-    );
-  }
-}
-
-function handleApiError(
-  error
-) {
-  const status =
-    error instanceof
-    ApiRequestError
-      ? error.status
-      : 500;
-
-  return jsonResponse(
     {
-      success: false,
+      metadata: {
+        orderId,
 
-      error:
-        error.message ||
-        "The request could not be completed.",
-    },
-    status
+        status:
+          cleanText(
+            storedRecord.status,
+            MAX_ORDER_STATUS_LENGTH
+          ),
+
+        email:
+          cleanText(
+            storedRecord.customer
+              ?.email,
+            254
+          ).toLowerCase(),
+
+        createdAt:
+          storedRecord.createdAt ||
+          "",
+
+        updatedAt:
+          storedRecord.updatedAt ||
+          "",
+      },
+    }
   );
+
+  return storedRecord;
+}
+
+function prepareOrderAdminUpdate(
+  existingRecord,
+  rawUpdate
+) {
+  if (
+    !rawUpdate ||
+    typeof rawUpdate !==
+      "object" ||
+    Array.isArray(
+      rawUpdate
+    )
+  ) {
+    throw new ApiRequestError(
+      "The order update is invalid.",
+      400
+    );
+  }
+
+  const status =
+    rawUpdate.status ===
+    undefined
+      ? existingRecord.status
+      : cleanText(
+          rawUpdate.status,
+          MAX_ORDER_STATUS_LENGTH
+        );
+
+  if (
+    !status
+  ) {
+    throw new ApiRequestError(
+      "An order status is required.",
+      400
+    );
+  }
+
+  const adminNotes =
+    rawUpdate.adminNotes ===
+    undefined
+      ? existingRecord.adminNotes ||
+        ""
+      : cleanMultilineText(
+          rawUpdate.adminNotes,
+          MAX_ORDER_ADMIN_NOTES_LENGTH
+        );
+
+  return {
+    ...existingRecord,
+
+    status,
+    adminNotes,
+
+    updatedAt:
+      new Date().toISOString(),
+  };
+}
+
+function createStoredOrder(
+  protectedOrder,
+  serviceResult
+) {
+  const now =
+    new Date().toISOString();
+
+  const orderId =
+    normalizeOrderId(
+      serviceResult.orderId ||
+        protectedOrder.id
+    );
+
+  return {
+    ...protectedOrder,
+
+    id:
+      orderId,
+
+    orderId,
+
+    status:
+      "Order Request Received",
+
+    createdAt:
+      now,
+
+    updatedAt:
+      now,
+
+    date:
+      now.slice(
+        0,
+        10
+      ),
+
+    externalServiceMessage:
+      cleanText(
+        serviceResult.message ||
+          "Order request received.",
+        500
+      ),
+
+    adminNotes:
+      "",
+  };
 }
 
 /* -------------------------------------------------- */
-/* ORDER API                                          */
+/* ORDER SUBMISSION API                               */
 /* -------------------------------------------------- */
 
 async function handleOrderRequest(
@@ -1033,11 +1162,11 @@ async function handleOrderRequest(
   env
 ) {
   try {
-    validateEnvironment(
+    validateOrderEnvironment(
       env
     );
 
-    validateContentType(
+    validateJsonContentType(
       request
     );
 
@@ -1047,8 +1176,10 @@ async function handleOrderRequest(
     );
 
     const requestBody =
-      await readRequestBody(
-        request
+      await readJsonRequest(
+        request,
+        MAX_REQUEST_LENGTH,
+        "order"
       );
 
     const turnstileToken =
@@ -1077,21 +1208,25 @@ async function handleOrderRequest(
       await fetch(
         env.ORDER_WEB_APP_URL,
         {
-          method: "POST",
-          redirect: "follow",
+          method:
+            "POST",
+
+          redirect:
+            "follow",
 
           headers: {
             "Content-Type":
               "application/json",
           },
 
-          body: JSON.stringify({
-            secret:
-              env.ORDER_API_SECRET,
+          body:
+            JSON.stringify({
+              secret:
+                env.ORDER_API_SECRET,
 
-            order:
-              protectedOrder,
-          }),
+              order:
+                protectedOrder,
+            }),
         }
       );
 
@@ -1123,18 +1258,34 @@ async function handleOrderRequest(
       );
     }
 
+    const storedOrder =
+      createStoredOrder(
+        protectedOrder,
+        result
+      );
+
+    await putOrderRecord(
+      env,
+      storedOrder
+    );
+
     return jsonResponse({
-      success: true,
+      success:
+        true,
 
       orderId:
-        result.orderId ||
-        protectedOrder.id,
+        storedOrder.orderId,
+
+      order:
+        storedOrder,
 
       message:
         result.message ||
         "Order request received.",
     });
-  } catch (error) {
+  } catch (
+    error
+  ) {
     console.error(
       "Order request error:",
       error
@@ -1142,13 +1293,16 @@ async function handleOrderRequest(
 
     const status =
       error instanceof
-      OrderRequestError
+          OrderRequestError ||
+      error instanceof
+          ApiRequestError
         ? error.status
         : 500;
 
     return jsonResponse(
       {
-        success: false,
+        success:
+          false,
 
         error:
           error.message ||
@@ -1159,40 +1313,19 @@ async function handleOrderRequest(
   }
 }
 
-function validateEnvironment(
+function validateOrderEnvironment(
   env
 ) {
   if (
     !env.ORDER_WEB_APP_URL ||
     !env.ORDER_API_SECRET ||
     !env.TURNSTILE_SECRET_KEY ||
-    !env.ORDER_RATE_LIMITER
+    !env.ORDER_RATE_LIMITER ||
+    !env.DOCUMENTS_KV
   ) {
     throw new OrderRequestError(
       "The order service has not been configured.",
       500
-    );
-  }
-}
-
-function validateContentType(
-  request
-) {
-  const contentType =
-    request.headers.get(
-      "content-type"
-    ) || "";
-
-  if (
-    !contentType
-      .toLowerCase()
-      .includes(
-        "application/json"
-      )
-  ) {
-    throw new OrderRequestError(
-      "The request must contain JSON.",
-      415
     );
   }
 }
@@ -1216,7 +1349,9 @@ async function enforceOrderRateLimit(
             `order:${clientIdentifier}`,
         }
       );
-  } catch (error) {
+  } catch (
+    error
+  ) {
     console.error(
       "Order rate limiter failed:",
       error
@@ -1228,7 +1363,9 @@ async function enforceOrderRateLimit(
     );
   }
 
-  if (!result.success) {
+  if (
+    !result.success
+  ) {
     throw new OrderRequestError(
       "Too many order attempts were received. Please wait one minute and try again.",
       429
@@ -1244,7 +1381,9 @@ function getClientIdentifier(
       "CF-Connecting-IP"
     );
 
-  if (cloudflareIp) {
+  if (
+    cloudflareIp
+  ) {
     return cleanText(
       cloudflareIp,
       100
@@ -1256,67 +1395,19 @@ function getClientIdentifier(
       "X-Forwarded-For"
     );
 
-  if (forwardedFor) {
+  if (
+    forwardedFor
+  ) {
     return cleanText(
       forwardedFor
-        .split(",")[0],
+        .split(
+          ","
+        )[0],
       100
     );
   }
 
   return "unknown-client";
-}
-
-async function readRequestBody(
-  request
-) {
-  const declaredLength =
-    Number(
-      request.headers.get(
-        "content-length"
-      )
-    ) || 0;
-
-  if (
-    declaredLength >
-    MAX_REQUEST_LENGTH
-  ) {
-    throw new OrderRequestError(
-      "The order request is too large.",
-      413
-    );
-  }
-
-  const text =
-    await request.text();
-
-  if (
-    text.length >
-    MAX_REQUEST_LENGTH
-  ) {
-    throw new OrderRequestError(
-      "The order request is too large.",
-      413
-    );
-  }
-
-  if (!text.trim()) {
-    throw new OrderRequestError(
-      "The order request is empty.",
-      400
-    );
-  }
-
-  try {
-    return JSON.parse(
-      text
-    );
-  } catch {
-    throw new OrderRequestError(
-      "The request contains invalid JSON.",
-      400
-    );
-  }
 }
 
 async function validateTurnstile(
@@ -1330,7 +1421,9 @@ async function validateTurnstile(
       MAX_TURNSTILE_TOKEN_LENGTH
     );
 
-  if (!token) {
+  if (
+    !token
+  ) {
     throw new OrderRequestError(
       "Complete the security verification before submitting your order.",
       400
@@ -1340,7 +1433,8 @@ async function validateTurnstile(
   const clientIp =
     request.headers.get(
       "CF-Connecting-IP"
-    ) || "";
+    ) ||
+    "";
 
   let response;
 
@@ -1349,33 +1443,37 @@ async function validateTurnstile(
       await fetch(
         TURNSTILE_VERIFY_URL,
         {
-          method: "POST",
+          method:
+            "POST",
 
           headers: {
             "Content-Type":
               "application/json",
           },
 
-          body: JSON.stringify({
-            secret:
-              env.TURNSTILE_SECRET_KEY,
+          body:
+            JSON.stringify({
+              secret:
+                env.TURNSTILE_SECRET_KEY,
 
-            response:
-              token,
+              response:
+                token,
 
-            idempotency_key:
-              crypto.randomUUID(),
+              idempotency_key:
+                crypto.randomUUID(),
 
-            ...(clientIp
-              ? {
-                  remoteip:
-                    clientIp,
-                }
-              : {}),
-          }),
+              ...(clientIp
+                ? {
+                    remoteip:
+                      clientIp,
+                  }
+                : {}),
+            }),
         }
       );
-  } catch (error) {
+  } catch (
+    error
+  ) {
     console.error(
       "Turnstile request failed:",
       error
@@ -1387,7 +1485,9 @@ async function validateTurnstile(
     );
   }
 
-  if (!response.ok) {
+  if (
+    !response.ok
+  ) {
     console.error(
       "Turnstile returned HTTP status:",
       response.status
@@ -1404,7 +1504,9 @@ async function validateTurnstile(
   try {
     result =
       await response.json();
-  } catch (error) {
+  } catch (
+    error
+  ) {
     console.error(
       "Turnstile returned invalid JSON:",
       error
@@ -1416,12 +1518,15 @@ async function validateTurnstile(
     );
   }
 
-  if (!result.success) {
+  if (
+    !result.success
+  ) {
     console.warn(
       "Turnstile verification failed:",
       result[
         "error-codes"
-      ] || []
+      ] ||
+        []
     );
 
     throw new OrderRequestError(
@@ -1468,7 +1573,9 @@ function prepareOrder(
     !rawOrder ||
     typeof rawOrder !==
       "object" ||
-    Array.isArray(rawOrder)
+    Array.isArray(
+      rawOrder
+    )
   ) {
     throw new OrderRequestError(
       "The order information is invalid.",
@@ -1479,17 +1586,19 @@ function prepareOrder(
   const customer =
     prepareCustomer(
       rawOrder.customer ||
-      rawOrder
+        rawOrder
     );
 
   const paymentMethod =
     normalizePaymentMethod(
       rawOrder.preferredPaymentLabel ||
-      rawOrder.preferredPaymentMethod ||
-      rawOrder.paymentMethod
+        rawOrder.preferredPaymentMethod ||
+        rawOrder.paymentMethod
     );
 
-  if (!paymentMethod) {
+  if (
+    !paymentMethod
+  ) {
     throw new OrderRequestError(
       "A valid payment preference is required.",
       400
@@ -1500,7 +1609,8 @@ function prepareOrder(
     !Array.isArray(
       rawOrder.items
     ) ||
-    rawOrder.items.length === 0
+    rawOrder.items.length ===
+      0
   ) {
     throw new OrderRequestError(
       "The order does not contain any products.",
@@ -1525,7 +1635,10 @@ function prepareOrder(
 
   const totalQuantity =
     items.reduce(
-      (total, item) =>
+      (
+        total,
+        item
+      ) =>
         total +
         item.quantity,
       0
@@ -1543,12 +1656,16 @@ function prepareOrder(
 
   const subtotalInCents =
     items.reduce(
-      (total, item) =>
+      (
+        total,
+        item
+      ) =>
         total +
         Math.round(
-          item.price * 100
+          item.price *
+            100
         ) *
-        item.quantity,
+          item.quantity,
       0
     );
 
@@ -1557,6 +1674,7 @@ function prepareOrder(
       createOrderId(),
 
     customer,
+
     paymentMethod,
 
     preferredPaymentLabel:
@@ -1565,7 +1683,8 @@ function prepareOrder(
     items,
 
     subtotal:
-      subtotalInCents / 100,
+      subtotalInCents /
+      100,
 
     totalQuantity,
   };
@@ -1669,7 +1788,9 @@ function prepareItem(
     !rawItem ||
     typeof rawItem !==
       "object" ||
-    Array.isArray(rawItem)
+    Array.isArray(
+      rawItem
+    )
   ) {
     throw new OrderRequestError(
       `Product ${index + 1} is invalid.`,
@@ -1683,7 +1804,9 @@ function prepareItem(
       100
     );
 
-  if (!codeName) {
+  if (
+    !codeName
+  ) {
     throw new OrderRequestError(
       `Product ${index + 1} is missing its product code.`,
       400
@@ -1695,7 +1818,9 @@ function prepareItem(
       codeName
     );
 
-  if (!catalogItem) {
+  if (
+    !catalogItem
+  ) {
     throw new OrderRequestError(
       `Product code ${codeName} is not available.`,
       400
@@ -1711,8 +1836,10 @@ function prepareItem(
     !Number.isInteger(
       quantity
     ) ||
-    quantity < 1 ||
-    quantity > 100
+    quantity <
+      1 ||
+    quantity >
+      100
   ) {
     throw new OrderRequestError(
       `The quantity for ${catalogItem.name} is invalid.`,
@@ -1753,23 +1880,35 @@ function normalizePaymentMethod(
     ).toLowerCase();
 
   const paymentMethods = {
-    zelle: "Zelle",
-    venmo: "Venmo",
-    cashapp: "Cash App",
-    "cash app": "Cash App",
-    "cash-app": "Cash App",
+    zelle:
+      "Zelle",
+
+    venmo:
+      "Venmo",
+
+    cashapp:
+      "Cash App",
+
+    "cash app":
+      "Cash App",
+
+    "cash-app":
+      "Cash App",
   };
 
   return (
     paymentMethods[
       normalized
-    ] || ""
+    ] ||
+    ""
   );
 }
 
 function createOrderId() {
   const randomValues =
-    new Uint32Array(1);
+    new Uint32Array(
+      1
+    );
 
   crypto.getRandomValues(
     randomValues
@@ -1777,24 +1916,463 @@ function createOrderId() {
 
   const number =
     10000000 +
-    (
-      randomValues[0] %
-      90000000
-    );
+    (randomValues[0] %
+      90000000);
 
   return `304-${number}`;
 }
 
 /* -------------------------------------------------- */
-/* SHARED UTILITIES                                   */
+/* ADMIN AUTHORIZATION                                */
 /* -------------------------------------------------- */
+
+async function requireAdmin(
+  request,
+  env
+) {
+  if (
+    !env.DOCUMENT_ADMIN_SECRET
+  ) {
+    throw new ApiRequestError(
+      "Administration has not been configured.",
+      500
+    );
+  }
+
+  const authorization =
+    request.headers.get(
+      "Authorization"
+    ) ||
+    "";
+
+  const match =
+    authorization.match(
+      /^Bearer\s+(.+)$/i
+    );
+
+  const submittedSecret =
+    match?.[1]?.trim() ||
+    "";
+
+  if (
+    !submittedSecret ||
+    !(await secretsMatch(
+      submittedSecret,
+      String(
+        env.DOCUMENT_ADMIN_SECRET
+      )
+    ))
+  ) {
+    throw new ApiRequestError(
+      "Administrator authorization is required.",
+      401
+    );
+  }
+}
+
+async function secretsMatch(
+  submittedSecret,
+  expectedSecret
+) {
+  const encoder =
+    new TextEncoder();
+
+  const [
+    submittedDigest,
+    expectedDigest,
+  ] =
+    await Promise.all([
+      crypto.subtle.digest(
+        "SHA-256",
+        encoder.encode(
+          submittedSecret
+        )
+      ),
+
+      crypto.subtle.digest(
+        "SHA-256",
+        encoder.encode(
+          expectedSecret
+        )
+      ),
+    ]);
+
+  const submittedBytes =
+    new Uint8Array(
+      submittedDigest
+    );
+
+  const expectedBytes =
+    new Uint8Array(
+      expectedDigest
+    );
+
+  if (
+    submittedBytes.length !==
+    expectedBytes.length
+  ) {
+    return false;
+  }
+
+  let difference =
+    0;
+
+  for (
+    let index =
+      0;
+    index <
+    submittedBytes.length;
+    index +=
+    1
+  ) {
+    difference |=
+      submittedBytes[
+        index
+      ] ^
+      expectedBytes[
+        index
+      ];
+  }
+
+  return (
+    difference ===
+    0
+  );
+}
+
+/* -------------------------------------------------- */
+/* SHARED STORAGE AND ROUTING                         */
+/* -------------------------------------------------- */
+
+function validateStorage(
+  env
+) {
+  if (
+    !env.DOCUMENTS_KV
+  ) {
+    throw new ApiRequestError(
+      "Cloudflare KV storage has not been configured.",
+      500
+    );
+  }
+}
+
+function getRouteValue(
+  pathname,
+  routeBase,
+  {
+    invalidRouteMessage,
+    invalidValueMessage,
+    normalize,
+  }
+) {
+  if (
+    pathname ===
+    routeBase
+  ) {
+    return "";
+  }
+
+  const routePrefix =
+    `${routeBase}/`;
+
+  if (
+    !pathname.startsWith(
+      routePrefix
+    )
+  ) {
+    return "";
+  }
+
+  const encodedValue =
+    pathname.slice(
+      routePrefix.length
+    );
+
+  if (
+    !encodedValue ||
+    encodedValue.includes(
+      "/"
+    )
+  ) {
+    throw new ApiRequestError(
+      invalidRouteMessage,
+      404
+    );
+  }
+
+  let decodedValue;
+
+  try {
+    decodedValue =
+      decodeURIComponent(
+        encodedValue
+      );
+  } catch {
+    throw new ApiRequestError(
+      invalidValueMessage,
+      400
+    );
+  }
+
+  return normalize(
+    decodedValue
+  );
+}
+
+async function listRecordsByPrefix(
+  namespace,
+  prefix
+) {
+  const keys =
+    [];
+
+  let cursor;
+
+  do {
+    const result =
+      await namespace.list({
+        prefix,
+
+        ...(cursor
+          ? {
+              cursor,
+            }
+          : {}),
+      });
+
+    keys.push(
+      ...result.keys
+    );
+
+    cursor =
+      result.list_complete
+        ? undefined
+        : result.cursor;
+  } while (
+    cursor
+  );
+
+  const records =
+    await Promise.all(
+      keys.map(
+        (
+          key
+        ) =>
+          namespace.get(
+            key.name,
+            "json"
+          )
+      )
+    );
+
+  return records.filter(
+    Boolean
+  );
+}
+
+/* -------------------------------------------------- */
+/* SHARED VALIDATION                                  */
+/* -------------------------------------------------- */
+
+function validateJsonContentType(
+  request
+) {
+  const contentType =
+    request.headers.get(
+      "content-type"
+    ) ||
+    "";
+
+  if (
+    !contentType
+      .toLowerCase()
+      .includes(
+        "application/json"
+      )
+  ) {
+    throw new ApiRequestError(
+      "The request must contain JSON.",
+      415
+    );
+  }
+}
+
+async function readJsonRequest(
+  request,
+  maximumLength,
+  label
+) {
+  const declaredLength =
+    Number(
+      request.headers.get(
+        "content-length"
+      )
+    ) ||
+    0;
+
+  if (
+    declaredLength >
+    maximumLength
+  ) {
+    throw new ApiRequestError(
+      `The ${label} request is too large.`,
+      413
+    );
+  }
+
+  const text =
+    await request.text();
+
+  if (
+    text.length >
+    maximumLength
+  ) {
+    throw new ApiRequestError(
+      `The ${label} request is too large.`,
+      413
+    );
+  }
+
+  if (
+    !text.trim()
+  ) {
+    throw new ApiRequestError(
+      `The ${label} request is empty.`,
+      400
+    );
+  }
+
+  try {
+    return JSON.parse(
+      text
+    );
+  } catch {
+    throw new ApiRequestError(
+      "The request contains invalid JSON.",
+      400
+    );
+  }
+}
+
+function cleanUrl(
+  value,
+  label
+) {
+  const cleanedValue =
+    String(
+      value == null
+        ? ""
+        : value
+    ).trim();
+
+  if (
+    !cleanedValue
+  ) {
+    return "";
+  }
+
+  if (
+    cleanedValue.length >
+    MAX_DOCUMENT_URL_LENGTH
+  ) {
+    throw new ApiRequestError(
+      `The ${label} link is too long.`,
+      400
+    );
+  }
+
+  let url;
+
+  try {
+    url =
+      new URL(
+        cleanedValue
+      );
+  } catch {
+    throw new ApiRequestError(
+      `Enter a valid ${label} link beginning with http:// or https://.`,
+      400
+    );
+  }
+
+  if (
+    url.protocol !==
+      "http:" &&
+    url.protocol !==
+      "https:"
+  ) {
+    throw new ApiRequestError(
+      `Enter a valid ${label} link beginning with http:// or https://.`,
+      400
+    );
+  }
+
+  return url.toString();
+}
+
+function isValidIsoDate(
+  value
+) {
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(
+      value
+    )
+  ) {
+    return false;
+  }
+
+  const date =
+    new Date(
+      `${value}T00:00:00.000Z`
+    );
+
+  return (
+    !Number.isNaN(
+      date.getTime()
+    ) &&
+    date
+      .toISOString()
+      .slice(
+        0,
+        10
+      ) ===
+      value
+  );
+}
+
+function cleanMultilineText(
+  value,
+  maximumLength
+) {
+  return String(
+    value == null
+      ? ""
+      : value
+  )
+    .replace(
+      /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
+      " "
+    )
+    .replace(
+      /\r\n?/g,
+      "\n"
+    )
+    .trim()
+    .slice(
+      0,
+      maximumLength
+    );
+}
 
 function cleanText(
   value,
   maximumLength
 ) {
   return String(
-    value == null ? "" : value
+    value == null
+      ? ""
+      : value
   )
     .replace(
       /[\u0000-\u001F\u007F]/g,
@@ -1809,6 +2387,34 @@ function cleanText(
       0,
       maximumLength
     );
+}
+
+/* -------------------------------------------------- */
+/* SHARED RESPONSES                                   */
+/* -------------------------------------------------- */
+
+function handleApiError(
+  error
+) {
+  const status =
+    error instanceof
+        ApiRequestError ||
+    error instanceof
+        OrderRequestError
+      ? error.status
+      : 500;
+
+  return jsonResponse(
+    {
+      success:
+        false,
+
+      error:
+        error.message ||
+        "The request could not be completed.",
+    },
+    status
+  );
 }
 
 function jsonResponse(
@@ -1833,13 +2439,14 @@ function jsonResponse(
   );
 }
 
-class OrderRequestError
-  extends Error {
+class OrderRequestError extends Error {
   constructor(
     message,
     status = 400
   ) {
-    super(message);
+    super(
+      message
+    );
 
     this.name =
       "OrderRequestError";
@@ -1849,13 +2456,14 @@ class OrderRequestError
   }
 }
 
-class ApiRequestError
-  extends Error {
+class ApiRequestError extends Error {
   constructor(
     message,
     status = 400
   ) {
-    super(message);
+    super(
+      message
+    );
 
     this.name =
       "ApiRequestError";
