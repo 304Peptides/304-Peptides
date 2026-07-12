@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -469,12 +470,35 @@ function normalizeOrders(
 function CustomerDashboard({
   onNavigate = () => {},
   orders = [],
+  account = null,
+  authenticationError = "",
+  onRefreshOrders = null,
   partnerApplication,
 }) {
   const [
     expandedOrderId,
     setExpandedOrderId,
   ] = useState("");
+
+  const [
+    isRefreshing,
+    setIsRefreshing,
+  ] = useState(false);
+
+  const [
+    refreshError,
+    setRefreshError,
+  ] = useState("");
+
+  const [
+    refreshMessage,
+    setRefreshMessage,
+  ] = useState("");
+
+  const [
+    refreshSucceeded,
+    setRefreshSucceeded,
+  ] = useState(false);
 
   const savedOrders =
     useMemo(
@@ -502,23 +526,188 @@ function CustomerDashboard({
         )
       : {};
 
+  const accountName =
+    `${account?.firstName || ""} ${
+      account?.lastName || ""
+    }`.trim();
+
   const customerName =
-    latestOrder
+    accountName ||
+    (latestOrder
       ? getCustomerName(
           latestOrder
         )
-      : "No checkout details saved yet";
+      : "Customer name unavailable");
 
   const customerEmail =
+    account?.email ||
     latestCustomer.email ||
-    "No checkout email saved yet";
+    "Account email unavailable";
 
   const customerAddress =
     latestOrder
       ? getCustomerAddress(
           latestOrder
         )
-      : "No shipping address saved yet";
+      : "No shipping address has been used yet";
+
+  const accountStatus =
+    account?.status ||
+    "Active";
+
+  const accountCreatedAt =
+    account?.createdAt
+      ? formatDate(
+          account.createdAt
+        )
+      : "Account date unavailable";
+
+  const displayedRefreshError =
+    refreshError ||
+    (!refreshSucceeded
+      ? authenticationError
+      : "");
+
+  async function handleRefreshOrders(
+    showSuccess = true
+  ) {
+    if (
+      typeof onRefreshOrders !==
+      "function"
+    ) {
+      setRefreshError(
+        "Order refresh is not available."
+      );
+
+      return;
+    }
+
+    setIsRefreshing(
+      true
+    );
+
+    setRefreshError(
+      ""
+    );
+
+    setRefreshMessage(
+      ""
+    );
+
+    setRefreshSucceeded(
+      false
+    );
+
+    try {
+      const refreshedOrders =
+        await onRefreshOrders({
+          replace: true,
+        });
+
+      setRefreshSucceeded(
+        true
+      );
+
+      if (
+        showSuccess
+      ) {
+        const orderCount =
+          Array.isArray(
+            refreshedOrders
+          )
+            ? refreshedOrders.length
+            : 0;
+
+        setRefreshMessage(
+          orderCount === 1
+            ? "Your secure order history is up to date."
+            : `Your secure order history is up to date. ${orderCount} account orders loaded.`
+        );
+      }
+    } catch (
+      error
+    ) {
+      setRefreshError(
+        error.message ||
+          "Secure order history could not be refreshed."
+      );
+    } finally {
+      setIsRefreshing(
+        false
+      );
+    }
+  }
+
+  useEffect(() => {
+    let isMounted =
+      true;
+
+    if (
+      typeof onRefreshOrders !==
+      "function"
+    ) {
+      return () => {
+        isMounted =
+          false;
+      };
+    }
+
+    async function refreshOnOpen() {
+      setIsRefreshing(
+        true
+      );
+
+      setRefreshError(
+        ""
+      );
+
+      setRefreshSucceeded(
+        false
+      );
+
+      try {
+        await onRefreshOrders({
+          replace: true,
+        });
+
+        if (
+          isMounted
+        ) {
+          setRefreshSucceeded(
+            true
+          );
+        }
+      } catch (
+        error
+      ) {
+        if (
+          isMounted
+        ) {
+          setRefreshError(
+            error.message ||
+              "Secure order history could not be loaded."
+          );
+        }
+      } finally {
+        if (
+          isMounted
+        ) {
+          setIsRefreshing(
+            false
+          );
+        }
+      }
+    }
+
+    refreshOnOpen();
+
+    return () => {
+      isMounted =
+        false;
+    };
+  }, [
+    onRefreshOrders,
+  ]);
 
   const statistics =
     useMemo(() => {
@@ -586,7 +775,7 @@ function CustomerDashboard({
         <section className="customer-dashboard-inner">
           <header className="customer-dashboard-hero">
             <div className="customer-dashboard-device-pill">
-              Saved On This Device
+              Secure Account
             </div>
 
             <p className="eyebrow">
@@ -598,9 +787,10 @@ function CustomerDashboard({
             </h1>
 
             <p>
-              Review order
-              requests saved in
-              this browser,
+              Review secure,
+              account-linked
+              order history,
+              current statuses,
               checkout details,
               product totals,
               research-use
@@ -651,47 +841,88 @@ function CustomerDashboard({
           <section className="customer-dashboard-security">
             <div>
               <strong>
-                This dashboard
-                currently shows
-                orders saved on
-                this device.
+                Secure account
+                session confirmed
+                for {
+                  customerEmail
+                }.
               </strong>
 
               <p>
-                Clearing browser
-                data or using a
-                different device
-                may hide this
-                local history.
-                Cross-device
-                customer order
-                access will
-                require secure
-                customer
-                authentication.
+                Orders submitted
+                while logged in
+                are linked to this
+                account and can be
+                reviewed across
+                approved devices.
+                Use Refresh Orders
+                to retrieve the
+                latest status from
+                Cloudflare.
               </p>
             </div>
 
-            <button
-              type="button"
-              className="secondary-btn"
-              onClick={() =>
-                onNavigate(
-                  "contact"
-                )
-              }
-            >
-              Contact Support
-            </button>
+            <div className="customer-dashboard-security-actions">
+              <button
+                type="button"
+                className="primary-btn"
+                disabled={
+                  isRefreshing
+                }
+                onClick={() =>
+                  handleRefreshOrders(
+                    true
+                  )
+                }
+              >
+                {isRefreshing
+                  ? "Refreshing..."
+                  : "Refresh Orders"}
+              </button>
+
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() =>
+                  onNavigate(
+                    "contact"
+                  )
+                }
+              >
+                Contact Support
+              </button>
+            </div>
           </section>
+
+          {displayedRefreshError && (
+            <div
+              className="customer-dashboard-load-error"
+              role="alert"
+            >
+              {
+                displayedRefreshError
+              }
+            </div>
+          )}
+
+          {refreshMessage && (
+            <div
+              className="customer-dashboard-load-success"
+              aria-live="polite"
+            >
+              {
+                refreshMessage
+              }
+            </div>
+          )}
 
           <section className="customer-dashboard-stats">
             <StatCard
-              label="Orders On Device"
+              label="Account Orders"
               value={
                 statistics.totalOrders
               }
-              detail="Saved in this browser"
+              detail="Secure Cloudflare history"
             />
 
             <StatCard
@@ -722,12 +953,12 @@ function CustomerDashboard({
           <div className="customer-dashboard-overview">
             <section className="customer-dashboard-panel">
               <p className="eyebrow">
-                LATEST CHECKOUT
+                ACCOUNT PROFILE
               </p>
 
               <h2>
-                Saved Customer
-                Information
+                Secure Customer
+                Account
               </h2>
 
               <div className="customer-dashboard-info-grid">
@@ -745,9 +976,23 @@ function CustomerDashboard({
                   }
                 />
 
+                <InfoBox
+                  label="Account Status"
+                  value={
+                    accountStatus
+                  }
+                />
+
+                <InfoBox
+                  label="Member Since"
+                  value={
+                    accountCreatedAt
+                  }
+                />
+
                 <div className="customer-dashboard-address-box">
                   <span>
-                    Shipping Address
+                    Latest Shipping Address
                   </span>
 
                   <strong>
@@ -904,11 +1149,16 @@ function CustomerDashboard({
               )}
 
               <div className="customer-dashboard-partner-note">
+                Secure customer
+                orders are stored
+                with the account.
                 Partner
                 application data
-                is also currently
-                saved only in
-                this browser.
+                is still saved in
+                the current
+                browser until the
+                Partner Program
+                backend is added.
               </div>
             </aside>
           </div>
@@ -921,8 +1171,8 @@ function CustomerDashboard({
                 </p>
 
                 <h2>
-                  Orders Saved On
-                  This Device
+                  Account Order
+                  History
                 </h2>
               </div>
 
@@ -942,18 +1192,19 @@ function CustomerDashboard({
             {!hasOrders ? (
               <div className="customer-dashboard-empty">
                 <h3>
-                  No Orders Saved
-                  Yet
+                  No Account
+                  Orders Yet
                 </h3>
 
                 <p>
-                  Submit an order
-                  request to see
-                  its products,
+                  Orders submitted
+                  while logged in
+                  will appear here
+                  with products,
                   status,
                   customer
                   details, and
-                  totals here.
+                  totals.
                 </p>
 
                 <button
@@ -1492,19 +1743,53 @@ const customerDashboardCss = `
     justify-content: space-between;
     align-items: center;
     gap: 22px;
-    margin-bottom: 30px;
+    margin-bottom: 18px;
     padding: 20px 22px;
-    border: 1px solid rgba(255,190,80,0.3);
+    border: 1px solid rgba(61,165,255,0.3);
     border-radius: 20px;
-    background: rgba(255,170,50,0.08);
-    color: #ffe0a8;
+    background: rgba(61,165,255,0.09);
+    color: #c8eaff;
   }
 
   .customer-dashboard-security p {
     max-width: 800px;
     margin-top: 5px;
-    color: #cdbd9e;
+    color: #a9cfe5;
     line-height: 1.6;
+  }
+
+  .customer-dashboard-security-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    flex: 0 0 auto;
+  }
+
+  .customer-dashboard-security-actions button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .customer-dashboard-load-error,
+  .customer-dashboard-load-success {
+    margin-bottom: 24px;
+    padding: 15px 17px;
+    border-radius: 15px;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.6;
+  }
+
+  .customer-dashboard-load-error {
+    border: 1px solid rgba(255,95,95,0.4);
+    background: rgba(255,70,70,0.1);
+    color: #ffd0d0;
+  }
+
+  .customer-dashboard-load-success {
+    border: 1px solid rgba(61,165,255,0.3);
+    background: rgba(61,165,255,0.1);
+    color: #bce7ff;
   }
 
   .customer-dashboard-stats {
@@ -1976,7 +2261,8 @@ const customerDashboardCss = `
       flex-direction: column;
     }
 
-    .customer-dashboard-security button,
+    .customer-dashboard-security-actions,
+    .customer-dashboard-security-actions button,
     .customer-dashboard-actions,
     .customer-dashboard-actions button {
       width: 100%;
