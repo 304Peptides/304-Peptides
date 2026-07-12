@@ -1,4 +1,8 @@
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useState,
+} from "react";
+
 import "./index.css";
 
 import Navbar from "./components/Navbar";
@@ -29,91 +33,298 @@ import CustomerManager from "./pages/CustomerManager";
 import SiteSettings from "./pages/SiteSettings";
 import LaunchChecklist from "./pages/LaunchChecklist";
 import ResearchAgreement from "./pages/ResearchAgreement";
+import QRManager from "./pages/QRManager";
+import VerificationRecord from "./pages/VerificationRecord";
 
-function getSavedValue(key, fallbackValue) {
-  const savedValue = localStorage.getItem(key);
+const pagePaths = {
+  home: "/",
+  products: "/products",
+  quality: "/quality",
+  partners: "/partners",
+  faq: "/faq",
+  contact: "/contact",
+  researchAgreement:
+    "/research-agreement",
+  login: "/login",
+  createAccount:
+    "/create-account",
+  dashboard: "/dashboard",
+  partnerApplication:
+    "/partner-application",
+  partnerHQ:
+    "/admin/partner-hq",
+  marketingCenter:
+    "/admin/marketing",
+  missionControl:
+    "/admin",
+  productManager:
+    "/admin/products",
+  coaManager:
+    "/admin/coa",
+  qrManager:
+    "/admin/qr",
+  customerManager:
+    "/admin/customers",
+  siteSettings:
+    "/admin/settings",
+  launchChecklist:
+    "/admin/launch-checklist",
+  cart: "/cart",
+  checkout: "/checkout",
+  orderConfirmation:
+    "/order-confirmation",
+  productDetails:
+    "/product-details",
+};
+
+function getSavedValue(
+  key,
+  fallbackValue
+) {
+  const savedValue =
+    localStorage.getItem(
+      key
+    );
 
   if (!savedValue) {
     return fallbackValue;
   }
 
   try {
-    return JSON.parse(savedValue);
+    return JSON.parse(
+      savedValue
+    );
   } catch {
     return fallbackValue;
   }
 }
 
-function getCartItemKey(item) {
+function getCartItemKey(
+  item
+) {
   return `${item.codeName}-${item.strength}`;
 }
 
-function App() {
-  const [ageGateAccepted, setAgeGateAccepted] =
-    useState(() => {
-      return (
-        localStorage.getItem(
-          "ageGateAccepted"
-        ) === "true"
-      );
-    });
+function getRouteFromLocation() {
+  const pathname =
+    window.location.pathname.replace(
+      /\/+$/,
+      ""
+    ) || "/";
 
-  const [currentPage, setCurrentPage] =
-    useState("home");
+  if (
+    pathname.startsWith(
+      "/verify/"
+    )
+  ) {
+    const encodedCode =
+      pathname.slice(
+        "/verify/".length
+      );
+
+    let code =
+      encodedCode;
+
+    try {
+      code =
+        decodeURIComponent(
+          encodedCode
+        );
+    } catch {
+      code =
+        encodedCode;
+    }
+
+    return {
+      page:
+        "verification",
+
+      verificationCode:
+        code,
+    };
+  }
+
+  const matchingEntry =
+    Object.entries(
+      pagePaths
+    ).find(
+      (
+        [, path]
+      ) =>
+        path ===
+        pathname
+    );
+
+  if (matchingEntry) {
+    return {
+      page:
+        matchingEntry[0],
+
+      verificationCode:
+        "",
+    };
+  }
+
+  return {
+    page: "home",
+    verificationCode:
+      "",
+  };
+}
+
+function getPagePath(
+  page,
+  verificationCode = ""
+) {
+  if (
+    page ===
+    "verification"
+  ) {
+    return verificationCode
+      ? `/verify/${encodeURIComponent(
+          verificationCode
+        )}`
+      : "/";
+  }
+
+  return (
+    pagePaths[page] ||
+    "/"
+  );
+}
+
+function App() {
+  const initialRoute =
+    getRouteFromLocation();
+
+  const [
+    ageGateAccepted,
+    setAgeGateAccepted,
+  ] = useState(
+    () =>
+      localStorage.getItem(
+        "ageGateAccepted"
+      ) === "true"
+  );
+
+  const [
+    currentPage,
+    setCurrentPage,
+  ] = useState(
+    initialRoute.page
+  );
+
+  const [
+    verificationCode,
+    setVerificationCode,
+  ] = useState(
+    initialRoute.verificationCode
+  );
 
   const [
     selectedProduct,
     setSelectedProduct,
   ] = useState(null);
 
-  const [isLoggedIn, setIsLoggedIn] =
-    useState(() => {
-      return (
-        localStorage.getItem(
-          "isLoggedIn"
-        ) === "true"
-      );
-    });
+  const [
+    isLoggedIn,
+    setIsLoggedIn,
+  ] = useState(
+    () =>
+      localStorage.getItem(
+        "isLoggedIn"
+      ) === "true"
+  );
 
-  const [cartItems, setCartItems] =
-    useState(() => {
-      return getSavedValue(
+  const [
+    cartItems,
+    setCartItems,
+  ] = useState(
+    () =>
+      getSavedValue(
         "cartItems",
         []
-      );
-    });
+      )
+  );
 
-  const [orders, setOrders] =
-    useState(() => {
-      return getSavedValue(
+  const [
+    orders,
+    setOrders,
+  ] = useState(
+    () =>
+      getSavedValue(
         "orders",
         []
-      );
-    });
+      )
+  );
 
-  const [latestOrder, setLatestOrder] =
-    useState(() => {
-      return getSavedValue(
+  const [
+    latestOrder,
+    setLatestOrder,
+  ] = useState(
+    () =>
+      getSavedValue(
         "latestOrder",
         null
-      );
-    });
+      )
+  );
 
   const [
     partnerApplication,
     setPartnerApplication,
-  ] = useState(() => {
-    return getSavedValue(
-      "partnerApplication",
-      null
-    );
-  });
-
-  const cartCount = cartItems.reduce(
-    (total, item) =>
-      total + item.quantity,
-    0
+  ] = useState(
+    () =>
+      getSavedValue(
+        "partnerApplication",
+        null
+      )
   );
+
+  const cartCount =
+    cartItems.reduce(
+      (
+        total,
+        item
+      ) =>
+        total +
+        Number(
+          item.quantity ||
+            0
+        ),
+      0
+    );
+
+  useEffect(() => {
+    function handlePopState() {
+      const route =
+        getRouteFromLocation();
+
+      setCurrentPage(
+        route.page
+      );
+
+      setVerificationCode(
+        route.verificationCode
+      );
+
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      });
+    }
+
+    window.addEventListener(
+      "popstate",
+      handlePopState
+    );
+
+    return () => {
+      window.removeEventListener(
+        "popstate",
+        handlePopState
+      );
+    };
+  }, []);
 
   useEffect(() => {
     window.scrollTo({
@@ -125,28 +336,36 @@ function App() {
   useEffect(() => {
     localStorage.setItem(
       "isLoggedIn",
-      isLoggedIn ? "true" : "false"
+      isLoggedIn
+        ? "true"
+        : "false"
     );
   }, [isLoggedIn]);
 
   useEffect(() => {
     localStorage.setItem(
       "cartItems",
-      JSON.stringify(cartItems)
+      JSON.stringify(
+        cartItems
+      )
     );
   }, [cartItems]);
 
   useEffect(() => {
     localStorage.setItem(
       "orders",
-      JSON.stringify(orders)
+      JSON.stringify(
+        orders
+      )
     );
   }, [orders]);
 
   useEffect(() => {
     localStorage.setItem(
       "latestOrder",
-      JSON.stringify(latestOrder)
+      JSON.stringify(
+        latestOrder
+      )
     );
   }, [latestOrder]);
 
@@ -157,7 +376,9 @@ function App() {
         partnerApplication
       )
     );
-  }, [partnerApplication]);
+  }, [
+    partnerApplication,
+  ]);
 
   function handleAcceptAgeGate() {
     localStorage.setItem(
@@ -165,11 +386,55 @@ function App() {
       "true"
     );
 
-    setAgeGateAccepted(true);
+    setAgeGateAccepted(
+      true
+    );
   }
 
-  function goToPage(page) {
+  function goToPage(
+    page,
+    options = {}
+  ) {
+    const suppliedCode =
+      typeof options ===
+      "string"
+        ? options
+        : options.code ||
+          "";
+
+    if (
+      page ===
+      "verification"
+    ) {
+      setVerificationCode(
+        suppliedCode
+      );
+    }
+
     setCurrentPage(page);
+
+    const path =
+      getPagePath(
+        page,
+        suppliedCode
+      );
+
+    const currentPath =
+      window.location.pathname;
+
+    if (
+      currentPath !== path
+    ) {
+      window.history.pushState(
+        {
+          page,
+          verificationCode:
+            suppliedCode,
+        },
+        "",
+        path
+      );
+    }
 
     window.scrollTo({
       top: 0,
@@ -186,7 +451,9 @@ function App() {
       "cartItems"
     );
 
-    localStorage.removeItem("orders");
+    localStorage.removeItem(
+      "orders"
+    );
 
     localStorage.removeItem(
       "latestOrder"
@@ -200,51 +467,79 @@ function App() {
     setCartItems([]);
     setOrders([]);
     setLatestOrder(null);
-    setPartnerApplication(null);
-    setSelectedProduct(null);
+
+    setPartnerApplication(
+      null
+    );
+
+    setSelectedProduct(
+      null
+    );
 
     goToPage("home");
   }
 
-  function handleProductSelect(product) {
-    setSelectedProduct(product);
-    goToPage("productDetails");
+  function handleProductSelect(
+    product
+  ) {
+    setSelectedProduct(
+      product
+    );
+
+    goToPage(
+      "productDetails"
+    );
   }
 
-  function handleAddToCart(product) {
+  function handleAddToCart(
+    product
+  ) {
     const productKey =
-      getCartItemKey(product);
+      getCartItemKey(
+        product
+      );
 
-    setCartItems((currentItems) => {
-      const existingItem =
-        currentItems.find(
-          (item) =>
-            getCartItemKey(item) ===
-            productKey
-        );
+    setCartItems(
+      (
+        currentItems
+      ) => {
+        const existingItem =
+          currentItems.find(
+            (item) =>
+              getCartItemKey(
+                item
+              ) ===
+              productKey
+          );
 
-      if (existingItem) {
-        return currentItems.map(
-          (item) =>
-            getCartItemKey(item) ===
-            productKey
-              ? {
-                  ...item,
-                  quantity:
-                    item.quantity + 1,
-                }
-              : item
-        );
+        if (existingItem) {
+          return currentItems.map(
+            (item) =>
+              getCartItemKey(
+                item
+              ) ===
+              productKey
+                ? {
+                    ...item,
+
+                    quantity:
+                      item.quantity +
+                      1,
+                  }
+                : item
+          );
+        }
+
+        return [
+          ...currentItems,
+
+          {
+            ...product,
+            quantity: 1,
+          },
+        ];
       }
-
-      return [
-        ...currentItems,
-        {
-          ...product,
-          quantity: 1,
-        },
-      ];
-    });
+    );
 
     goToPage("cart");
   }
@@ -252,49 +547,71 @@ function App() {
   function handleIncreaseQuantity(
     itemKey
   ) {
-    setCartItems((currentItems) =>
-      currentItems.map((item) =>
-        getCartItemKey(item) === itemKey
-          ? {
-              ...item,
-              quantity:
-                item.quantity + 1,
-            }
-          : item
-      )
+    setCartItems(
+      (
+        currentItems
+      ) =>
+        currentItems.map(
+          (item) =>
+            getCartItemKey(
+              item
+            ) === itemKey
+              ? {
+                  ...item,
+
+                  quantity:
+                    item.quantity +
+                    1,
+                }
+              : item
+        )
     );
   }
 
   function handleDecreaseQuantity(
     itemKey
   ) {
-    setCartItems((currentItems) =>
-      currentItems
-        .map((item) =>
-          getCartItemKey(item) === itemKey
-            ? {
-                ...item,
-                quantity:
-                  item.quantity - 1,
-              }
-            : item
-        )
-        .filter(
-          (item) =>
-            item.quantity > 0
-        )
+    setCartItems(
+      (
+        currentItems
+      ) =>
+        currentItems
+          .map(
+            (item) =>
+              getCartItemKey(
+                item
+              ) ===
+              itemKey
+                ? {
+                    ...item,
+
+                    quantity:
+                      item.quantity -
+                      1,
+                  }
+                : item
+          )
+          .filter(
+            (item) =>
+              item.quantity >
+              0
+          )
     );
   }
 
   function handleRemoveItem(
     itemKey
   ) {
-    setCartItems((currentItems) =>
-      currentItems.filter(
-        (item) =>
-          getCartItemKey(item) !==
-          itemKey
-      )
+    setCartItems(
+      (
+        currentItems
+      ) =>
+        currentItems.filter(
+          (item) =>
+            getCartItemKey(
+              item
+            ) !== itemKey
+        )
     );
   }
 
@@ -305,7 +622,10 @@ function App() {
   function handlePlaceOrder(
     orderInformation = {}
   ) {
-    if (cartItems.length === 0) {
+    if (
+      cartItems.length ===
+      0
+    ) {
       goToPage("cart");
       return;
     }
@@ -319,7 +639,6 @@ function App() {
 
     const order = {
       id: orderId,
-
       orderId,
 
       date:
@@ -339,20 +658,24 @@ function App() {
           "",
 
         email:
-          orderInformation.email || "",
+          orderInformation.email ||
+          "",
 
         address:
           orderInformation.address ||
           "",
 
         city:
-          orderInformation.city || "",
+          orderInformation.city ||
+          "",
 
         state:
-          orderInformation.state || "",
+          orderInformation.state ||
+          "",
 
         zip:
-          orderInformation.zip || "",
+          orderInformation.zip ||
+          "",
       },
 
       preferredPaymentMethod:
@@ -363,42 +686,64 @@ function App() {
         orderInformation.preferredPaymentLabel ||
         "",
 
-      items: cartItems.map(
-        (item) => ({
-          ...item,
-        })
-      ),
+      items:
+        cartItems.map(
+          (item) => ({
+            ...item,
+          })
+        ),
 
       totalQuantity:
         cartItems.reduce(
-          (total, item) =>
+          (
+            total,
+            item
+          ) =>
             total +
             Number(
-              item.quantity || 0
+              item.quantity ||
+                0
             ),
           0
         ),
 
-      subtotal: cartItems.reduce(
-        (total, item) =>
-          total +
-          Number(item.price || 0) *
+      subtotal:
+        cartItems.reduce(
+          (
+            total,
+            item
+          ) =>
+            total +
             Number(
-              item.quantity || 0
-            ),
-        0
-      ),
+              item.price ||
+                0
+            ) *
+              Number(
+                item.quantity ||
+                  0
+              ),
+          0
+        ),
     };
 
-    setOrders((currentOrders) => [
-      order,
-      ...currentOrders,
-    ]);
+    setOrders(
+      (
+        currentOrders
+      ) => [
+        order,
+        ...currentOrders,
+      ]
+    );
 
-    setLatestOrder(order);
+    setLatestOrder(
+      order
+    );
+
     setCartItems([]);
 
-    goToPage("orderConfirmation");
+    goToPage(
+      "orderConfirmation"
+    );
   }
 
   function handlePartnerApplicationSubmit(
@@ -414,33 +759,52 @@ function App() {
         new Date().toLocaleDateString(),
     };
 
-    setPartnerApplication(application);
-    goToPage("dashboard");
+    setPartnerApplication(
+      application
+    );
+
+    goToPage(
+      "dashboard"
+    );
   }
 
   function handleLogin() {
     setIsLoggedIn(true);
-    goToPage("dashboard");
+
+    goToPage(
+      "dashboard"
+    );
   }
 
   function handleLogout() {
     setIsLoggedIn(false);
-    setSelectedProduct(null);
+
+    setSelectedProduct(
+      null
+    );
+
     setCartItems([]);
 
     goToPage("home");
   }
 
-  let pageToShow;
+  let pageToShow =
+    null;
 
-  if (currentPage === "home") {
+  if (
+    currentPage === "home"
+  ) {
     pageToShow = (
       <Home
-        onNavigate={goToPage}
+        onNavigate={
+          goToPage
+        }
         onProductSelect={
           handleProductSelect
         }
-        isLoggedIn={isLoggedIn}
+        isLoggedIn={
+          isLoggedIn
+        }
         onAddToCart={
           handleAddToCart
         }
@@ -448,13 +812,18 @@ function App() {
     );
   }
 
-  if (currentPage === "products") {
+  if (
+    currentPage ===
+    "products"
+  ) {
     pageToShow = (
       <Products
         onProductSelect={
           handleProductSelect
         }
-        isLoggedIn={isLoggedIn}
+        isLoggedIn={
+          isLoggedIn
+        }
         onAddToCart={
           handleAddToCart
         }
@@ -462,34 +831,53 @@ function App() {
     );
   }
 
-  if (currentPage === "quality") {
+  if (
+    currentPage ===
+    "quality"
+  ) {
     pageToShow = (
       <Quality
-        onNavigate={goToPage}
+        onNavigate={
+          goToPage
+        }
       />
     );
   }
 
-  if (currentPage === "partners") {
+  if (
+    currentPage ===
+    "partners"
+  ) {
     pageToShow = (
       <ResearchPartners
-        onNavigate={goToPage}
+        onNavigate={
+          goToPage
+        }
       />
     );
   }
 
-  if (currentPage === "faq") {
+  if (
+    currentPage === "faq"
+  ) {
     pageToShow = (
       <FAQ
-        onNavigate={goToPage}
+        onNavigate={
+          goToPage
+        }
       />
     );
   }
 
-  if (currentPage === "contact") {
+  if (
+    currentPage ===
+    "contact"
+  ) {
     pageToShow = (
       <Contact
-        onNavigate={goToPage}
+        onNavigate={
+          goToPage
+        }
       />
     );
   }
@@ -500,36 +888,57 @@ function App() {
   ) {
     pageToShow = (
       <ResearchAgreement
-        onNavigate={goToPage}
-      />
-    );
-  }
-
-  if (currentPage === "login") {
-    pageToShow = (
-      <Login
-        onNavigate={goToPage}
-        onLogin={handleLogin}
+        onNavigate={
+          goToPage
+        }
       />
     );
   }
 
   if (
-    currentPage === "createAccount"
+    currentPage ===
+    "login"
   ) {
     pageToShow = (
-      <CreateAccount
-        onNavigate={goToPage}
-        onLogin={handleLogin}
+      <Login
+        onNavigate={
+          goToPage
+        }
+        onLogin={
+          handleLogin
+        }
       />
     );
   }
 
-  if (currentPage === "dashboard") {
+  if (
+    currentPage ===
+    "createAccount"
+  ) {
+    pageToShow = (
+      <CreateAccount
+        onNavigate={
+          goToPage
+        }
+        onLogin={
+          handleLogin
+        }
+      />
+    );
+  }
+
+  if (
+    currentPage ===
+    "dashboard"
+  ) {
     pageToShow = (
       <CustomerDashboard
-        onNavigate={goToPage}
-        orders={orders}
+        onNavigate={
+          goToPage
+        }
+        orders={
+          orders
+        }
         partnerApplication={
           partnerApplication
         }
@@ -543,7 +952,9 @@ function App() {
   ) {
     pageToShow = (
       <PartnerApplication
-        onNavigate={goToPage}
+        onNavigate={
+          goToPage
+        }
         onSubmitApplication={
           handlePartnerApplicationSubmit
         }
@@ -551,10 +962,15 @@ function App() {
     );
   }
 
-  if (currentPage === "partnerHQ") {
+  if (
+    currentPage ===
+    "partnerHQ"
+  ) {
     pageToShow = (
       <PartnerHQ
-        onNavigate={goToPage}
+        onNavigate={
+          goToPage
+        }
         partnerApplication={
           partnerApplication
         }
@@ -568,7 +984,9 @@ function App() {
   ) {
     pageToShow = (
       <MarketingCenter
-        onNavigate={goToPage}
+        onNavigate={
+          goToPage
+        }
         partnerApplication={
           partnerApplication
         }
@@ -582,11 +1000,15 @@ function App() {
   ) {
     pageToShow = (
       <MissionControl
-        orders={orders}
+        orders={
+          orders
+        }
         partnerApplication={
           partnerApplication
         }
-        onNavigate={goToPage}
+        onNavigate={
+          goToPage
+        }
         onResetPrototypeData={
           handleResetPrototypeData
         }
@@ -600,17 +1022,61 @@ function App() {
   ) {
     pageToShow = (
       <ProductManager
-        onNavigate={goToPage}
+        onNavigate={
+          goToPage
+        }
       />
     );
   }
 
   if (
-    currentPage === "coaManager"
+    currentPage ===
+    "coaManager"
   ) {
     pageToShow = (
       <COAManager
-        onNavigate={goToPage}
+        onNavigate={
+          goToPage
+        }
+      />
+    );
+  }
+
+  if (
+    currentPage ===
+    "qrManager"
+  ) {
+    pageToShow = (
+      <QRManager
+        onNavigate={
+          goToPage
+        }
+        onOpenVerification={(
+          code
+        ) =>
+          goToPage(
+            "verification",
+            {
+              code,
+            }
+          )
+        }
+      />
+    );
+  }
+
+  if (
+    currentPage ===
+    "verification"
+  ) {
+    pageToShow = (
+      <VerificationRecord
+        code={
+          verificationCode
+        }
+        onNavigate={
+          goToPage
+        }
       />
     );
   }
@@ -621,21 +1087,28 @@ function App() {
   ) {
     pageToShow = (
       <CustomerManager
-        orders={orders}
+        orders={
+          orders
+        }
         partnerApplication={
           partnerApplication
         }
-        onNavigate={goToPage}
+        onNavigate={
+          goToPage
+        }
       />
     );
   }
 
   if (
-    currentPage === "siteSettings"
+    currentPage ===
+    "siteSettings"
   ) {
     pageToShow = (
       <SiteSettings
-        onNavigate={goToPage}
+        onNavigate={
+          goToPage
+        }
       />
     );
   }
@@ -646,16 +1119,25 @@ function App() {
   ) {
     pageToShow = (
       <LaunchChecklist
-        onNavigate={goToPage}
+        onNavigate={
+          goToPage
+        }
       />
     );
   }
 
-  if (currentPage === "cart") {
+  if (
+    currentPage ===
+    "cart"
+  ) {
     pageToShow = (
       <Cart
-        cartItems={cartItems}
-        onNavigate={goToPage}
+        cartItems={
+          cartItems
+        }
+        onNavigate={
+          goToPage
+        }
         onRemoveItem={
           handleRemoveItem
         }
@@ -672,11 +1154,18 @@ function App() {
     );
   }
 
-  if (currentPage === "checkout") {
+  if (
+    currentPage ===
+    "checkout"
+  ) {
     pageToShow = (
       <Checkout
-        cartItems={cartItems}
-        onNavigate={goToPage}
+        cartItems={
+          cartItems
+        }
+        onNavigate={
+          goToPage
+        }
         onPlaceOrder={
           handlePlaceOrder
         }
@@ -690,8 +1179,12 @@ function App() {
   ) {
     pageToShow = (
       <OrderConfirmation
-        onNavigate={goToPage}
-        latestOrder={latestOrder}
+        onNavigate={
+          goToPage
+        }
+        latestOrder={
+          latestOrder
+        }
       />
     );
   }
@@ -702,12 +1195,39 @@ function App() {
   ) {
     pageToShow = (
       <ProductDetails
-        product={selectedProduct}
-        onBack={() =>
-          goToPage("products")
+        product={
+          selectedProduct
         }
-        onNavigate={goToPage}
-        isLoggedIn={isLoggedIn}
+        onBack={() =>
+          goToPage(
+            "products"
+          )
+        }
+        onNavigate={
+          goToPage
+        }
+        isLoggedIn={
+          isLoggedIn
+        }
+        onAddToCart={
+          handleAddToCart
+        }
+      />
+    );
+  }
+
+  if (!pageToShow) {
+    pageToShow = (
+      <Home
+        onNavigate={
+          goToPage
+        }
+        onProductSelect={
+          handleProductSelect
+        }
+        isLoggedIn={
+          isLoggedIn
+        }
         onAddToCart={
           handleAddToCart
         }
@@ -726,11 +1246,21 @@ function App() {
       )}
 
       <Navbar
-        currentPage={currentPage}
-        onNavigate={goToPage}
-        isLoggedIn={isLoggedIn}
-        onLogout={handleLogout}
-        cartCount={cartCount}
+        currentPage={
+          currentPage
+        }
+        onNavigate={
+          goToPage
+        }
+        isLoggedIn={
+          isLoggedIn
+        }
+        onLogout={
+          handleLogout
+        }
+        cartCount={
+          cartCount
+        }
       />
 
       <SiteAlert />
@@ -738,7 +1268,9 @@ function App() {
       {pageToShow}
 
       <Footer
-        onNavigate={goToPage}
+        onNavigate={
+          goToPage
+        }
       />
     </>
   );
