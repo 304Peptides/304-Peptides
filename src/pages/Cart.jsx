@@ -236,7 +236,10 @@ function Cart({
             <div style={warningNoticeStyle}>
               {invalidPriceItems.length} cart item
               {invalidPriceItems.length === 1 ? "" : "s"} no
-              longer {invalidPriceItems.length === 1 ? "has" : "have"}{" "}
+              longer{" "}
+              {invalidPriceItems.length === 1
+                ? "has"
+                : "have"}{" "}
               valid pricing. Remove the affected item
               {invalidPriceItems.length === 1 ? "" : "s"} before
               checkout.
@@ -377,7 +380,7 @@ function Cart({
                           <button
                             className="secondary-btn"
                             onClick={() =>
-                              onDecreaseQuantity(item.name)
+                              onDecreaseQuantity(itemKey)
                             }
                             aria-label={`Decrease ${item.name} quantity`}
                           >
@@ -391,7 +394,7 @@ function Cart({
                           <button
                             className="secondary-btn"
                             onClick={() =>
-                              onIncreaseQuantity(item.name)
+                              onIncreaseQuantity(itemKey)
                             }
                             aria-label={`Increase ${item.name} quantity`}
                           >
@@ -414,7 +417,7 @@ function Cart({
                         className="secondary-btn"
                         style={{ width: "100%" }}
                         onClick={() =>
-                          onRemoveItem(item.name)
+                          onRemoveItem(itemKey)
                         }
                       >
                         Remove

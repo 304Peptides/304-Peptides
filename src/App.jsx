@@ -44,6 +44,10 @@ function getSavedValue(key, fallbackValue) {
   }
 }
 
+function getCartItemKey(item) {
+  return `${item.codeName}-${item.strength}`;
+}
+
 function App() {
   const [ageGateAccepted, setAgeGateAccepted] =
     useState(() => {
@@ -208,17 +212,22 @@ function App() {
   }
 
   function handleAddToCart(product) {
+    const productKey =
+      getCartItemKey(product);
+
     setCartItems((currentItems) => {
       const existingItem =
         currentItems.find(
           (item) =>
-            item.name === product.name
+            getCartItemKey(item) ===
+            productKey
         );
 
       if (existingItem) {
         return currentItems.map(
           (item) =>
-            item.name === product.name
+            getCartItemKey(item) ===
+            productKey
               ? {
                   ...item,
                   quantity:
@@ -241,11 +250,11 @@ function App() {
   }
 
   function handleIncreaseQuantity(
-    productName
+    itemKey
   ) {
     setCartItems((currentItems) =>
       currentItems.map((item) =>
-        item.name === productName
+        getCartItemKey(item) === itemKey
           ? {
               ...item,
               quantity:
@@ -257,12 +266,12 @@ function App() {
   }
 
   function handleDecreaseQuantity(
-    productName
+    itemKey
   ) {
     setCartItems((currentItems) =>
       currentItems
         .map((item) =>
-          item.name === productName
+          getCartItemKey(item) === itemKey
             ? {
                 ...item,
                 quantity:
@@ -278,12 +287,13 @@ function App() {
   }
 
   function handleRemoveItem(
-    productName
+    itemKey
   ) {
     setCartItems((currentItems) =>
       currentItems.filter(
         (item) =>
-          item.name !== productName
+          getCartItemKey(item) !==
+          itemKey
       )
     );
   }
@@ -396,6 +406,7 @@ function App() {
   ) {
     const application = {
       code,
+
       status:
         "Application Submitted",
 
