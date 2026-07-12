@@ -20,16 +20,33 @@ export default {
 
     if (
       request.method === "POST" &&
-      ["/api/auth/register", "/api/auth/login"].includes(url.pathname)
+      ["/api/auth/register", "/api/auth/login"].includes(
+        url.pathname
+      )
     ) {
-      const response = await coreWorker.fetch(request, env, context);
-      return upgradeAuthenticationResponse(response, env);
+      const response = await coreWorker.fetch(
+        request,
+        env,
+        context
+      );
+
+      return upgradeAuthenticationResponse(
+        response,
+        env
+      );
     }
 
     if (url.pathname === "/api/auth/session") {
-      const sessionState = await inspectCustomerSession(request, env);
+      const sessionState =
+        await inspectCustomerSession(
+          request,
+          env
+        );
 
-      if (sessionState.hasToken && !sessionState.session) {
+      if (
+        sessionState.hasToken &&
+        !sessionState.session
+      ) {
         return jsonResponse(
           {
             success: true,
@@ -38,33 +55,50 @@ export default {
           },
           200,
           {
-            "Set-Cookie": buildClearedSessionCookie(),
+            "Set-Cookie":
+              buildClearedSessionCookie(),
           }
         );
       }
     }
 
     if (url.pathname === "/api/account/orders") {
-      const sessionState = await inspectCustomerSession(request, env);
+      const sessionState =
+        await inspectCustomerSession(
+          request,
+          env
+        );
 
       if (!sessionState.session) {
         return jsonResponse(
           {
             success: false,
-            error: "Customer authentication is required.",
+            error:
+              "Customer authentication is required.",
           },
           401,
           {
-            "Set-Cookie": buildClearedSessionCookie(),
+            "Set-Cookie":
+              buildClearedSessionCookie(),
           }
         );
       }
     }
 
-    if (url.pathname === "/api/order" && request.method === "POST") {
-      const sessionState = await inspectCustomerSession(request, env);
+    if (
+      url.pathname === "/api/order" &&
+      request.method === "POST"
+    ) {
+      const sessionState =
+        await inspectCustomerSession(
+          request,
+          env
+        );
 
-      if (sessionState.hasToken && !sessionState.session) {
+      if (
+        sessionState.hasToken &&
+        !sessionState.session
+      ) {
         return jsonResponse(
           {
             success: false,
@@ -73,17 +107,25 @@ export default {
           },
           401,
           {
-            "Set-Cookie": buildClearedSessionCookie(),
+            "Set-Cookie":
+              buildClearedSessionCookie(),
           }
         );
       }
     }
 
-    return coreWorker.fetch(request, env, context);
+    return coreWorker.fetch(
+      request,
+      env,
+      context
+    );
   },
 };
 
-async function upgradeAuthenticationResponse(response, env) {
+async function upgradeAuthenticationResponse(
+  response,
+  env
+) {
   if (!response.ok) {
     return response;
   }
@@ -108,29 +150,59 @@ async function upgradeAuthenticationResponse(response, env) {
   try {
     validateEnvironment(env);
 
-    const accountKey = await getAccountKey(result.account.email);
-    const storedAccount = await env.DOCUMENTS_KV.get(accountKey, "json");
-    const account = storedAccount || result.account;
-    const sessionVersion = getAccountSessionVersion(account);
-
-    if (storedAccount && storedAccount.sessionVersion !== sessionVersion) {
-      await putAccountRecord(env, accountKey, {
-        ...storedAccount,
-        sessionVersion,
-      });
-    }
-
-    const token = await createCustomerSessionToken(
-      {
-        ...account,
-        sessionVersion,
-      },
-      env
+    const accountKey = await getAccountKey(
+      result.account.email
     );
 
-    const headers = new Headers(response.headers);
-    headers.set("Set-Cookie", buildSessionCookie(token));
-    headers.set("Cache-Control", "no-store");
+    const storedAccount =
+      await env.DOCUMENTS_KV.get(
+        accountKey,
+        "json"
+      );
+
+    const account =
+      storedAccount || result.account;
+
+    const sessionVersion =
+      getAccountSessionVersion(account);
+
+    if (
+      storedAccount &&
+      storedAccount.sessionVersion !==
+        sessionVersion
+    ) {
+      await putAccountRecord(
+        env,
+        accountKey,
+        {
+          ...storedAccount,
+          sessionVersion,
+        }
+      );
+    }
+
+    const token =
+      await createCustomerSessionToken(
+        {
+          ...account,
+          sessionVersion,
+        },
+        env
+      );
+
+    const headers = new Headers(
+      response.headers
+    );
+
+    headers.set(
+      "Set-Cookie",
+      buildSessionCookie(token)
+    );
+
+    headers.set(
+      "Cache-Control",
+      "no-store"
+    );
 
     return new Response(response.body, {
       status: response.status,
@@ -138,7 +210,10 @@ async function upgradeAuthenticationResponse(response, env) {
       headers,
     });
   } catch (error) {
-    console.error("Secure session upgrade failed:", error);
+    console.error(
+      "Secure session upgrade failed:",
+      error
+    );
 
     return jsonResponse(
       {
@@ -149,51 +224,90 @@ async function upgradeAuthenticationResponse(response, env) {
       },
       503,
       {
-        "Set-Cookie": buildClearedSessionCookie(),
+        "Set-Cookie":
+          buildClearedSessionCookie(),
       }
     );
   }
 }
 
-async function handleChangePasswordRequest(request, env) {
+async function handleChangePasswordRequest(
+  request,
+  env
+) {
   try {
     validateEnvironment(env);
 
     if (request.method !== "POST") {
-      throw new ApiRequestError("Method not allowed.", 405);
+      throw new ApiRequestError(
+        "Method not allowed.",
+        405
+      );
     }
 
     requireSameOrigin(request);
     validateJsonContentType(request);
-    await enforceAuthenticationRateLimit(request, env, "change-password");
 
-    const sessionState = await inspectCustomerSession(request, env);
+    await enforceAuthenticationRateLimit(
+      request,
+      env,
+      "change-password"
+    );
+
+    const sessionState =
+      await inspectCustomerSession(
+        request,
+        env
+      );
 
     if (!sessionState.session) {
-      throw new ApiRequestError("Customer authentication is required.", 401);
+      throw new ApiRequestError(
+        "Customer authentication is required.",
+        401
+      );
     }
 
-    const body = await readJsonRequest(request, MAX_AUTH_REQUEST_LENGTH);
+    const body = await readJsonRequest(
+      request,
+      MAX_AUTH_REQUEST_LENGTH
+    );
 
     const currentPassword = String(
-      body.currentPassword == null ? "" : body.currentPassword
+      body.currentPassword == null
+        ? ""
+        : body.currentPassword
     );
 
-    const newPassword = validateAccountPassword(body.newPassword);
+    const newPassword =
+      validateAccountPassword(
+        body.newPassword
+      );
 
-    if (!currentPassword || currentPassword.length > MAX_PASSWORD_LENGTH) {
-      throw new ApiRequestError("The current password is incorrect.", 401);
+    if (
+      !currentPassword ||
+      currentPassword.length >
+        MAX_PASSWORD_LENGTH
+    ) {
+      throw new ApiRequestError(
+        "The current password is incorrect.",
+        401
+      );
     }
 
-    const account = sessionState.session.account;
+    const account =
+      sessionState.session.account;
 
-    const passwordMatches = await verifyPassword(
-      currentPassword,
-      account
-    );
+    const passwordMatches =
+      await verifyPassword(
+        currentPassword,
+        account
+      );
 
     if (!passwordMatches) {
-      throw new ApiRequestError("The current password is incorrect.", 401);
+      throw new ApiRequestError(
+        "The current password is incorrect.",
+        401
+      );
     }
 
     if (currentPassword === newPassword) {
@@ -204,21 +318,38 @@ async function handleChangePasswordRequest(request, env) {
     }
 
     const salt = randomBytes(16);
-    const passwordHash = await derivePasswordHash(newPassword, salt);
-    const now = new Date().toISOString();
+
+    const passwordHash =
+      await derivePasswordHash(
+        newPassword,
+        salt
+      );
+
+    const now =
+      new Date().toISOString();
 
     const updatedAccount = {
       ...account,
 
-      passwordHash: bytesToBase64Url(passwordHash),
-      passwordSalt: bytesToBase64Url(salt),
-      passwordIterations: PASSWORD_HASH_ITERATIONS,
-      passwordChangedAt: now,
+      passwordHash:
+        bytesToBase64Url(passwordHash),
+
+      passwordSalt:
+        bytesToBase64Url(salt),
+
+      passwordIterations:
+        PASSWORD_HASH_ITERATIONS,
+
+      passwordChangedAt:
+        now,
 
       sessionVersion:
-        getAccountSessionVersion(account) + 1,
+        getAccountSessionVersion(
+          account
+        ) + 1,
 
-      updatedAt: now,
+      updatedAt:
+        now,
     };
 
     await putAccountRecord(
@@ -237,21 +368,29 @@ async function handleChangePasswordRequest(request, env) {
       },
       200,
       {
-        "Set-Cookie": buildClearedSessionCookie(),
+        "Set-Cookie":
+          buildClearedSessionCookie(),
       }
     );
   } catch (error) {
-    console.error("Change password request error:", error);
+    console.error(
+      "Change password request error:",
+      error
+    );
 
     return handleApiError(error);
   }
 }
 
-async function inspectCustomerSession(request, env) {
+async function inspectCustomerSession(
+  request,
+  env
+) {
   try {
     validateEnvironment(env);
 
-    const token = getSessionToken(request);
+    const token =
+      getSessionToken(request);
 
     if (!token) {
       return {
@@ -260,7 +399,11 @@ async function inspectCustomerSession(request, env) {
       };
     }
 
-    const payload = await verifyCustomerSessionToken(token, env);
+    const payload =
+      await verifyCustomerSessionToken(
+        token,
+        env
+      );
 
     if (!payload) {
       return {
@@ -269,20 +412,30 @@ async function inspectCustomerSession(request, env) {
       };
     }
 
-    const accountKey = await getAccountKey(payload.email);
+    const accountKey =
+      await getAccountKey(
+        payload.email
+      );
 
-    const account = await env.DOCUMENTS_KV.get(
-      accountKey,
-      "json"
-    );
+    const account =
+      await env.DOCUMENTS_KV.get(
+        accountKey,
+        "json"
+      );
 
     if (
       !account ||
       account.status !== "active" ||
       account.id !== payload.sub ||
-      normalizeAccountEmail(account.email) !== payload.email ||
-      getAccountSessionVersion(account) !==
-        getPayloadSessionVersion(payload)
+      normalizeAccountEmail(
+        account.email
+      ) !== payload.email ||
+      getAccountSessionVersion(
+        account
+      ) !==
+        getPayloadSessionVersion(
+          payload
+        )
     ) {
       return {
         hasToken: true,
@@ -300,17 +453,28 @@ async function inspectCustomerSession(request, env) {
       },
     };
   } catch (error) {
-    console.error("Customer session inspection failed:", error);
+    console.error(
+      "Customer session inspection failed:",
+      error
+    );
 
     return {
-      hasToken: Boolean(getSessionToken(request)),
-      session: null,
+      hasToken:
+        Boolean(
+          getSessionToken(request)
+        ),
+
+      session:
+        null,
     };
   }
 }
 
 function validateEnvironment(env) {
-  if (!env.DOCUMENTS_KV || !env.DOCUMENT_ADMIN_SECRET) {
+  if (
+    !env.DOCUMENTS_KV ||
+    !env.DOCUMENT_ADMIN_SECRET
+  ) {
     throw new ApiRequestError(
       "Customer authentication has not been configured.",
       500
@@ -325,17 +489,32 @@ function validateEnvironment(env) {
   }
 }
 
-async function putAccountRecord(env, accountKey, account) {
+async function putAccountRecord(
+  env,
+  accountKey,
+  account
+) {
   await env.DOCUMENTS_KV.put(
     accountKey,
+
     JSON.stringify(account),
+
     {
       metadata: {
-        accountId: account.id,
-        email: account.email,
-        status: account.status,
-        createdAt: account.createdAt || "",
-        updatedAt: account.updatedAt || "",
+        accountId:
+          account.id,
+
+        email:
+          account.email,
+
+        status:
+          account.status,
+
+        createdAt:
+          account.createdAt || "",
+
+        updatedAt:
+          account.updatedAt || "",
       },
     }
   );
@@ -346,14 +525,19 @@ async function enforceAuthenticationRateLimit(
   env,
   action
 ) {
-  const clientIdentifier = getClientIdentifier(request);
+  const clientIdentifier =
+    getClientIdentifier(request);
 
   let result;
 
   try {
-    result = await env.ORDER_RATE_LIMITER.limit({
-      key: `auth:${action}:${clientIdentifier}`,
-    });
+    result =
+      await env.ORDER_RATE_LIMITER.limit(
+        {
+          key:
+            `auth:${action}:${clientIdentifier}`,
+        }
+      );
   } catch (error) {
     console.error(
       "Authentication rate limiter failed:",
@@ -374,18 +558,25 @@ async function enforceAuthenticationRateLimit(
   }
 }
 
-function getClientIdentifier(request) {
-  const cloudflareIp = request.headers.get(
-    "CF-Connecting-IP"
-  );
+function getClientIdentifier(
+  request
+) {
+  const cloudflareIp =
+    request.headers.get(
+      "CF-Connecting-IP"
+    );
 
   if (cloudflareIp) {
-    return cleanText(cloudflareIp, 100);
+    return cleanText(
+      cloudflareIp,
+      100
+    );
   }
 
-  const forwardedFor = request.headers.get(
-    "X-Forwarded-For"
-  );
+  const forwardedFor =
+    request.headers.get(
+      "X-Forwarded-For"
+    );
 
   if (forwardedFor) {
     return cleanText(
@@ -397,16 +588,26 @@ function getClientIdentifier(request) {
   return "unknown-client";
 }
 
-function requireSameOrigin(request) {
-  const requestUrl = new URL(request.url);
+function requireSameOrigin(
+  request
+) {
+  const requestUrl =
+    new URL(request.url);
 
-  const origin = request.headers.get("Origin");
+  const origin =
+    request.headers.get(
+      "Origin"
+    );
 
-  const fetchSite = request.headers.get(
-    "Sec-Fetch-Site"
-  );
+  const fetchSite =
+    request.headers.get(
+      "Sec-Fetch-Site"
+    );
 
-  if (origin && origin !== requestUrl.origin) {
+  if (
+    origin &&
+    origin !== requestUrl.origin
+  ) {
     throw new ApiRequestError(
       "Cross-site requests are not allowed.",
       403
@@ -415,9 +616,11 @@ function requireSameOrigin(request) {
 
   if (
     fetchSite &&
-    !["same-origin", "same-site", "none"].includes(
-      fetchSite
-    )
+    ![
+      "same-origin",
+      "same-site",
+      "none",
+    ].includes(fetchSite)
   ) {
     throw new ApiRequestError(
       "Cross-site requests are not allowed.",
@@ -426,14 +629,20 @@ function requireSameOrigin(request) {
   }
 }
 
-function validateJsonContentType(request) {
+function validateJsonContentType(
+  request
+) {
   const contentType =
-    request.headers.get("Content-Type") || "";
+    request.headers.get(
+      "Content-Type"
+    ) || "";
 
   if (
     !contentType
       .toLowerCase()
-      .includes("application/json")
+      .includes(
+        "application/json"
+      )
   ) {
     throw new ApiRequestError(
       "Content-Type must be application/json.",
@@ -446,13 +655,19 @@ async function readJsonRequest(
   request,
   maximumLength
 ) {
-  const declaredLength = Number(
-    request.headers.get("Content-Length") || 0
-  );
+  const declaredLength =
+    Number(
+      request.headers.get(
+        "Content-Length"
+      ) || 0
+    );
 
   if (
-    Number.isFinite(declaredLength) &&
-    declaredLength > maximumLength
+    Number.isFinite(
+      declaredLength
+    ) &&
+    declaredLength >
+      maximumLength
   ) {
     throw new ApiRequestError(
       "The request is too large.",
@@ -460,9 +675,13 @@ async function readJsonRequest(
     );
   }
 
-  const text = await request.text();
+  const text =
+    await request.text();
 
-  if (text.length > maximumLength) {
+  if (
+    text.length >
+    maximumLength
+  ) {
     throw new ApiRequestError(
       "The request is too large.",
       413
@@ -470,14 +689,18 @@ async function readJsonRequest(
   }
 
   try {
-    const body = JSON.parse(text);
+    const body =
+      JSON.parse(text);
 
     if (
       !body ||
-      typeof body !== "object" ||
+      typeof body !==
+        "object" ||
       Array.isArray(body)
     ) {
-      throw new Error("Invalid JSON object.");
+      throw new Error(
+        "Invalid JSON object."
+      );
     }
 
     return body;
@@ -489,19 +712,30 @@ async function readJsonRequest(
   }
 }
 
-function validateAccountPassword(value) {
-  const password = String(
-    value == null ? "" : value
-  );
+function validateAccountPassword(
+  value
+) {
+  const password =
+    String(
+      value == null
+        ? ""
+        : value
+    );
 
-  if (password.length < MIN_PASSWORD_LENGTH) {
+  if (
+    password.length <
+    MIN_PASSWORD_LENGTH
+  ) {
     throw new ApiRequestError(
       `Password must contain at least ${MIN_PASSWORD_LENGTH} characters.`,
       400
     );
   }
 
-  if (password.length > MAX_PASSWORD_LENGTH) {
+  if (
+    password.length >
+    MAX_PASSWORD_LENGTH
+  ) {
     throw new ApiRequestError(
       `Password cannot exceed ${MAX_PASSWORD_LENGTH} characters.`,
       400
@@ -511,15 +745,20 @@ function validateAccountPassword(value) {
   return password;
 }
 
-function normalizeAccountEmail(value) {
-  const email = cleanText(
-    value,
-    MAX_ACCOUNT_EMAIL_LENGTH
-  ).toLowerCase();
+function normalizeAccountEmail(
+  value
+) {
+  const email =
+    cleanText(
+      value,
+      MAX_ACCOUNT_EMAIL_LENGTH
+    ).toLowerCase();
 
   if (
     !email ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+      email
+    )
   ) {
     throw new ApiRequestError(
       "Enter a valid email address.",
@@ -530,10 +769,15 @@ function normalizeAccountEmail(value) {
   return email;
 }
 
-async function getAccountKey(email) {
-  const emailHash = await sha256Hex(
-    normalizeAccountEmail(email)
-  );
+async function getAccountKey(
+  email
+) {
+  const emailHash =
+    await sha256Hex(
+      normalizeAccountEmail(
+        email
+      )
+    );
 
   return `${ACCOUNT_KEY_PREFIX}${emailHash}`;
 }
@@ -541,30 +785,48 @@ async function getAccountKey(email) {
 async function derivePasswordHash(
   password,
   salt,
-  iterations = PASSWORD_HASH_ITERATIONS
+  iterations =
+    PASSWORD_HASH_ITERATIONS
 ) {
   const keyMaterial =
     await crypto.subtle.importKey(
       "raw",
-      new TextEncoder().encode(password),
+
+      new TextEncoder().encode(
+        password
+      ),
+
       "PBKDF2",
+
       false,
-      ["deriveBits"]
+
+      [
+        "deriveBits",
+      ]
     );
 
   const derivedBits =
     await crypto.subtle.deriveBits(
       {
-        name: "PBKDF2",
+        name:
+          "PBKDF2",
+
         salt,
+
         iterations,
-        hash: "SHA-256",
+
+        hash:
+          "SHA-256",
       },
+
       keyMaterial,
+
       256
     );
 
-  return new Uint8Array(derivedBits);
+  return new Uint8Array(
+    derivedBits
+  );
 }
 
 async function verifyPassword(
@@ -572,16 +834,20 @@ async function verifyPassword(
   account
 ) {
   try {
-    const salt = base64UrlToBytes(
-      account.passwordSalt
-    );
+    const salt =
+      base64UrlToBytes(
+        account.passwordSalt
+      );
 
-    const expectedHash = base64UrlToBytes(
-      account.passwordHash
-    );
+    const expectedHash =
+      base64UrlToBytes(
+        account.passwordHash
+      );
 
     const iterations =
-      Number(account.passwordIterations) ||
+      Number(
+        account.passwordIterations
+      ) ||
       PASSWORD_HASH_ITERATIONS;
 
     const submittedHash =
@@ -610,18 +876,27 @@ function constantTimeBytesEqual(
   right
 ) {
   if (
-    !(left instanceof Uint8Array) ||
-    !(right instanceof Uint8Array)
+    !(
+      left instanceof
+      Uint8Array
+    ) ||
+    !(
+      right instanceof
+      Uint8Array
+    )
   ) {
     return false;
   }
 
-  let difference = left.length ^ right.length;
+  let difference =
+    left.length ^
+    right.length;
 
-  const maximumLength = Math.max(
-    left.length,
-    right.length
-  );
+  const maximumLength =
+    Math.max(
+      left.length,
+      right.length
+    );
 
   for (
     let index = 0;
@@ -636,18 +911,24 @@ function constantTimeBytesEqual(
   return difference === 0;
 }
 
-function randomBytes(length) {
-  const bytes = new Uint8Array(length);
+function randomBytes(
+  length
+) {
+  const bytes =
+    new Uint8Array(length);
 
   crypto.getRandomValues(bytes);
 
   return bytes;
 }
 
-async function sha256Hex(value) {
+async function sha256Hex(
+  value
+) {
   const digest =
     await crypto.subtle.digest(
       "SHA-256",
+
       new TextEncoder().encode(
         String(value)
       )
@@ -664,26 +945,36 @@ async function sha256Hex(value) {
     .join("");
 }
 
-function getAccountSessionVersion(account) {
-  const sessionVersion = Number(
-    account?.sessionVersion
-  );
+function getAccountSessionVersion(
+  account
+) {
+  const sessionVersion =
+    Number(
+      account?.sessionVersion
+    );
 
   return (
-    Number.isSafeInteger(sessionVersion) &&
+    Number.isSafeInteger(
+      sessionVersion
+    ) &&
     sessionVersion > 0
   )
     ? sessionVersion
     : 1;
 }
 
-function getPayloadSessionVersion(payload) {
-  const sessionVersion = Number(
-    payload?.sv
-  );
+function getPayloadSessionVersion(
+  payload
+) {
+  const sessionVersion =
+    Number(
+      payload?.sv
+    );
 
   return (
-    Number.isSafeInteger(sessionVersion) &&
+    Number.isSafeInteger(
+      sessionVersion
+    ) &&
     sessionVersion > 0
   )
     ? sessionVersion
@@ -694,17 +985,22 @@ async function createCustomerSessionToken(
   account,
   env
 ) {
-  const issuedAt = Math.floor(
-    Date.now() / 1000
-  );
+  const issuedAt =
+    Math.floor(
+      Date.now() / 1000
+    );
 
   const payload = {
-    v: 1,
-    sub: account.id,
+    v:
+      1,
 
-    email: normalizeAccountEmail(
-      account.email
-    ),
+    sub:
+      account.id,
+
+    email:
+      normalizeAccountEmail(
+        account.email
+      ),
 
     firstName:
       account.firstName || "",
@@ -722,9 +1018,13 @@ async function createCustomerSessionToken(
     accountUpdatedAt:
       account.updatedAt || "",
 
-    sv: getAccountSessionVersion(account),
+    sv:
+      getAccountSessionVersion(
+        account
+      ),
 
-    iat: issuedAt,
+    iat:
+      issuedAt,
 
     exp:
       issuedAt +
@@ -753,9 +1053,10 @@ async function verifyCustomerSessionToken(
   token,
   env
 ) {
-  const parts = String(
-    token || ""
-  ).split(".");
+  const parts =
+    String(
+      token || ""
+    ).split(".");
 
   if (
     parts.length !== 2 ||
@@ -769,27 +1070,36 @@ async function verifyCustomerSessionToken(
   let signature;
 
   try {
-    payload = JSON.parse(
-      new TextDecoder().decode(
-        base64UrlToBytes(parts[0])
-      )
-    );
+    payload =
+      JSON.parse(
+        new TextDecoder().decode(
+          base64UrlToBytes(
+            parts[0]
+          )
+        )
+      );
 
-    signature = base64UrlToBytes(
-      parts[1]
-    );
+    signature =
+      base64UrlToBytes(
+        parts[1]
+      );
   } catch {
     return null;
   }
 
   const key =
-    await getCustomerSessionSigningKey(env);
+    await getCustomerSessionSigningKey(
+      env
+    );
 
   const signatureValid =
     await crypto.subtle.verify(
       "HMAC",
+
       key,
+
       signature,
+
       new TextEncoder().encode(
         parts[0]
       )
@@ -799,22 +1109,31 @@ async function verifyCustomerSessionToken(
     return null;
   }
 
-  const now = Math.floor(
-    Date.now() / 1000
-  );
+  const now =
+    Math.floor(
+      Date.now() / 1000
+    );
 
   if (
     payload.v !== 1 ||
     !payload.sub ||
     !payload.email ||
     !Number.isFinite(
-      Number(payload.iat)
+      Number(
+        payload.iat
+      )
     ) ||
     !Number.isFinite(
-      Number(payload.exp)
+      Number(
+        payload.exp
+      )
     ) ||
-    Number(payload.exp) <= now ||
-    Number(payload.iat) > now + 300
+    Number(
+      payload.exp
+    ) <= now ||
+    Number(
+      payload.iat
+    ) > now + 300
   ) {
     return null;
   }
@@ -836,18 +1155,24 @@ async function signCustomerSessionPayload(
   env
 ) {
   const key =
-    await getCustomerSessionSigningKey(env);
+    await getCustomerSessionSigningKey(
+      env
+    );
 
   const signature =
     await crypto.subtle.sign(
       "HMAC",
+
       key,
+
       new TextEncoder().encode(
         encodedPayload
       )
     );
 
-  return new Uint8Array(signature);
+  return new Uint8Array(
+    signature
+  );
 }
 
 async function getCustomerSessionSigningKey(
@@ -866,23 +1191,40 @@ async function getCustomerSessionSigningKey(
 
   return crypto.subtle.importKey(
     "raw",
+
     secretMaterial,
+
     {
-      name: "HMAC",
-      hash: "SHA-256",
+      name:
+        "HMAC",
+
+      hash:
+        "SHA-256",
     },
+
     false,
-    ["sign", "verify"]
+
+    [
+      "sign",
+      "verify",
+    ]
   );
 }
 
-function getSessionToken(request) {
+function getSessionToken(
+  request
+) {
   const cookieHeader =
-    request.headers.get("Cookie") || "";
+    request.headers.get(
+      "Cookie"
+    ) || "";
 
-  const cookies = cookieHeader.split(";");
+  const cookies =
+    cookieHeader.split(";");
 
-  for (const cookie of cookies) {
+  for (
+    const cookie of cookies
+  ) {
     const separatorIndex =
       cookie.indexOf("=");
 
@@ -890,15 +1232,25 @@ function getSessionToken(request) {
       continue;
     }
 
-    const name = cookie
-      .slice(0, separatorIndex)
-      .trim();
+    const name =
+      cookie
+        .slice(
+          0,
+          separatorIndex
+        )
+        .trim();
 
-    const value = cookie
-      .slice(separatorIndex + 1)
-      .trim();
+    const value =
+      cookie
+        .slice(
+          separatorIndex + 1
+        )
+        .trim();
 
-    if (name === SESSION_COOKIE_NAME) {
+    if (
+      name ===
+      SESSION_COOKIE_NAME
+    ) {
       return value;
     }
   }
@@ -906,7 +1258,9 @@ function getSessionToken(request) {
   return "";
 }
 
-function buildSessionCookie(token) {
+function buildSessionCookie(
+  token
+) {
   return [
     `${SESSION_COOKIE_NAME}=${token}`,
     "Path=/",
@@ -929,11 +1283,18 @@ function buildClearedSessionCookie() {
   ].join("; ");
 }
 
-function bytesToBase64Url(bytes) {
+function bytesToBase64Url(
+  bytes
+) {
   let binary = "";
 
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
+  for (
+    const byte of bytes
+  ) {
+    binary +=
+      String.fromCharCode(
+        byte
+      );
   }
 
   return btoa(binary)
@@ -942,30 +1303,39 @@ function bytesToBase64Url(bytes) {
     .replace(/=+$/g, "");
 }
 
-function base64UrlToBytes(value) {
-  const normalized = String(
-    value || ""
-  )
-    .replace(/-/g, "+")
-    .replace(/_/g, "/");
+function base64UrlToBytes(
+  value
+) {
+  const normalized =
+    String(
+      value || ""
+    )
+      .replace(/-/g, "+")
+      .replace(/_/g, "/");
 
-  const padded = normalized.padEnd(
-    normalized.length +
-      (
+  const padded =
+    normalized.padEnd(
+      normalized.length +
         (
-          4 -
-          (normalized.length % 4)
-        ) %
-        4
-      ),
-    "="
-  );
+          (
+            4 -
+            (
+              normalized.length %
+              4
+            )
+          ) %
+          4
+        ),
+      "="
+    );
 
-  const binary = atob(padded);
+  const binary =
+    atob(padded);
 
-  const bytes = new Uint8Array(
-    binary.length
-  );
+  const bytes =
+    new Uint8Array(
+      binary.length
+    );
 
   for (
     let index = 0;
@@ -973,7 +1343,9 @@ function base64UrlToBytes(value) {
     index += 1
   ) {
     bytes[index] =
-      binary.charCodeAt(index);
+      binary.charCodeAt(
+        index
+      );
   }
 
   return bytes;
@@ -984,15 +1356,23 @@ function cleanText(
   maximumLength
 ) {
   return String(
-    value == null ? "" : value
+    value == null
+      ? ""
+      : value
   )
     .replace(
       /[\u0000-\u001F\u007F]/g,
       " "
     )
-    .replace(/\s+/g, " ")
+    .replace(
+      /\s+/g,
+      " "
+    )
     .trim()
-    .slice(0, maximumLength);
+    .slice(
+      0,
+      maximumLength
+    );
 }
 
 function jsonResponse(
@@ -1000,15 +1380,16 @@ function jsonResponse(
   status = 200,
   extraHeaders = {}
 ) {
-  const headers = new Headers({
-    "Content-Type":
-      "application/json; charset=utf-8",
+  const headers =
+    new Headers({
+      "Content-Type":
+        "application/json; charset=utf-8",
 
-    "Cache-Control":
-      "no-store",
+      "Cache-Control":
+        "no-store",
 
-    ...extraHeaders,
-  });
+      ...extraHeaders,
+    });
 
   return new Response(
     JSON.stringify(body),
@@ -1019,11 +1400,19 @@ function jsonResponse(
   );
 }
 
-function handleApiError(error) {
+function handleApiError(
+  error
+) {
   const status =
-    error instanceof ApiRequestError
+    error instanceof
+    ApiRequestError
       ? error.status
       : 500;
+
+  const shouldClearSession =
+    status === 401 &&
+    error?.message ===
+      "Customer authentication is required.";
 
   return jsonResponse(
     {
@@ -1033,8 +1422,10 @@ function handleApiError(error) {
         error?.message ||
         "The account request could not be completed.",
     },
+
     status,
-    status === 401
+
+    shouldClearSession
       ? {
           "Set-Cookie":
             buildClearedSessionCookie(),

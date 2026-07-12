@@ -22,6 +22,7 @@ import Login from "./pages/Login";
 import CreateAccount from "./pages/CreateAccount";
 import ProductDetails from "./pages/ProductDetails";
 import CustomerDashboard from "./pages/CustomerDashboard";
+import ChangePassword from "./pages/ChangePassword";
 import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
 import OrderConfirmation from "./pages/OrderConfirmation";
@@ -52,6 +53,7 @@ const legacyLoginStorageKey = "isLoggedIn";
 
 const customerProtectedPages = new Set([
   "dashboard",
+  "changePassword",
   "partnerApplication",
   "cart",
   "checkout",
@@ -68,6 +70,7 @@ const pagePaths = {
   login: "/login",
   createAccount: "/create-account",
   dashboard: "/dashboard",
+  changePassword: "/change-password",
   partnerApplication: "/partner-application",
   partnerHQ: "/admin/partner-hq",
   marketingCenter: "/admin/marketing",
@@ -603,6 +606,42 @@ function App() {
 
       goToPage("home");
     }
+  }, [goToPage]);
+
+  const handlePasswordChanged = useCallback(() => {
+    removeSessionStorage(
+      customerAccountSessionKey
+    );
+
+    removeStorage(
+      legacyLoginStorageKey
+    );
+
+    setAuthenticationStatus("guest");
+    setCustomerAccount(null);
+    setAuthenticationError("");
+
+    setOrders([]);
+
+    removeStorage(
+      storageKeys.orders
+    );
+
+    setLatestOrder(null);
+
+    removeStorage(
+      storageKeys.latestOrder
+    );
+
+    setPartnerApplication(null);
+
+    removeStorage(
+      storageKeys.partnerApplication
+    );
+
+    goToPage("login", {
+      replace: true,
+    });
   }, [goToPage]);
 
   useEffect(() => {
@@ -1356,6 +1395,17 @@ function App() {
             }
             partnerApplication={
               partnerApplication
+            }
+          />
+        );
+
+      case "changePassword":
+        return (
+          <ChangePassword
+            account={customerAccount}
+            onNavigate={goToPage}
+            onPasswordChanged={
+              handlePasswordChanged
             }
           />
         );

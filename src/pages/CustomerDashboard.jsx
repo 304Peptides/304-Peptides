@@ -4,200 +4,145 @@ import {
   useState,
 } from "react";
 
-import {
-  products,
-} from "../data/products";
+import { products } from "../data/products";
 
-function normalizeValue(
-  value
-) {
-  return String(
-    value || ""
-  )
+function normalizeText(value) {
+  return String(value || "")
     .trim()
     .toLowerCase();
 }
 
 function buildCatalogVariants() {
-  return products.flatMap(
-    (
-      product
-    ) => {
-      const variants =
-        product.variants?.length
-          ? product.variants
-          : [product];
+  return products.flatMap((product) => {
+    const variants = product.variants?.length
+      ? product.variants
+      : [product];
 
-      return variants.map(
-        (
-          variant
-        ) => ({
-          ...product,
-          ...variant,
+    return variants.map((variant) => ({
+      ...product,
+      ...variant,
 
-          name:
-            variant.name ||
-            product.name ||
-            "",
+      name:
+        variant.name ||
+        product.name ||
+        "Research Product",
 
-          category:
-            variant.category ||
-            product.category ||
-            "",
+      codeName:
+        variant.codeName ||
+        product.codeName ||
+        "",
 
-          codeName:
-            variant.codeName ||
-            product.codeName ||
-            "",
+      strength:
+        variant.strength ||
+        product.strength ||
+        "",
 
-          strength:
-            variant.strength ||
-            product.strength ||
-            "",
-
-          image:
-            variant.image ||
-            product.image ||
-            "",
-        })
-      );
-    }
-  );
+      image:
+        variant.image ||
+        product.image ||
+        "",
+    }));
+  });
 }
 
-const catalogVariants =
-  buildCatalogVariants();
+const catalogVariants = buildCatalogVariants();
 
-function findCatalogVariant(
-  item
-) {
-  const codeName =
-    normalizeValue(
-      item?.codeName
-    );
+function findCatalogVariant(item) {
+  const codeName = normalizeText(
+    item?.codeName
+  );
 
-  const strength =
-    normalizeValue(
-      item?.strength
-    );
+  const strength = normalizeText(
+    item?.strength
+  );
 
-  const name =
-    normalizeValue(
-      item?.name
-    );
+  const name = normalizeText(
+    item?.name
+  );
 
-  const exactCodeMatch =
+  return (
     catalogVariants.find(
-      (
-        variant
-      ) =>
-        normalizeValue(
+      (variant) =>
+        normalizeText(
           variant.codeName
-        ) ===
-          codeName &&
-        normalizeValue(
+        ) === codeName &&
+        normalizeText(
           variant.strength
-        ) ===
-          strength
-    );
-
-  if (
-    exactCodeMatch
-  ) {
-    return exactCodeMatch;
-  }
-
-  const exactNameMatch =
+        ) === strength
+    ) ||
     catalogVariants.find(
-      (
-        variant
-      ) =>
-        normalizeValue(
+      (variant) =>
+        normalizeText(
           variant.name
-        ) ===
-          name &&
-        normalizeValue(
+        ) === name &&
+        normalizeText(
           variant.strength
-        ) ===
-          strength
-    );
-
-  if (
-    exactNameMatch
-  ) {
-    return exactNameMatch;
-  }
-
-  return catalogVariants.find(
-    (
-      variant
-    ) =>
-      normalizeValue(
-        variant.codeName
-      ) ===
-        codeName ||
-      normalizeValue(
-        variant.name
-      ) ===
-        name
+        ) === strength
+    ) ||
+    catalogVariants.find(
+      (variant) =>
+        normalizeText(
+          variant.codeName
+        ) === codeName ||
+        normalizeText(
+          variant.name
+        ) === name
+    ) ||
+    null
   );
 }
 
-function getOrderItems(
-  order
-) {
-  const items =
-    Array.isArray(
-      order?.items
-    )
-      ? order.items
-      : [];
+function getOrderItems(order) {
+  const items = Array.isArray(
+    order?.items
+  )
+    ? order.items
+    : [];
 
-  return items.map(
-    (
-      item
-    ) => {
-      const catalogItem =
-        findCatalogVariant(
-          item
-        );
+  return items.map((item) => {
+    const catalogItem =
+      findCatalogVariant(item);
 
-      return {
-        ...catalogItem,
-        ...item,
+    return {
+      ...catalogItem,
+      ...item,
 
-        name:
-          item.name ||
-          catalogItem?.name ||
-          "Research Product",
+      name:
+        item.name ||
+        catalogItem?.name ||
+        "Research Product",
 
-        codeName:
-          item.codeName ||
-          catalogItem?.codeName ||
-          "",
+      codeName:
+        item.codeName ||
+        catalogItem?.codeName ||
+        "",
 
-        strength:
-          item.strength ||
-          catalogItem?.strength ||
-          "",
+      strength:
+        item.strength ||
+        catalogItem?.strength ||
+        "",
 
-        category:
-          item.category ||
-          catalogItem?.category ||
-          "Research Product",
+      image:
+        item.image ||
+        catalogItem?.image ||
+        "",
 
-        image:
-          item.image ||
-          catalogItem?.image ||
-          "",
-      };
-    }
-  );
+      quantity:
+        Number(
+          item.quantity ||
+            0
+        ),
+
+      price:
+        Number(
+          item.price ||
+            0
+        ),
+    };
+  });
 }
 
-function getOrderId(
-  order
-) {
+function getOrderId(order) {
   return String(
     order?.orderId ||
       order?.id ||
@@ -205,9 +150,16 @@ function getOrderId(
   );
 }
 
-function getOrderQuantity(
-  order
-) {
+function getOrderDateValue(order) {
+  return (
+    order?.createdAt ||
+    order?.updatedAt ||
+    order?.date ||
+    ""
+  );
+}
+
+function getOrderQuantity(order) {
   const savedQuantity =
     Number(
       order?.totalQuantity
@@ -224,10 +176,7 @@ function getOrderQuantity(
   return getOrderItems(
     order
   ).reduce(
-    (
-      total,
-      item
-    ) =>
+    (total, item) =>
       total +
       Number(
         item.quantity ||
@@ -237,9 +186,7 @@ function getOrderQuantity(
   );
 }
 
-function getOrderSubtotal(
-  order
-) {
+function getOrderSubtotal(order) {
   const savedSubtotal =
     Number(
       order?.subtotal
@@ -256,10 +203,7 @@ function getOrderSubtotal(
   return getOrderItems(
     order
   ).reduce(
-    (
-      total,
-      item
-    ) =>
+    (total, item) =>
       total +
       Number(
         item.price ||
@@ -273,22 +217,16 @@ function getOrderSubtotal(
   );
 }
 
-function getCustomer(
-  order
-) {
+function getCustomer(order) {
   return (
     order?.customer ||
     {}
   );
 }
 
-function getCustomerName(
-  order
-) {
+function getCustomerName(order) {
   const customer =
-    getCustomer(
-      order
-    );
+    getCustomer(order);
 
   const fullName =
     `${customer.firstName || ""} ${
@@ -301,13 +239,9 @@ function getCustomerName(
   );
 }
 
-function getCustomerAddress(
-  order
-) {
+function getCustomerAddress(order) {
   const customer =
-    getCustomer(
-      order
-    );
+    getCustomer(order);
 
   const cityState =
     [
@@ -317,84 +251,49 @@ function getCustomerAddress(
       .filter(Boolean)
       .join(", ");
 
-  const address =
+  return (
     [
       customer.address,
       cityState,
       customer.zip,
     ]
       .filter(Boolean)
-      .join(" ");
-
-  return (
-    address ||
+      .join(" ") ||
     "Shipping address unavailable"
   );
 }
 
-function getOrderDateValue(
-  order
-) {
-  return (
-    order?.createdAt ||
-    order?.updatedAt ||
-    order?.date ||
-    ""
-  );
-}
-
-function formatDate(
-  value
-) {
-  if (
-    !value
-  ) {
+function formatDate(value) {
+  if (!value) {
     return "Date unavailable";
   }
 
   const date =
-    new Date(
-      value
-    );
+    new Date(value);
 
   if (
     Number.isNaN(
       date.getTime()
     )
   ) {
-    return String(
-      value
-    );
+    return String(value);
   }
 
   return date.toLocaleString(
     "en-US",
     {
-      month:
-        "short",
-
-      day:
-        "numeric",
-
-      year:
-        "numeric",
-
-      hour:
-        "numeric",
-
-      minute:
-        "2-digit",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
     }
   );
 }
 
-function formatMoney(
-  value
-) {
+function formatMoney(value) {
   const amount =
-    Number(
-      value
-    );
+    Number(value);
 
   return Number.isFinite(
     amount
@@ -412,9 +311,7 @@ function formatMoney(
     : "$0.00";
 }
 
-function normalizeOrders(
-  orders
-) {
+function normalizeOrders(orders) {
   if (
     !Array.isArray(
       orders
@@ -425,9 +322,7 @@ function normalizeOrders(
 
   return [...orders]
     .filter(
-      (
-        order
-      ) =>
+      (order) =>
         order &&
         typeof order ===
           "object"
@@ -473,7 +368,7 @@ function CustomerDashboard({
   account = null,
   authenticationError = "",
   onRefreshOrders = null,
-  partnerApplication,
+  partnerApplication = null,
 }) {
   const [
     expandedOrderId,
@@ -494,11 +389,6 @@ function CustomerDashboard({
     refreshMessage,
     setRefreshMessage,
   ] = useState("");
-
-  const [
-    refreshSucceeded,
-    setRefreshSucceeded,
-  ] = useState(false);
 
   const savedOrders =
     useMemo(
@@ -562,153 +452,6 @@ function CustomerDashboard({
         )
       : "Account date unavailable";
 
-  const displayedRefreshError =
-    refreshError ||
-    (!refreshSucceeded
-      ? authenticationError
-      : "");
-
-  async function handleRefreshOrders(
-    showSuccess = true
-  ) {
-    if (
-      typeof onRefreshOrders !==
-      "function"
-    ) {
-      setRefreshError(
-        "Order refresh is not available."
-      );
-
-      return;
-    }
-
-    setIsRefreshing(
-      true
-    );
-
-    setRefreshError(
-      ""
-    );
-
-    setRefreshMessage(
-      ""
-    );
-
-    setRefreshSucceeded(
-      false
-    );
-
-    try {
-      const refreshedOrders =
-        await onRefreshOrders({
-          replace: true,
-        });
-
-      setRefreshSucceeded(
-        true
-      );
-
-      if (
-        showSuccess
-      ) {
-        const orderCount =
-          Array.isArray(
-            refreshedOrders
-          )
-            ? refreshedOrders.length
-            : 0;
-
-        setRefreshMessage(
-          orderCount === 1
-            ? "Your secure order history is up to date."
-            : `Your secure order history is up to date. ${orderCount} account orders loaded.`
-        );
-      }
-    } catch (
-      error
-    ) {
-      setRefreshError(
-        error.message ||
-          "Secure order history could not be refreshed."
-      );
-    } finally {
-      setIsRefreshing(
-        false
-      );
-    }
-  }
-
-  useEffect(() => {
-    let isMounted =
-      true;
-
-    if (
-      typeof onRefreshOrders !==
-      "function"
-    ) {
-      return () => {
-        isMounted =
-          false;
-      };
-    }
-
-    async function refreshOnOpen() {
-      setIsRefreshing(
-        true
-      );
-
-      setRefreshError(
-        ""
-      );
-
-      setRefreshSucceeded(
-        false
-      );
-
-      try {
-        await onRefreshOrders({
-          replace: true,
-        });
-
-        if (
-          isMounted
-        ) {
-          setRefreshSucceeded(
-            true
-          );
-        }
-      } catch (
-        error
-      ) {
-        if (
-          isMounted
-        ) {
-          setRefreshError(
-            error.message ||
-              "Secure order history could not be loaded."
-          );
-        }
-      } finally {
-        if (
-          isMounted
-        ) {
-          setIsRefreshing(
-            false
-          );
-        }
-      }
-    }
-
-    refreshOnOpen();
-
-    return () => {
-      isMounted =
-        false;
-    };
-  }, [
-    onRefreshOrders,
-  ]);
-
   const statistics =
     useMemo(() => {
       const totalOrders =
@@ -742,9 +485,7 @@ function CustomerDashboard({
 
       const activeOrders =
         savedOrders.filter(
-          (
-            order
-          ) =>
+          (order) =>
             ![
               "Completed",
               "Cancelled",
@@ -763,20 +504,113 @@ function CustomerDashboard({
       savedOrders,
     ]);
 
+  async function handleRefreshOrders(
+    showSuccess = true
+  ) {
+    if (
+      typeof onRefreshOrders !==
+      "function"
+    ) {
+      setRefreshError(
+        "Order refresh is not available."
+      );
+
+      return;
+    }
+
+    setIsRefreshing(true);
+    setRefreshError("");
+    setRefreshMessage("");
+
+    try {
+      const refreshedOrders =
+        await onRefreshOrders({
+          replace: true,
+        });
+
+      if (showSuccess) {
+        const orderCount =
+          Array.isArray(
+            refreshedOrders
+          )
+            ? refreshedOrders.length
+            : 0;
+
+        setRefreshMessage(
+          orderCount === 1
+            ? "Your secure order history is up to date."
+            : `Your secure order history is up to date. ${orderCount} account orders loaded.`
+        );
+      }
+    } catch (error) {
+      setRefreshError(
+        error?.message ||
+          "Secure order history could not be refreshed."
+      );
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+
+    if (
+      typeof onRefreshOrders !==
+      "function"
+    ) {
+      return () => {
+        active = false;
+      };
+    }
+
+    async function refreshOnOpen() {
+      setIsRefreshing(true);
+      setRefreshError("");
+
+      try {
+        await onRefreshOrders({
+          replace: true,
+        });
+      } catch (error) {
+        if (active) {
+          setRefreshError(
+            error?.message ||
+              "Secure order history could not be loaded."
+          );
+        }
+      } finally {
+        if (active) {
+          setIsRefreshing(false);
+        }
+      }
+    }
+
+    refreshOnOpen();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    onRefreshOrders,
+  ]);
+
+  const displayedError =
+    refreshError ||
+    authenticationError;
+
   return (
     <>
       <style>
-        {
-          customerDashboardCss
-        }
+        {customerDashboardCss}
       </style>
 
       <main className="customer-dashboard-page">
         <section className="customer-dashboard-inner">
           <header className="customer-dashboard-hero">
-            <div className="customer-dashboard-device-pill">
+            <span className="customer-dashboard-pill">
               Secure Account
-            </div>
+            </span>
 
             <p className="eyebrow">
               RESEARCH HUB
@@ -787,19 +621,13 @@ function CustomerDashboard({
             </h1>
 
             <p>
-              Review secure,
-              account-linked
-              order history,
-              current statuses,
-              checkout details,
-              product totals,
-              research-use
-              reminders, and
-              Partner Program
-              access.
+              Review secure account-linked order history,
+              current statuses, checkout details, product
+              totals, research-use reminders, and Partner
+              Program access.
             </p>
 
-            <div className="customer-dashboard-actions">
+            <div className="customer-dashboard-hero-actions">
               <button
                 type="button"
                 className="primary-btn"
@@ -841,24 +669,14 @@ function CustomerDashboard({
           <section className="customer-dashboard-security">
             <div>
               <strong>
-                Secure account
-                session confirmed
-                for {
-                  customerEmail
-                }.
+                Secure account session confirmed for{" "}
+                {customerEmail}.
               </strong>
 
               <p>
-                Orders submitted
-                while logged in
-                are linked to this
-                account and can be
-                reviewed across
+                Orders submitted while logged in are linked
+                to this account and can be reviewed across
                 approved devices.
-                Use Refresh Orders
-                to retrieve the
-                latest status from
-                Cloudflare.
               </p>
             </div>
 
@@ -885,6 +703,18 @@ function CustomerDashboard({
                 className="secondary-btn"
                 onClick={() =>
                   onNavigate(
+                    "changePassword"
+                  )
+                }
+              >
+                Change Password
+              </button>
+
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() =>
+                  onNavigate(
                     "contact"
                   )
                 }
@@ -894,25 +724,21 @@ function CustomerDashboard({
             </div>
           </section>
 
-          {displayedRefreshError && (
+          {displayedError && (
             <div
-              className="customer-dashboard-load-error"
+              className="customer-dashboard-alert customer-dashboard-error"
               role="alert"
             >
-              {
-                displayedRefreshError
-              }
+              {displayedError}
             </div>
           )}
 
           {refreshMessage && (
             <div
-              className="customer-dashboard-load-success"
+              className="customer-dashboard-alert customer-dashboard-success"
               aria-live="polite"
             >
-              {
-                refreshMessage
-              }
+              {refreshMessage}
             </div>
           )}
 
@@ -957,8 +783,7 @@ function CustomerDashboard({
               </p>
 
               <h2>
-                Secure Customer
-                Account
+                Secure Customer Account
               </h2>
 
               <div className="customer-dashboard-info-grid">
@@ -996,9 +821,7 @@ function CustomerDashboard({
                   </span>
 
                   <strong>
-                    {
-                      customerAddress
-                    }
+                    {customerAddress}
                   </strong>
                 </div>
               </div>
@@ -1046,8 +869,7 @@ function CustomerDashboard({
               </p>
 
               <h2>
-                Research Partner
-                Access
+                Research Partner Access
               </h2>
 
               {partnerApplication ? (
@@ -1101,12 +923,8 @@ function CustomerDashboard({
               ) : hasOrders ? (
                 <>
                   <p className="customer-dashboard-muted">
-                    Your first
-                    order request
-                    is saved, so
-                    the Partner
-                    Application is
-                    available.
+                    Your first order request is saved, so
+                    the Partner Application is available.
                   </p>
 
                   <button
@@ -1118,19 +936,14 @@ function CustomerDashboard({
                       )
                     }
                   >
-                    Apply For
-                    Partner Code
+                    Apply For Partner Code
                   </button>
                 </>
               ) : (
                 <>
                   <p className="customer-dashboard-muted">
-                    Submit your
-                    first order
-                    request to
-                    unlock the
-                    Partner
-                    Application.
+                    Submit your first order request to
+                    unlock the Partner Application.
                   </p>
 
                   <button
@@ -1142,23 +955,16 @@ function CustomerDashboard({
                       )
                     }
                   >
-                    Start First
-                    Order
+                    Start First Order
                   </button>
                 </>
               )}
 
               <div className="customer-dashboard-partner-note">
-                Secure customer
-                orders are stored
-                with the account.
-                Partner
-                application data
-                is still saved in
-                the current
-                browser until the
-                Partner Program
-                backend is added.
+                Secure customer orders are stored with the
+                account. Partner application data remains
+                stored in this browser until the Partner
+                Program backend is added.
               </div>
             </aside>
           </div>
@@ -1171,8 +977,7 @@ function CustomerDashboard({
                 </p>
 
                 <h2>
-                  Account Order
-                  History
+                  Account Order History
                 </h2>
               </div>
 
@@ -1192,19 +997,13 @@ function CustomerDashboard({
             {!hasOrders ? (
               <div className="customer-dashboard-empty">
                 <h3>
-                  No Account
-                  Orders Yet
+                  No Account Orders Yet
                 </h3>
 
                 <p>
-                  Orders submitted
-                  while logged in
-                  will appear here
-                  with products,
-                  status,
-                  customer
-                  details, and
-                  totals.
+                  Orders submitted while logged in will
+                  appear here with products, status,
+                  customer details, and totals.
                 </p>
 
                 <button
@@ -1222,33 +1021,21 @@ function CustomerDashboard({
             ) : (
               <div className="customer-dashboard-order-stack">
                 {savedOrders.map(
-                  (
-                    order
-                  ) => {
+                  (order) => {
                     const orderId =
-                      getOrderId(
-                        order
-                      );
+                      getOrderId(order);
 
                     const items =
-                      getOrderItems(
-                        order
-                      );
+                      getOrderItems(order);
 
                     const subtotal =
-                      getOrderSubtotal(
-                        order
-                      );
+                      getOrderSubtotal(order);
 
                     const quantity =
-                      getOrderQuantity(
-                        order
-                      );
+                      getOrderQuantity(order);
 
                     const customer =
-                      getCustomer(
-                        order
-                      );
+                      getCustomer(order);
 
                     const isExpanded =
                       expandedOrderId ===
@@ -1266,9 +1053,7 @@ function CustomerDashboard({
                             <div className="customer-dashboard-order-heading">
                               <p>
                                 Order #
-                                {
-                                  orderId
-                                }
+                                {orderId}
                               </p>
 
                               <span className="customer-dashboard-status">
@@ -1292,28 +1077,18 @@ function CustomerDashboard({
                             </p>
 
                             <p>
-                              {
-                                items.length
-                              }{" "}
-                              product
-                              {items.length ===
-                              1
+                              {items.length} product
+                              {items.length === 1
                                 ? ""
                                 : "s"}{" "}
-                              ·{" "}
-                              {
-                                quantity
-                              }{" "}
-                              total item
-                              {quantity ===
-                              1
+                              · {quantity} total item
+                              {quantity === 1
                                 ? ""
                                 : "s"}
                             </p>
 
                             <p>
-                              Payment
-                              preference:{" "}
+                              Payment preference:{" "}
                               <strong>
                                 {order.preferredPaymentLabel ||
                                   order.paymentMethod ||
@@ -1396,8 +1171,7 @@ function CustomerDashboard({
 
                             <section>
                               <h4>
-                                Checkout
-                                Information
+                                Checkout Information
                               </h4>
 
                               <DetailRow
@@ -1466,10 +1240,8 @@ function CustomerDashboard({
           </section>
 
           <div className="customer-dashboard-research-notice">
-            For Research Use
-            Only. Products are
-            not intended for
-            human consumption.
+            For Research Use Only. Products are not intended
+            for human consumption.
           </div>
         </section>
       </main>
@@ -1477,35 +1249,59 @@ function CustomerDashboard({
   );
 }
 
-function ProductPreview({
+function ProductImage({
   item,
+  compact = false,
 }) {
   const [
     imageFailed,
     setImageFailed,
   ] = useState(false);
 
+  if (
+    !item.image ||
+    imageFailed
+  ) {
+    return (
+      <div
+        className={
+          compact
+            ? "customer-dashboard-image-fallback customer-dashboard-image-compact"
+            : "customer-dashboard-image-fallback"
+        }
+      >
+        304
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={
+        item.image
+      }
+      alt={`${item.name} ${item.strength || ""}`}
+      loading="lazy"
+      onError={() =>
+        setImageFailed(
+          true
+        )
+      }
+    />
+  );
+}
+
+function ProductPreview({
+  item,
+}) {
   return (
     <div className="customer-dashboard-preview-item">
-      {item.image &&
-      !imageFailed ? (
-        <img
-          src={
-            item.image
-          }
-          alt={`${item.name} ${item.strength || ""}`}
-          loading="lazy"
-          onError={() =>
-            setImageFailed(
-              true
-            )
-          }
-        />
-      ) : (
-        <div className="customer-dashboard-image-fallback">
-          304
-        </div>
-      )}
+      <ProductImage
+        item={
+          item
+        }
+        compact
+      />
 
       <div>
         <strong>
@@ -1524,11 +1320,6 @@ function ProductPreview({
 function ProductRow({
   item,
 }) {
-  const [
-    imageFailed,
-    setImageFailed,
-  ] = useState(false);
-
   const quantity =
     Number(
       item.quantity ||
@@ -1544,25 +1335,11 @@ function ProductRow({
   return (
     <div className="customer-dashboard-product-row">
       <div className="customer-dashboard-product-image">
-        {item.image &&
-        !imageFailed ? (
-          <img
-            src={
-              item.image
-            }
-            alt={`${item.name} ${item.strength || ""}`}
-            loading="lazy"
-            onError={() =>
-              setImageFailed(
-                true
-              )
-            }
-          />
-        ) : (
-          <div className="customer-dashboard-image-fallback">
-            304
-          </div>
-        )}
+        <ProductImage
+          item={
+            item
+          }
+        />
       </div>
 
       <div className="customer-dashboard-product-copy">
@@ -1582,11 +1359,7 @@ function ProductRow({
         </span>
 
         <span>
-          Quantity:{" "}
-          {
-            quantity
-          }{" "}
-          ·{" "}
+          Quantity: {quantity} ·{" "}
           {formatMoney(
             price
           )}{" "}
@@ -1670,7 +1443,6 @@ const customerDashboardCss = `
 
   .customer-dashboard-page {
     width: 100%;
-    max-width: 100%;
     padding: 90px 60px;
     overflow-x: hidden;
   }
@@ -1694,11 +1466,12 @@ const customerDashboardCss = `
         transparent 42%
       ),
       rgba(255,255,255,0.035);
-    box-shadow: 0 30px 90px rgba(0,0,0,0.5);
+    box-shadow:
+      0 30px 90px rgba(0,0,0,0.5);
     text-align: center;
   }
 
-  .customer-dashboard-device-pill {
+  .customer-dashboard-pill {
     position: absolute;
     top: 22px;
     right: 24px;
@@ -1717,7 +1490,12 @@ const customerDashboardCss = `
     margin-bottom: 20px;
     font-size: clamp(45px, 7vw, 62px);
     line-height: 1.05;
-    background: linear-gradient(180deg, #ffffff, #9d9d9d);
+    background:
+      linear-gradient(
+        180deg,
+        #ffffff,
+        #9d9d9d
+      );
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
   }
@@ -1730,11 +1508,15 @@ const customerDashboardCss = `
     line-height: 1.8;
   }
 
-  .customer-dashboard-actions {
+  .customer-dashboard-hero-actions,
+  .customer-dashboard-security-actions {
     display: flex;
-    justify-content: center;
-    gap: 14px;
+    gap: 12px;
     flex-wrap: wrap;
+  }
+
+  .customer-dashboard-hero-actions {
+    justify-content: center;
     margin-top: 28px;
   }
 
@@ -1752,16 +1534,13 @@ const customerDashboardCss = `
   }
 
   .customer-dashboard-security p {
-    max-width: 800px;
+    max-width: 720px;
     margin-top: 5px;
     color: #a9cfe5;
     line-height: 1.6;
   }
 
   .customer-dashboard-security-actions {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
     flex: 0 0 auto;
   }
 
@@ -1770,9 +1549,8 @@ const customerDashboardCss = `
     cursor: not-allowed;
   }
 
-  .customer-dashboard-load-error,
-  .customer-dashboard-load-success {
-    margin-bottom: 24px;
+  .customer-dashboard-alert {
+    margin-bottom: 20px;
     padding: 15px 17px;
     border-radius: 15px;
     font-size: 13px;
@@ -1780,13 +1558,13 @@ const customerDashboardCss = `
     line-height: 1.6;
   }
 
-  .customer-dashboard-load-error {
+  .customer-dashboard-error {
     border: 1px solid rgba(255,95,95,0.4);
     background: rgba(255,70,70,0.1);
     color: #ffd0d0;
   }
 
-  .customer-dashboard-load-success {
+  .customer-dashboard-success {
     border: 1px solid rgba(61,165,255,0.3);
     background: rgba(61,165,255,0.1);
     color: #bce7ff;
@@ -1794,7 +1572,11 @@ const customerDashboardCss = `
 
   .customer-dashboard-stats {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns:
+      repeat(
+        4,
+        minmax(0, 1fr)
+      );
     gap: 18px;
     margin-bottom: 30px;
   }
@@ -1807,7 +1589,8 @@ const customerDashboardCss = `
     border: 1px solid rgba(255,255,255,0.09);
     border-radius: 22px;
     background: rgba(255,255,255,0.035);
-    box-shadow: 0 22px 60px rgba(0,0,0,0.32);
+    box-shadow:
+      0 22px 60px rgba(0,0,0,0.32);
   }
 
   .customer-dashboard-stat-card span,
@@ -1834,7 +1617,9 @@ const customerDashboardCss = `
 
   .customer-dashboard-overview {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+    grid-template-columns:
+      minmax(0, 1fr)
+      minmax(300px, 360px);
     gap: 30px;
     align-items: start;
     margin-bottom: 30px;
@@ -1854,7 +1639,8 @@ const customerDashboardCss = `
         transparent 35%
       ),
       rgba(255,255,255,0.035);
-    box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+    box-shadow:
+      0 30px 80px rgba(0,0,0,0.45);
   }
 
   .customer-dashboard-partner {
@@ -1867,16 +1653,30 @@ const customerDashboardCss = `
   .customer-dashboard-partner h2,
   .customer-dashboard-orders h2 {
     margin-bottom: 24px;
-    font-size: clamp(29px, 4vw, 38px);
+    font-size:
+      clamp(
+        29px,
+        4vw,
+        38px
+      );
     line-height: 1.12;
-    background: linear-gradient(180deg, #ffffff, #9d9d9d);
+    background:
+      linear-gradient(
+        180deg,
+        #ffffff,
+        #9d9d9d
+      );
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
   }
 
   .customer-dashboard-info-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns:
+      repeat(
+        2,
+        minmax(0, 1fr)
+      );
     gap: 14px;
   }
 
@@ -1903,7 +1703,11 @@ const customerDashboardCss = `
 
   .customer-dashboard-latest-order {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns:
+      repeat(
+        2,
+        minmax(0, 1fr)
+      );
     gap: 14px;
     margin-top: 20px;
     padding: 16px;
@@ -1992,13 +1796,12 @@ const customerDashboardCss = `
 
   .customer-dashboard-order-summary {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(230px, 310px) auto;
+    grid-template-columns:
+      minmax(0, 1fr)
+      minmax(230px, 310px)
+      auto;
     gap: 20px;
     align-items: center;
-  }
-
-  .customer-dashboard-order-main {
-    min-width: 0;
   }
 
   .customer-dashboard-order-heading {
@@ -2051,7 +1854,8 @@ const customerDashboardCss = `
 
   .customer-dashboard-preview-item {
     display: grid;
-    grid-template-columns: 46px minmax(0, 1fr);
+    grid-template-columns:
+      46px minmax(0, 1fr);
     gap: 10px;
     align-items: center;
     padding: 7px;
@@ -2061,21 +1865,11 @@ const customerDashboardCss = `
   }
 
   .customer-dashboard-preview-item img,
-  .customer-dashboard-image-fallback {
+  .customer-dashboard-image-compact {
     width: 46px;
     height: 54px;
     object-fit: contain;
     border-radius: 9px;
-  }
-
-  .customer-dashboard-image-fallback {
-    display: grid;
-    place-items: center;
-    border: 1px solid rgba(61,165,255,0.27);
-    background: #10161c;
-    color: #9ed8ff;
-    font-size: 11px;
-    font-weight: 900;
   }
 
   .customer-dashboard-preview-item > div:last-child {
@@ -2098,7 +1892,8 @@ const customerDashboardCss = `
 
   .customer-dashboard-order-details {
     display: grid;
-    grid-template-columns: 1.4fr 1fr 1fr;
+    grid-template-columns:
+      1.4fr 1fr 1fr;
     gap: 16px;
     margin-top: 20px;
     padding-top: 20px;
@@ -2126,7 +1921,8 @@ const customerDashboardCss = `
 
   .customer-dashboard-product-row {
     display: grid;
-    grid-template-columns: 72px minmax(0, 1fr) auto;
+    grid-template-columns:
+      72px minmax(0, 1fr) auto;
     gap: 12px;
     align-items: center;
     padding: 11px;
@@ -2148,9 +1944,17 @@ const customerDashboardCss = `
     object-fit: contain;
   }
 
-  .customer-dashboard-product-image .customer-dashboard-image-fallback {
+  .customer-dashboard-image-fallback {
     width: 65px;
     height: 75px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(61,165,255,0.27);
+    border-radius: 9px;
+    background: #10161c;
+    color: #9ed8ff;
+    font-size: 11px;
+    font-weight: 900;
   }
 
   .customer-dashboard-product-copy {
@@ -2213,11 +2017,16 @@ const customerDashboardCss = `
     }
 
     .customer-dashboard-stats {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns:
+        repeat(
+          2,
+          minmax(0, 1fr)
+        );
     }
 
     .customer-dashboard-overview {
-      grid-template-columns: minmax(0, 1fr);
+      grid-template-columns:
+        minmax(0, 1fr);
     }
 
     .customer-dashboard-partner {
@@ -2225,7 +2034,9 @@ const customerDashboardCss = `
     }
 
     .customer-dashboard-order-summary {
-      grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
+      grid-template-columns:
+        minmax(0, 1fr)
+        minmax(220px, 300px);
     }
 
     .customer-dashboard-order-summary > button {
@@ -2233,7 +2044,8 @@ const customerDashboardCss = `
     }
 
     .customer-dashboard-order-details {
-      grid-template-columns: minmax(0, 1fr);
+      grid-template-columns:
+        minmax(0, 1fr);
     }
   }
 
@@ -2250,10 +2062,10 @@ const customerDashboardCss = `
       border-radius: 22px;
     }
 
-    .customer-dashboard-device-pill {
+    .customer-dashboard-pill {
       position: static;
-      width: fit-content;
-      margin: 0 auto 20px;
+      display: inline-flex;
+      margin-bottom: 20px;
     }
 
     .customer-dashboard-security {
@@ -2263,22 +2075,23 @@ const customerDashboardCss = `
 
     .customer-dashboard-security-actions,
     .customer-dashboard-security-actions button,
-    .customer-dashboard-actions,
-    .customer-dashboard-actions button {
+    .customer-dashboard-hero-actions,
+    .customer-dashboard-hero-actions button {
       width: 100%;
     }
 
     .customer-dashboard-info-grid,
     .customer-dashboard-order-summary {
-      grid-template-columns: minmax(0, 1fr);
+      grid-template-columns:
+        minmax(0, 1fr);
     }
 
-    .customer-dashboard-address-box {
+    .customer-dashboard-address-box,
+    .customer-dashboard-order-summary > button {
       grid-column: auto;
     }
 
     .customer-dashboard-order-summary > button {
-      grid-column: auto;
       width: 100%;
     }
   }
@@ -2298,7 +2111,8 @@ const customerDashboardCss = `
 
     .customer-dashboard-stats,
     .customer-dashboard-latest-order {
-      grid-template-columns: minmax(0, 1fr);
+      grid-template-columns:
+        minmax(0, 1fr);
     }
 
     .customer-dashboard-latest-order small {
@@ -2306,7 +2120,8 @@ const customerDashboardCss = `
     }
 
     .customer-dashboard-product-row {
-      grid-template-columns: 65px minmax(0, 1fr);
+      grid-template-columns:
+        65px minmax(0, 1fr);
     }
 
     .customer-dashboard-line-total {
