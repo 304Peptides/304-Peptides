@@ -9,7 +9,8 @@ const defaultSettings = {
 
 function loadSettings() {
   try {
-    const savedSettings = window.localStorage.getItem(storageKey);
+    const savedSettings =
+      window.localStorage.getItem(storageKey);
 
     if (!savedSettings) {
       return defaultSettings;
@@ -24,15 +25,20 @@ function loadSettings() {
   }
 }
 
+function CartResponsiveStyles() {
+  return <style>{cartResponsiveCss}</style>;
+}
+
 function Cart({
-  cartItems,
+  cartItems = [],
   onNavigate,
   onRemoveItem,
   onClearCart,
   onIncreaseQuantity,
   onDecreaseQuantity,
 }) {
-  const [settings, setSettings] = useState(loadSettings);
+  const [settings, setSettings] =
+    useState(loadSettings);
 
   useEffect(() => {
     function updateSettings(event) {
@@ -80,7 +86,8 @@ function Cart({
   const totalQuantity = useMemo(
     () =>
       cartItems.reduce(
-        (total, item) => total + item.quantity,
+        (total, item) =>
+          total + Number(item.quantity || 0),
         0
       ),
     [cartItems]
@@ -93,7 +100,11 @@ function Cart({
           ? item.price
           : 0;
 
-        return total + price * item.quantity;
+        const quantity = Number(
+          item.quantity || 0
+        );
+
+        return total + price * quantity;
       }, 0),
     [cartItems]
   );
@@ -110,6 +121,7 @@ function Cart({
     settings.storeStatus === "open";
 
   const checkoutEnabled =
+    settings.catalogEnabled &&
     purchasingEnabled &&
     invalidPriceItems.length === 0 &&
     cartItems.length > 0;
@@ -120,6 +132,10 @@ function Cart({
       : settings.storeStatus === "maintenance"
       ? "Maintenance Mode"
       : "Coming Soon";
+
+  function getItemKey(item) {
+    return `${item.codeName}-${item.strength}`;
+  }
 
   function formatPrice(price) {
     if (!Number.isFinite(price)) {
@@ -139,72 +155,34 @@ function Cart({
 
   if (cartItems.length === 0) {
     return (
-      <main style={{ padding: "90px 60px" }}>
-        <section style={emptyPanelStyle}>
-          <p className="eyebrow">CART</p>
+      <>
+        <CartResponsiveStyles />
 
-          <h1 style={titleStyle}>
-            Your Cart Is Empty
-          </h1>
-
-          <p style={subtitleStyle}>
-            Browse the research-use catalog and select a
-            product to begin.
-          </p>
-
-          <div
-            style={
-              purchasingEnabled
-                ? openStatusStyle
-                : closedStatusStyle
-            }
+        <main
+          className="cart-page"
+          style={pageStyle}
+        >
+          <section
+            className="cart-empty-panel"
+            style={emptyPanelStyle}
           >
-            {storeStatusLabel}
-          </div>
+            <p className="eyebrow">
+              CART
+            </p>
 
-          {!purchasingEnabled && (
-            <div style={storeNoticeStyle}>
-              Product browsing may remain available, but
-              purchasing is currently disabled while the store
-              status is <strong>{storeStatusLabel}</strong>.
-            </div>
-          )}
-
-          <div style={buttonRowStyle}>
-            <button
-              className="primary-btn"
-              onClick={() => onNavigate("products")}
+            <h1
+              className="cart-main-title"
+              style={titleStyle}
             >
-              Browse Products
-            </button>
+              Your Cart Is Empty
+            </h1>
 
-            <button
-              className="secondary-btn"
-              onClick={() =>
-                onNavigate("researchAgreement")
-              }
-            >
-              Research Agreement
-            </button>
-          </div>
-        </section>
-      </main>
-    );
-  }
+            <p style={subtitleStyle}>
+              Browse the research-use catalog and
+              select a product to begin.
+            </p>
 
-  return (
-    <main style={{ padding: "90px 60px" }}>
-      <section
-        style={{
-          maxWidth: "1200px",
-          margin: "0 auto",
-        }}
-      >
-        <div style={heroPanelStyle}>
-          <div style={heroStatusRowStyle}>
-            <p className="eyebrow">CART</p>
-
-            <span
+            <div
               style={
                 purchasingEnabled
                   ? openStatusStyle
@@ -212,340 +190,799 @@ function Cart({
               }
             >
               {storeStatusLabel}
-            </span>
-          </div>
-
-          <h1 style={titleStyle}>
-            Review Cart
-          </h1>
-
-          <p style={subtitleStyle}>
-            Review selected research-use products before
-            continuing to checkout.
-          </p>
-
-          {!purchasingEnabled && (
-            <div style={storeNoticeStyle}>
-              Your cart remains available, but checkout is
-              disabled while the store status is{" "}
-              <strong>{storeStatusLabel}</strong>.
-            </div>
-          )}
-
-          {invalidPriceItems.length > 0 && (
-            <div style={warningNoticeStyle}>
-              {invalidPriceItems.length} cart item
-              {invalidPriceItems.length === 1 ? "" : "s"} no
-              longer{" "}
-              {invalidPriceItems.length === 1
-                ? "has"
-                : "have"}{" "}
-              valid pricing. Remove the affected item
-              {invalidPriceItems.length === 1 ? "" : "s"} before
-              checkout.
-            </div>
-          )}
-        </div>
-
-        <div style={cartLayoutStyle}>
-          <div style={itemsPanelStyle}>
-            <div style={sectionHeaderStyle}>
-              <div>
-                <p className="eyebrow">
-                  SELECTED PRODUCTS
-                </p>
-
-                <h2 style={sectionTitleStyle}>
-                  Cart Items
-                </h2>
-              </div>
-
-              <button
-                className="secondary-btn"
-                onClick={onClearCart}
-              >
-                Clear Cart
-              </button>
             </div>
 
-            <div style={itemStackStyle}>
-              {cartItems.map((item) => {
-                const hasPrice =
-                  Number.isFinite(item.price);
-
-                const lineTotal = hasPrice
-                  ? item.price * item.quantity
-                  : 0;
-
-                const itemKey = `${item.codeName}-${item.strength}`;
-
-                return (
-                  <article
-                    key={itemKey}
-                    style={cartItemStyle}
-                  >
-                    <div style={itemVisualStyle}>
-                      {item.image ? (
-                        <div style={imagePreviewWrapStyle}>
-                          <img
-                            src={item.image}
-                            alt={`${item.name} research product`}
-                            style={imagePreviewStyle}
-                          />
-                        </div>
-                      ) : (
-                        <div style={placeholderVisualStyle}>
-                          <div style={bottleCapStyle}></div>
-
-                          <div style={bottleStyle}>
-                            <div style={labelStyle}>
-                              <strong>304</strong>
-
-                              <span>{item.codeName}</span>
-
-                              <small>
-                                {item.strength}
-                              </small>
-
-                              <small style={labelNoticeStyle}>
-                                Research Use Only
-                              </small>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div style={itemInfoStyle}>
-                      <p style={categoryStyle}>
-                        {item.category}
-                      </p>
-
-                      <h3 style={itemTitleStyle}>
-                        {item.name}
-                      </h3>
-
-                      <p style={codeStyle}>
-                        {item.codeName} · {item.strength}
-                      </p>
-
-                      {item.composition && (
-                        <div style={compositionStyle}>
-                          <span>Composition</span>
-
-                          <strong>
-                            {item.composition}
-                          </strong>
-                        </div>
-                      )}
-
-                      <p style={itemTextStyle}>
-                        {item.description}
-                      </p>
-
-                      <div style={statusRowStyle}>
-                        <span style={statusBadgeStyle}>
-                          {item.purity}
-                        </span>
-
-                        <span style={statusBadgeStyle}>
-                          {item.coaStatus}
-                        </span>
-
-                        <span style={statusBadgeStyle}>
-                          {item.qrStatus}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div style={itemActionStyle}>
-                      <div
-                        style={
-                          hasPrice
-                            ? priceStyle
-                            : missingPriceStyle
-                        }
-                      >
-                        <span>Price</span>
-
-                        <strong>
-                          {formatPrice(item.price)}
-                        </strong>
-                      </div>
-
-                      <div style={quantityBoxStyle}>
-                        <span>Quantity</span>
-
-                        <div style={quantityControlsStyle}>
-                          <button
-                            className="secondary-btn"
-                            onClick={() =>
-                              onDecreaseQuantity(itemKey)
-                            }
-                            aria-label={`Decrease ${item.name} quantity`}
-                          >
-                            −
-                          </button>
-
-                          <strong style={quantityValueStyle}>
-                            {item.quantity}
-                          </strong>
-
-                          <button
-                            className="secondary-btn"
-                            onClick={() =>
-                              onIncreaseQuantity(itemKey)
-                            }
-                            aria-label={`Increase ${item.name} quantity`}
-                          >
-                            +
-                          </button>
-                        </div>
-                      </div>
-
-                      <div style={lineTotalStyle}>
-                        <span>Line Total</span>
-
-                        <strong>
-                          {hasPrice
-                            ? `$${lineTotal.toFixed(2)}`
-                            : "Unavailable"}
-                        </strong>
-                      </div>
-
-                      <button
-                        className="secondary-btn"
-                        style={{ width: "100%" }}
-                        onClick={() =>
-                          onRemoveItem(itemKey)
-                        }
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </div>
-
-          <aside style={summaryPanelStyle}>
-            <p className="eyebrow">ORDER SUMMARY</p>
-
-            <h2 style={summaryTitleStyle}>
-              Summary
-            </h2>
-
-            <div style={summaryRowStyle}>
-              <span>Total Products</span>
-
-              <strong>{cartItems.length}</strong>
-            </div>
-
-            <div style={summaryRowStyle}>
-              <span>Total Items</span>
-
-              <strong>{totalQuantity}</strong>
-            </div>
-
-            <div style={summaryRowStyle}>
-              <span>Subtotal</span>
-
-              <strong>${subtotal.toFixed(2)}</strong>
-            </div>
-
-            <div style={summaryRowStyle}>
-              <span>Shipping</span>
-
-              <strong>Calculated Later</strong>
-            </div>
-
-            <div style={summaryRowStyle}>
-              <span>Taxes</span>
-
-              <strong>Calculated Later</strong>
-            </div>
-
-            <div style={summaryRowStyle}>
-              <span>Store Status</span>
-
-              <strong>{storeStatusLabel}</strong>
-            </div>
-
-            {!purchasingEnabled ? (
-              <div style={noticeBoxStyle}>
-                Checkout is unavailable while the store is set
-                to {storeStatusLabel}.
-              </div>
-            ) : invalidPriceItems.length > 0 ? (
-              <div style={warningSummaryStyle}>
-                Remove products without valid pricing before
-                continuing to checkout.
-              </div>
-            ) : (
-              <div style={noticeBoxStyle}>
-                Shipping and applicable taxes will be calculated
-                during checkout.
+            {!settings.catalogEnabled && (
+              <div style={storeNoticeStyle}>
+                Product browsing and purchasing are
+                currently unavailable because the
+                catalog is disabled.
               </div>
             )}
 
-            {checkoutEnabled ? (
-              <button
-                className="primary-btn"
-                style={{
-                  width: "100%",
-                  marginTop: "24px",
-                }}
-                onClick={handleCheckout}
-              >
-                Continue To Checkout
-              </button>
-            ) : (
+            {settings.catalogEnabled &&
+              !purchasingEnabled && (
+                <div style={storeNoticeStyle}>
+                  Product browsing may remain
+                  available, but purchasing is
+                  currently disabled while the store
+                  status is{" "}
+                  <strong>
+                    {storeStatusLabel}
+                  </strong>
+                  .
+                </div>
+              )}
+
+            <div style={buttonRowStyle}>
               <button
                 type="button"
-                style={disabledCheckoutButtonStyle}
-                disabled
+                className="primary-btn"
+                onClick={() =>
+                  onNavigate("products")
+                }
               >
-                {!purchasingEnabled
-                  ? "Checkout Unavailable"
-                  : "Resolve Cart Items"}
+                Browse Products
               </button>
+
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() =>
+                  onNavigate(
+                    "researchAgreement"
+                  )
+                }
+              >
+                Research Agreement
+              </button>
+            </div>
+          </section>
+        </main>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <CartResponsiveStyles />
+
+      <main
+        className="cart-page"
+        style={pageStyle}
+      >
+        <section
+          className="cart-page-inner"
+          style={pageInnerStyle}
+        >
+          <div
+            className="cart-hero-panel"
+            style={heroPanelStyle}
+          >
+            <div style={heroStatusRowStyle}>
+              <p className="eyebrow">
+                CART
+              </p>
+
+              <span
+                style={
+                  purchasingEnabled
+                    ? openStatusStyle
+                    : closedStatusStyle
+                }
+              >
+                {storeStatusLabel}
+              </span>
+            </div>
+
+            <h1
+              className="cart-main-title"
+              style={titleStyle}
+            >
+              Review Cart
+            </h1>
+
+            <p style={subtitleStyle}>
+              Review selected research-use products
+              before continuing to checkout.
+            </p>
+
+            {!settings.catalogEnabled && (
+              <div style={storeNoticeStyle}>
+                Your cart remains available, but
+                checkout is disabled because the
+                product catalog is currently
+                unavailable.
+              </div>
             )}
 
-            <button
-              className="secondary-btn"
-              style={{
-                width: "100%",
-                marginTop: "14px",
-              }}
-              onClick={() => onNavigate("products")}
-            >
-              Continue Shopping
-            </button>
+            {settings.catalogEnabled &&
+              !purchasingEnabled && (
+                <div style={storeNoticeStyle}>
+                  Your cart remains available, but
+                  checkout is disabled while the
+                  store status is{" "}
+                  <strong>
+                    {storeStatusLabel}
+                  </strong>
+                  .
+                </div>
+              )}
 
-            <button
-              className="secondary-btn"
-              style={{
-                width: "100%",
-                marginTop: "14px",
-              }}
-              onClick={() =>
-                onNavigate("researchAgreement")
-              }
-            >
-              Research Agreement
-            </button>
-          </aside>
-        </div>
+            {invalidPriceItems.length > 0 && (
+              <div style={warningNoticeStyle}>
+                {invalidPriceItems.length} cart item
+                {invalidPriceItems.length === 1
+                  ? ""
+                  : "s"}{" "}
+                no longer{" "}
+                {invalidPriceItems.length === 1
+                  ? "has"
+                  : "have"}{" "}
+                valid pricing. Remove the affected
+                item
+                {invalidPriceItems.length === 1
+                  ? ""
+                  : "s"}{" "}
+                before checkout.
+              </div>
+            )}
+          </div>
 
-        <div style={researchNoticeStyle}>
-          For Research Use Only. Products are not intended for
-          human consumption.
-        </div>
-      </section>
-    </main>
+          <div
+            className="cart-layout"
+            style={cartLayoutStyle}
+          >
+            <div
+              className="cart-items-panel"
+              style={itemsPanelStyle}
+            >
+              <div
+                className="cart-section-header"
+                style={sectionHeaderStyle}
+              >
+                <div>
+                  <p className="eyebrow">
+                    SELECTED PRODUCTS
+                  </p>
+
+                  <h2
+                    className="cart-section-title"
+                    style={sectionTitleStyle}
+                  >
+                    Cart Items
+                  </h2>
+                </div>
+
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={onClearCart}
+                >
+                  Clear Cart
+                </button>
+              </div>
+
+              <div style={itemStackStyle}>
+                {cartItems.map((item) => {
+                  const hasPrice =
+                    Number.isFinite(item.price);
+
+                  const quantity = Number(
+                    item.quantity || 0
+                  );
+
+                  const lineTotal = hasPrice
+                    ? item.price * quantity
+                    : 0;
+
+                  const itemKey =
+                    getItemKey(item);
+
+                  return (
+                    <article
+                      key={itemKey}
+                      className="cart-item"
+                      style={cartItemStyle}
+                    >
+                      <div
+                        className="cart-item-visual"
+                        style={itemVisualStyle}
+                      >
+                        {item.image ? (
+                          <div
+                            className="cart-image-wrapper"
+                            style={
+                              imagePreviewWrapStyle
+                            }
+                          >
+                            <img
+                              src={item.image}
+                              alt={`${item.name} research product`}
+                              style={
+                                imagePreviewStyle
+                              }
+                            />
+                          </div>
+                        ) : (
+                          <div
+                            style={
+                              placeholderVisualStyle
+                            }
+                          >
+                            <div
+                              style={
+                                bottleCapStyle
+                              }
+                            />
+
+                            <div
+                              style={bottleStyle}
+                            >
+                              <div
+                                style={labelStyle}
+                              >
+                                <strong>
+                                  304
+                                </strong>
+
+                                <span>
+                                  {item.codeName}
+                                </span>
+
+                                <small>
+                                  {item.strength}
+                                </small>
+
+                                <small
+                                  style={
+                                    labelNoticeStyle
+                                  }
+                                >
+                                  Research Use Only
+                                </small>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div
+                        className="cart-item-info"
+                        style={itemInfoStyle}
+                      >
+                        <p style={categoryStyle}>
+                          {item.category}
+                        </p>
+
+                        <h3
+                          className="cart-item-title"
+                          style={itemTitleStyle}
+                        >
+                          {item.name}
+                        </h3>
+
+                        <p
+                          className="cart-item-code"
+                          style={codeStyle}
+                        >
+                          {item.codeName} ·{" "}
+                          {item.strength}
+                        </p>
+
+                        {item.composition && (
+                          <div
+                            style={
+                              compositionStyle
+                            }
+                          >
+                            <span>
+                              Composition
+                            </span>
+
+                            <strong>
+                              {item.composition}
+                            </strong>
+                          </div>
+                        )}
+
+                        <p
+                          className="cart-item-description"
+                          style={itemTextStyle}
+                        >
+                          {item.description}
+                        </p>
+
+                        <div
+                          style={statusRowStyle}
+                        >
+                          {item.purity && (
+                            <span
+                              style={
+                                statusBadgeStyle
+                              }
+                            >
+                              {item.purity}
+                            </span>
+                          )}
+
+                          {item.coaStatus && (
+                            <span
+                              style={
+                                statusBadgeStyle
+                              }
+                            >
+                              {item.coaStatus}
+                            </span>
+                          )}
+
+                          {item.qrStatus && (
+                            <span
+                              style={
+                                statusBadgeStyle
+                              }
+                            >
+                              {item.qrStatus}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div
+                        className="cart-item-actions"
+                        style={itemActionStyle}
+                      >
+                        <div
+                          style={
+                            hasPrice
+                              ? priceStyle
+                              : missingPriceStyle
+                          }
+                        >
+                          <span>
+                            Price
+                          </span>
+
+                          <strong>
+                            {formatPrice(
+                              item.price
+                            )}
+                          </strong>
+                        </div>
+
+                        <div
+                          style={
+                            quantityBoxStyle
+                          }
+                        >
+                          <span>
+                            Quantity
+                          </span>
+
+                          <div
+                            style={
+                              quantityControlsStyle
+                            }
+                          >
+                            <button
+                              type="button"
+                              className="secondary-btn"
+                              onClick={() =>
+                                onDecreaseQuantity(
+                                  itemKey
+                                )
+                              }
+                              aria-label={`Decrease ${item.name} ${item.strength} quantity`}
+                            >
+                              −
+                            </button>
+
+                            <strong
+                              style={
+                                quantityValueStyle
+                              }
+                            >
+                              {quantity}
+                            </strong>
+
+                            <button
+                              type="button"
+                              className="secondary-btn"
+                              onClick={() =>
+                                onIncreaseQuantity(
+                                  itemKey
+                                )
+                              }
+                              aria-label={`Increase ${item.name} ${item.strength} quantity`}
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+
+                        <div
+                          style={lineTotalStyle}
+                        >
+                          <span>
+                            Line Total
+                          </span>
+
+                          <strong>
+                            {hasPrice
+                              ? `$${lineTotal.toFixed(
+                                  2
+                                )}`
+                              : "Unavailable"}
+                          </strong>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="secondary-btn"
+                          style={{
+                            width: "100%",
+                          }}
+                          onClick={() =>
+                            onRemoveItem(
+                              itemKey
+                            )
+                          }
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+
+            <aside
+              className="cart-summary-panel"
+              style={summaryPanelStyle}
+            >
+              <p className="eyebrow">
+                ORDER SUMMARY
+              </p>
+
+              <h2
+                className="cart-summary-title"
+                style={summaryTitleStyle}
+              >
+                Summary
+              </h2>
+
+              <div style={summaryRowStyle}>
+                <span>
+                  Total Products
+                </span>
+
+                <strong>
+                  {cartItems.length}
+                </strong>
+              </div>
+
+              <div style={summaryRowStyle}>
+                <span>
+                  Total Items
+                </span>
+
+                <strong>
+                  {totalQuantity}
+                </strong>
+              </div>
+
+              <div style={summaryRowStyle}>
+                <span>
+                  Subtotal
+                </span>
+
+                <strong>
+                  ${subtotal.toFixed(2)}
+                </strong>
+              </div>
+
+              <div style={summaryRowStyle}>
+                <span>
+                  Shipping
+                </span>
+
+                <strong>
+                  Calculated Later
+                </strong>
+              </div>
+
+              <div style={summaryRowStyle}>
+                <span>
+                  Taxes
+                </span>
+
+                <strong>
+                  Calculated Later
+                </strong>
+              </div>
+
+              <div style={summaryRowStyle}>
+                <span>
+                  Store Status
+                </span>
+
+                <strong>
+                  {storeStatusLabel}
+                </strong>
+              </div>
+
+              {!settings.catalogEnabled ? (
+                <div style={noticeBoxStyle}>
+                  Checkout is unavailable while
+                  the catalog is disabled.
+                </div>
+              ) : !purchasingEnabled ? (
+                <div style={noticeBoxStyle}>
+                  Checkout is unavailable while
+                  the store is set to{" "}
+                  {storeStatusLabel}.
+                </div>
+              ) : invalidPriceItems.length >
+                0 ? (
+                <div
+                  style={warningSummaryStyle}
+                >
+                  Remove products without valid
+                  pricing before continuing to
+                  checkout.
+                </div>
+              ) : (
+                <div style={noticeBoxStyle}>
+                  Shipping and applicable taxes
+                  will be calculated during
+                  checkout.
+                </div>
+              )}
+
+              {checkoutEnabled ? (
+                <button
+                  type="button"
+                  className="primary-btn"
+                  style={{
+                    width: "100%",
+                    marginTop: "24px",
+                  }}
+                  onClick={handleCheckout}
+                >
+                  Continue To Checkout
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  style={
+                    disabledCheckoutButtonStyle
+                  }
+                  disabled
+                >
+                  {!settings.catalogEnabled
+                    ? "Catalog Unavailable"
+                    : !purchasingEnabled
+                    ? "Checkout Unavailable"
+                    : "Resolve Cart Items"}
+                </button>
+              )}
+
+              <button
+                type="button"
+                className="secondary-btn"
+                style={{
+                  width: "100%",
+                  marginTop: "14px",
+                }}
+                onClick={() =>
+                  onNavigate("products")
+                }
+              >
+                Continue Shopping
+              </button>
+
+              <button
+                type="button"
+                className="secondary-btn"
+                style={{
+                  width: "100%",
+                  marginTop: "14px",
+                }}
+                onClick={() =>
+                  onNavigate(
+                    "researchAgreement"
+                  )
+                }
+              >
+                Research Agreement
+              </button>
+            </aside>
+          </div>
+
+          <div style={researchNoticeStyle}>
+            For Research Use Only. Products are
+            not intended for human consumption.
+          </div>
+        </section>
+      </main>
+    </>
   );
 }
+
+const cartResponsiveCss = `
+  .cart-page,
+  .cart-page *,
+  .cart-page *::before,
+  .cart-page *::after {
+    box-sizing: border-box;
+  }
+
+  .cart-page {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .cart-page-inner,
+  .cart-layout,
+  .cart-items-panel,
+  .cart-summary-panel,
+  .cart-item,
+  .cart-item > div {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .cart-item-title,
+  .cart-item-code,
+  .cart-item-description,
+  .cart-summary-panel span,
+  .cart-summary-panel strong {
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+
+  .cart-page img {
+    display: block;
+    max-width: 100%;
+  }
+
+  @media (max-width: 1000px) {
+    .cart-page {
+      padding: 65px 24px !important;
+    }
+
+    .cart-layout {
+      grid-template-columns:
+        minmax(0, 1fr) !important;
+    }
+
+    .cart-summary-panel {
+      position: static !important;
+      top: auto !important;
+      width: 100% !important;
+    }
+
+    .cart-item {
+      grid-template-columns:
+        minmax(110px, 140px)
+        minmax(0, 1fr) !important;
+    }
+
+    .cart-item-actions {
+      grid-column: 1 / -1 !important;
+      grid-template-columns:
+        repeat(3, minmax(0, 1fr)) !important;
+    }
+
+    .cart-item-actions > button {
+      grid-column: 1 / -1;
+    }
+  }
+
+  @media (max-width: 700px) {
+    .cart-page {
+      padding: 44px 14px !important;
+    }
+
+    .cart-hero-panel,
+    .cart-empty-panel {
+      padding: 32px 20px !important;
+      border-radius: 22px !important;
+    }
+
+    .cart-main-title {
+      font-size:
+        clamp(38px, 12vw, 52px) !important;
+    }
+
+    .cart-items-panel,
+    .cart-summary-panel {
+      padding: 20px !important;
+      border-radius: 22px !important;
+    }
+
+    .cart-section-header {
+      align-items: stretch !important;
+    }
+
+    .cart-section-header > button {
+      width: 100%;
+    }
+
+    .cart-section-title {
+      font-size:
+        clamp(30px, 10vw, 38px) !important;
+    }
+
+    .cart-item {
+      grid-template-columns:
+        minmax(0, 1fr) !important;
+      gap: 18px !important;
+      padding: 18px !important;
+      border-radius: 18px !important;
+    }
+
+    .cart-item-visual {
+      justify-content: center !important;
+    }
+
+    .cart-item-actions {
+      grid-column: auto !important;
+      grid-template-columns:
+        minmax(0, 1fr) !important;
+    }
+
+    .cart-item-actions > button {
+      grid-column: auto;
+    }
+
+    .cart-summary-title {
+      font-size:
+        clamp(28px, 9vw, 34px) !important;
+    }
+  }
+
+  @media (max-width: 420px) {
+    .cart-page {
+      padding: 34px 8px !important;
+    }
+
+    .cart-hero-panel,
+    .cart-empty-panel {
+      padding: 26px 15px !important;
+    }
+
+    .cart-items-panel,
+    .cart-summary-panel {
+      padding: 14px !important;
+      border-radius: 18px !important;
+    }
+
+    .cart-item {
+      padding: 14px !important;
+    }
+
+    .cart-item-title {
+      font-size: 24px !important;
+    }
+
+    .cart-page button {
+      max-width: 100%;
+      white-space: normal;
+    }
+  }
+`;
+
+const pageStyle = {
+  padding: "90px 60px",
+};
+
+const pageInnerStyle = {
+  maxWidth: "1200px",
+  margin: "0 auto",
+};
 
 const emptyPanelStyle = {
   maxWidth: "900px",
@@ -553,20 +990,24 @@ const emptyPanelStyle = {
   textAlign: "center",
   background:
     "radial-gradient(circle at top, rgba(61,165,255,0.18), transparent 40%), rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.09)",
+  border:
+    "1px solid rgba(255,255,255,0.09)",
   borderRadius: "30px",
   padding: "60px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
+  boxShadow:
+    "0 30px 80px rgba(0,0,0,0.45)",
 };
 
 const heroPanelStyle = {
   textAlign: "center",
   background:
     "radial-gradient(circle at top, rgba(61,165,255,0.2), transparent 42%), rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.09)",
+  border:
+    "1px solid rgba(255,255,255,0.09)",
   borderRadius: "30px",
   padding: "56px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
+  boxShadow:
+    "0 30px 80px rgba(0,0,0,0.45)",
   marginBottom: "30px",
 };
 
@@ -602,8 +1043,10 @@ const openStatusStyle = {
   margin: "18px auto 0",
   padding: "9px 13px",
   borderRadius: "999px",
-  border: "1px solid rgba(61,165,255,0.42)",
-  background: "rgba(61,165,255,0.17)",
+  border:
+    "1px solid rgba(61,165,255,0.42)",
+  background:
+    "rgba(61,165,255,0.17)",
   color: "#9ed8ff",
   fontSize: "11px",
   fontWeight: "900",
@@ -617,8 +1060,10 @@ const closedStatusStyle = {
   margin: "18px auto 0",
   padding: "9px 13px",
   borderRadius: "999px",
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(255,255,255,0.06)",
+  border:
+    "1px solid rgba(255,255,255,0.12)",
+  background:
+    "rgba(255,255,255,0.06)",
   color: "#c8c8c8",
   fontSize: "11px",
   fontWeight: "900",
@@ -631,7 +1076,8 @@ const storeNoticeStyle = {
   margin: "24px auto 0",
   padding: "16px 18px",
   borderRadius: "16px",
-  border: "1px solid rgba(255,255,255,0.09)",
+  border:
+    "1px solid rgba(255,255,255,0.09)",
   background: "rgba(0,0,0,0.24)",
   color: "#aeb7bf",
   lineHeight: "1.65",
@@ -642,8 +1088,10 @@ const warningNoticeStyle = {
   margin: "14px auto 0",
   padding: "16px 18px",
   borderRadius: "16px",
-  border: "1px solid rgba(61,165,255,0.24)",
-  background: "rgba(61,165,255,0.09)",
+  border:
+    "1px solid rgba(61,165,255,0.24)",
+  background:
+    "rgba(61,165,255,0.09)",
   color: "#bfe7ff",
   lineHeight: "1.65",
 };
@@ -665,12 +1113,15 @@ const cartLayoutStyle = {
 };
 
 const itemsPanelStyle = {
+  minWidth: 0,
   background:
     "radial-gradient(circle at top left, rgba(61,165,255,0.14), transparent 35%), rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.09)",
+  border:
+    "1px solid rgba(255,255,255,0.09)",
   borderRadius: "30px",
   padding: "34px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
+  boxShadow:
+    "0 30px 80px rgba(0,0,0,0.45)",
 };
 
 const sectionHeaderStyle = {
@@ -698,28 +1149,34 @@ const itemStackStyle = {
 };
 
 const cartItemStyle = {
+  minWidth: 0,
   display: "grid",
   gridTemplateColumns:
-    "minmax(120px, 140px) minmax(220px, 1fr) minmax(170px, 190px)",
+    "minmax(120px, 140px) minmax(0, 1fr) minmax(170px, 190px)",
   gap: "22px",
   alignItems: "center",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
+  background:
+    "rgba(255,255,255,0.045)",
+  border:
+    "1px solid rgba(255,255,255,0.09)",
   borderRadius: "24px",
   padding: "22px",
 };
 
 const itemVisualStyle = {
+  minWidth: 0,
   display: "grid",
   justifyContent: "center",
 };
 
 const imagePreviewWrapStyle = {
   width: "130px",
+  maxWidth: "100%",
   height: "160px",
   borderRadius: "18px",
   overflow: "hidden",
-  border: "1px solid rgba(61,165,255,0.2)",
+  border:
+    "1px solid rgba(61,165,255,0.2)",
   background:
     "radial-gradient(circle, rgba(61,165,255,0.18), rgba(0,0,0,0.72))",
 };
@@ -746,15 +1203,18 @@ const bottleCapStyle = {
 
 const bottleStyle = {
   width: "90px",
+  maxWidth: "100%",
   height: "132px",
   borderRadius: "22px 22px 28px 28px",
   background:
     "linear-gradient(135deg, rgba(255,255,255,0.88), rgba(255,255,255,0.34))",
-  border: "1px solid rgba(255,255,255,0.7)",
+  border:
+    "1px solid rgba(255,255,255,0.7)",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  boxShadow: "0 22px 55px rgba(0,0,0,0.42)",
+  boxShadow:
+    "0 22px 55px rgba(0,0,0,0.42)",
 };
 
 const labelStyle = {
@@ -763,7 +1223,8 @@ const labelStyle = {
   borderRadius: "11px",
   background:
     "linear-gradient(180deg, #050505, #171717)",
-  border: "1px solid rgba(61,165,255,0.35)",
+  border:
+    "1px solid rgba(61,165,255,0.35)",
   color: "#ffffff",
   display: "grid",
   alignContent: "center",
@@ -798,18 +1259,21 @@ const itemTitleStyle = {
   fontSize: "28px",
   lineHeight: "1.2",
   marginBottom: "6px",
+  overflowWrap: "anywhere",
 };
 
 const codeStyle = {
   color: "#9ed8ff",
   fontWeight: "900",
   marginBottom: "12px",
+  overflowWrap: "anywhere",
 };
 
 const itemTextStyle = {
   color: "#c8c8c8",
   lineHeight: "1.7",
   fontSize: "14px",
+  overflowWrap: "anywhere",
 };
 
 const compositionStyle = {
@@ -818,10 +1282,13 @@ const compositionStyle = {
   marginBottom: "13px",
   padding: "11px",
   borderRadius: "12px",
-  border: "1px solid rgba(61,165,255,0.18)",
-  background: "rgba(61,165,255,0.08)",
+  border:
+    "1px solid rgba(61,165,255,0.18)",
+  background:
+    "rgba(61,165,255,0.08)",
   color: "#c8eaff",
   fontSize: "12px",
+  overflowWrap: "anywhere",
 };
 
 const statusRowStyle = {
@@ -832,45 +1299,59 @@ const statusRowStyle = {
 };
 
 const statusBadgeStyle = {
+  maxWidth: "100%",
   padding: "6px 9px",
   borderRadius: "999px",
-  border: "1px solid rgba(255,255,255,0.08)",
-  background: "rgba(255,255,255,0.045)",
+  border:
+    "1px solid rgba(255,255,255,0.08)",
+  background:
+    "rgba(255,255,255,0.045)",
   color: "#aeb7bf",
   fontSize: "10px",
   fontWeight: "800",
+  overflowWrap: "anywhere",
 };
 
 const itemActionStyle = {
+  minWidth: 0,
   display: "grid",
   gap: "12px",
 };
 
 const priceStyle = {
+  minWidth: 0,
   display: "grid",
   gap: "4px",
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
+  background:
+    "rgba(61,165,255,0.12)",
+  border:
+    "1px solid rgba(61,165,255,0.28)",
   color: "#9ed8ff",
   borderRadius: "14px",
   padding: "13px",
 };
 
 const missingPriceStyle = {
+  minWidth: 0,
   display: "grid",
   gap: "4px",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
+  background:
+    "rgba(255,255,255,0.045)",
+  border:
+    "1px solid rgba(255,255,255,0.09)",
   color: "#c8c8c8",
   borderRadius: "14px",
   padding: "13px",
 };
 
 const quantityBoxStyle = {
+  minWidth: 0,
   display: "grid",
   gap: "9px",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
+  background:
+    "rgba(255,255,255,0.045)",
+  border:
+    "1px solid rgba(255,255,255,0.09)",
   color: "#c8c8c8",
   borderRadius: "14px",
   padding: "13px",
@@ -878,7 +1359,8 @@ const quantityBoxStyle = {
 
 const quantityControlsStyle = {
   display: "grid",
-  gridTemplateColumns: "1fr auto 1fr",
+  gridTemplateColumns:
+    "minmax(0, 1fr) auto minmax(0, 1fr)",
   gap: "10px",
   alignItems: "center",
 };
@@ -890,24 +1372,30 @@ const quantityValueStyle = {
 };
 
 const lineTotalStyle = {
+  minWidth: 0,
   display: "grid",
   gap: "4px",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
+  background:
+    "rgba(255,255,255,0.045)",
+  border:
+    "1px solid rgba(255,255,255,0.09)",
   color: "#ffffff",
   borderRadius: "14px",
   padding: "13px",
 };
 
 const summaryPanelStyle = {
+  minWidth: 0,
   position: "sticky",
   top: "110px",
   background:
     "radial-gradient(circle at top left, rgba(61,165,255,0.16), transparent 35%), rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.09)",
+  border:
+    "1px solid rgba(255,255,255,0.09)",
   borderRadius: "28px",
   padding: "32px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
+  boxShadow:
+    "0 30px 80px rgba(0,0,0,0.45)",
 };
 
 const summaryTitleStyle = {
@@ -921,11 +1409,16 @@ const summaryTitleStyle = {
 };
 
 const summaryRowStyle = {
+  minWidth: 0,
   display: "flex",
   justifyContent: "space-between",
-  gap: "18px",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
+  alignItems: "flex-start",
+  flexWrap: "wrap",
+  gap: "10px 18px",
+  background:
+    "rgba(255,255,255,0.045)",
+  border:
+    "1px solid rgba(255,255,255,0.09)",
   borderRadius: "14px",
   padding: "15px",
   color: "#c8c8c8",
@@ -934,8 +1427,10 @@ const summaryRowStyle = {
 
 const noticeBoxStyle = {
   marginTop: "20px",
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
+  background:
+    "rgba(61,165,255,0.12)",
+  border:
+    "1px solid rgba(61,165,255,0.28)",
   color: "#9ed8ff",
   borderRadius: "16px",
   padding: "16px",
@@ -946,8 +1441,10 @@ const noticeBoxStyle = {
 
 const warningSummaryStyle = {
   marginTop: "20px",
-  background: "rgba(255,255,255,0.055)",
-  border: "1px solid rgba(255,255,255,0.1)",
+  background:
+    "rgba(255,255,255,0.055)",
+  border:
+    "1px solid rgba(255,255,255,0.1)",
   color: "#c8c8c8",
   borderRadius: "16px",
   padding: "16px",
@@ -961,8 +1458,10 @@ const disabledCheckoutButtonStyle = {
   marginTop: "24px",
   padding: "14px 18px",
   borderRadius: "14px",
-  border: "1px solid rgba(255,255,255,0.1)",
-  background: "rgba(255,255,255,0.045)",
+  border:
+    "1px solid rgba(255,255,255,0.1)",
+  background:
+    "rgba(255,255,255,0.045)",
   color: "#75818c",
   fontWeight: "900",
   cursor: "not-allowed",
@@ -971,8 +1470,10 @@ const disabledCheckoutButtonStyle = {
 const researchNoticeStyle = {
   marginTop: "30px",
   textAlign: "center",
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
+  background:
+    "rgba(61,165,255,0.12)",
+  border:
+    "1px solid rgba(61,165,255,0.28)",
   color: "#9ed8ff",
   borderRadius: "20px",
   padding: "20px",
