@@ -6,13 +6,16 @@ const MIN_PASSWORD_LENGTH = 12;
 const MAX_PASSWORD_LENGTH = 128;
 const PASSWORD_HASH_ITERATIONS = 100_000;
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
-
 const ACCOUNT_KEY_PREFIX = "account:";
 const SESSION_COOKIE_NAME = "__Host-304_session";
 
 export default {
   async fetch(request, env, context) {
     const url = new URL(request.url);
+
+    if (url.pathname === "/api/admin/accounts") {
+      return handleAdminAccountDirectoryRequest(request, env);
+    }
 
     if (url.pathname === "/api/admin/accounts/reset-password") {
       return handleAdminPasswordResetRequest(request, env);
@@ -26,12 +29,24 @@ export default {
       request.method === "POST" &&
       ["/api/auth/register", "/api/auth/login"].includes(url.pathname)
     ) {
-      const response = await coreWorker.fetch(request, env, context);
-      return upgradeAuthenticationResponse(response, env);
+      const response = await coreWorker.fetch(
+        request,
+        env,
+        context
+      );
+
+      return upgradeAuthenticationResponse(
+        response,
+        env
+      );
     }
 
     if (url.pathname === "/api/auth/session") {
-      const sessionState = await inspectCustomerSession(request, env);
+      const sessionState =
+        await inspectCustomerSession(
+          request,
+          env
+        );
 
       if (!sessionState.session) {
         return jsonResponse(
@@ -43,7 +58,8 @@ export default {
           200,
           sessionState.hasToken
             ? {
-                "Set-Cookie": buildClearedSessionCookie(),
+                "Set-Cookie":
+                  buildClearedSessionCookie(),
               }
             : {}
         );
@@ -52,194 +68,321 @@ export default {
       return jsonResponse({
         success: true,
         authenticated: true,
-        account: toPublicAccount(sessionState.session.account),
-        requiresPasswordChange: Boolean(
-          sessionState.session.account.mustChangePassword
-        ),
+
+        account:
+          toPublicAccount(
+            sessionState.session
+              .account
+          ),
+
+        requiresPasswordChange:
+          Boolean(
+            sessionState.session
+              .account
+              .mustChangePassword
+          ),
       });
     }
 
-    if (url.pathname === "/api/account/orders") {
-      const sessionState = await inspectCustomerSession(request, env);
+    if (
+      url.pathname ===
+      "/api/account/orders"
+    ) {
+      const sessionState =
+        await inspectCustomerSession(
+          request,
+          env
+        );
 
       if (!sessionState.session) {
         return jsonResponse(
           {
             success: false,
-            error: "Customer authentication is required.",
+
+            error:
+              "Customer authentication is required.",
           },
           401,
           {
-            "Set-Cookie": buildClearedSessionCookie(),
+            "Set-Cookie":
+              buildClearedSessionCookie(),
           }
         );
       }
 
-      if (sessionState.session.account.mustChangePassword) {
+      if (
+        sessionState.session
+          .account
+          .mustChangePassword
+      ) {
         return jsonResponse(
           {
             success: false,
+
             error:
               "Change your temporary password before accessing account orders.",
-            requiresPasswordChange: true,
+
+            requiresPasswordChange:
+              true,
           },
           403
         );
       }
     }
 
-    if (url.pathname === "/api/order" && request.method === "POST") {
-      const sessionState = await inspectCustomerSession(request, env);
+    if (
+      url.pathname ===
+        "/api/order" &&
+      request.method ===
+        "POST"
+    ) {
+      const sessionState =
+        await inspectCustomerSession(
+          request,
+          env
+        );
 
-      if (sessionState.hasToken && !sessionState.session) {
+      if (
+        sessionState.hasToken &&
+        !sessionState.session
+      ) {
         return jsonResponse(
           {
             success: false,
+
             error:
               "Your secure session has expired. Log in again before submitting the order.",
           },
           401,
           {
-            "Set-Cookie": buildClearedSessionCookie(),
+            "Set-Cookie":
+              buildClearedSessionCookie(),
           }
         );
       }
 
       if (
         sessionState.session &&
-        sessionState.session.account.mustChangePassword
+        sessionState.session
+          .account
+          .mustChangePassword
       ) {
         return jsonResponse(
           {
             success: false,
+
             error:
               "Change your temporary password before submitting an order.",
-            requiresPasswordChange: true,
+
+            requiresPasswordChange:
+              true,
           },
           403
         );
       }
     }
 
-    return coreWorker.fetch(request, env, context);
+    return coreWorker.fetch(
+      request,
+      env,
+      context
+    );
   },
 };
 
-async function upgradeAuthenticationResponse(response, env) {
-  if (!response.ok) {
-    return response;
-  }
-
-  let result;
-
+async function handleAdminAccountDirectoryRequest(
+  request,
+  env
+) {
   try {
-    result = await response.clone().json();
-  } catch {
-    return response;
-  }
-
-  if (
-    !result?.success ||
-    !result?.authenticated ||
-    !result?.account?.email ||
-    !result?.account?.id
-  ) {
-    return response;
-  }
-
-  try {
-    validateEnvironment(env);
-
-    const accountKey = await getAccountKey(result.account.email);
-    const storedAccount = await env.DOCUMENTS_KV.get(accountKey, "json");
-    const account = storedAccount || result.account;
-    const sessionVersion = getAccountSessionVersion(account);
-
-    if (storedAccount && storedAccount.sessionVersion !== sessionVersion) {
-      await putAccountRecord(env, accountKey, {
-        ...storedAccount,
-        sessionVersion,
-      });
-    }
-
-    const token = await createCustomerSessionToken(
-      {
-        ...account,
-        sessionVersion,
-      },
+    validateEnvironment(
       env
     );
 
-    const headers = new Headers(response.headers);
+    if (
+      request.method !==
+      "GET"
+    ) {
+      throw new ApiRequestError(
+        "Method not allowed.",
+        405
+      );
+    }
 
-    headers.set(
-      "Set-Cookie",
-      buildSessionCookie(token)
+    requireSameOrigin(
+      request
     );
 
-    headers.set(
-      "Cache-Control",
-      "no-store"
+    await requireAdminAuthorization(
+      request,
+      env
     );
 
-    headers.set(
-      "Content-Type",
-      "application/json; charset=utf-8"
-    );
+    const records =
+      await listCustomerAccounts(
+        env
+      );
 
-    headers.delete(
-      "Content-Length"
-    );
-
-    const upgradedResult = {
-      ...result,
-
-      account:
-        toPublicAccount(
-          account
-        ),
-
-      requiresPasswordChange:
-        Boolean(
-          account.mustChangePassword
-        ),
-    };
-
-    return new Response(
-      JSON.stringify(
-        upgradedResult
-      ),
-      {
-        status:
-          response.status,
-
-        statusText:
-          response.statusText,
-
-        headers,
-      }
-    );
-  } catch (error) {
+    return jsonResponse({
+      success: true,
+      records,
+      accounts: records,
+      count: records.length,
+    });
+  } catch (
+    error
+  ) {
     console.error(
-      "Secure session upgrade failed:",
+      "Admin account directory request error:",
       error
     );
 
-    return jsonResponse(
-      {
-        success: false,
-        authenticated: false,
-
-        error:
-          "The account was accepted, but the secure session could not be finalized. Please log in again.",
-      },
-      503,
-      {
-        "Set-Cookie":
-          buildClearedSessionCookie(),
-      }
+    return handleApiError(
+      error
     );
   }
+}
+
+async function listCustomerAccounts(
+  env
+) {
+  const accountKeys = [];
+
+  let cursor = "";
+  let listComplete =
+    false;
+
+  while (!listComplete) {
+    const options = {
+      prefix:
+        ACCOUNT_KEY_PREFIX,
+
+      limit:
+        1000,
+    };
+
+    if (cursor) {
+      options.cursor =
+        cursor;
+    }
+
+    const page =
+      await env.DOCUMENTS_KV.list(
+        options
+      );
+
+    accountKeys.push(
+      ...(
+        Array.isArray(
+          page.keys
+        )
+          ? page.keys.map(
+              (
+                key
+              ) =>
+                key.name
+            )
+          : []
+      )
+    );
+
+    listComplete =
+      page.list_complete ===
+      true;
+
+    cursor =
+      page.cursor ||
+      "";
+
+    if (
+      !listComplete &&
+      !cursor
+    ) {
+      throw new ApiRequestError(
+        "The customer account directory could not be fully paginated.",
+        503
+      );
+    }
+  }
+
+  const accounts = [];
+
+  for (
+    let index = 0;
+
+    index <
+    accountKeys.length;
+
+    index += 100
+  ) {
+    const batch =
+      accountKeys.slice(
+        index,
+        index + 100
+      );
+
+    if (
+      batch.length ===
+      0
+    ) {
+      continue;
+    }
+
+    const values =
+      await env.DOCUMENTS_KV.get(
+        batch,
+        {
+          type:
+            "json",
+        }
+      );
+
+    for (
+      const key of batch
+    ) {
+      const account =
+        values.get(
+          key
+        );
+
+      if (
+        account &&
+        typeof account ===
+          "object"
+      ) {
+        accounts.push(
+          toAdminAccountSummary(
+            account
+          )
+        );
+      }
+    }
+  }
+
+  return accounts.sort(
+    (
+      left,
+      right
+    ) => {
+      const leftDate =
+        String(
+          left.createdAt ||
+            left.updatedAt ||
+            ""
+        );
+
+      const rightDate =
+        String(
+          right.createdAt ||
+            right.updatedAt ||
+            ""
+        );
+
+      return rightDate.localeCompare(
+        leftDate
+      );
+    }
+  );
 }
 
 async function handleAdminPasswordResetRequest(
@@ -247,17 +390,27 @@ async function handleAdminPasswordResetRequest(
   env
 ) {
   try {
-    validateEnvironment(env);
+    validateEnvironment(
+      env
+    );
 
-    if (request.method !== "POST") {
+    if (
+      request.method !==
+      "POST"
+    ) {
       throw new ApiRequestError(
         "Method not allowed.",
         405
       );
     }
 
-    requireSameOrigin(request);
-    validateJsonContentType(request);
+    requireSameOrigin(
+      request
+    );
+
+    validateJsonContentType(
+      request
+    );
 
     await requireAdminAuthorization(
       request,
@@ -294,7 +447,8 @@ async function handleAdminPasswordResetRequest(
 
     if (
       !account ||
-      account.status !== "active"
+      account.status !==
+        "active"
     ) {
       throw new ApiRequestError(
         "No active customer account was found for that email address.",
@@ -308,7 +462,9 @@ async function handleAdminPasswordResetRequest(
       );
 
     const salt =
-      randomBytes(16);
+      randomBytes(
+        16
+      );
 
     const passwordHash =
       await derivePasswordHash(
@@ -347,7 +503,8 @@ async function handleAdminPasswordResetRequest(
       sessionVersion:
         getAccountSessionVersion(
           account
-        ) + 1,
+        ) +
+        1,
 
       updatedAt:
         now,
@@ -373,10 +530,17 @@ async function handleAdminPasswordResetRequest(
       requiresPasswordChange:
         true,
 
+      account:
+        toAdminAccountSummary(
+          updatedAccount
+        ),
+
       message:
         "A temporary password was created. Existing sessions were invalidated, and the customer must change the password after logging in.",
     });
-  } catch (error) {
+  } catch (
+    error
+  ) {
     console.error(
       "Admin password reset request error:",
       error
@@ -393,17 +557,27 @@ async function handleChangePasswordRequest(
   env
 ) {
   try {
-    validateEnvironment(env);
+    validateEnvironment(
+      env
+    );
 
-    if (request.method !== "POST") {
+    if (
+      request.method !==
+      "POST"
+    ) {
       throw new ApiRequestError(
         "Method not allowed.",
         405
       );
     }
 
-    requireSameOrigin(request);
-    validateJsonContentType(request);
+    requireSameOrigin(
+      request
+    );
+
+    validateJsonContentType(
+      request
+    );
 
     await enforceAuthenticationRateLimit(
       request,
@@ -417,7 +591,9 @@ async function handleChangePasswordRequest(
         env
       );
 
-    if (!sessionState.session) {
+    if (
+      !sessionState.session
+    ) {
       throw new ApiRequestError(
         "Customer authentication is required.",
         401
@@ -432,7 +608,8 @@ async function handleChangePasswordRequest(
 
     const currentPassword =
       String(
-        body.currentPassword == null
+        body.currentPassword ==
+        null
           ? ""
           : body.currentPassword
       );
@@ -454,7 +631,8 @@ async function handleChangePasswordRequest(
     }
 
     const account =
-      sessionState.session.account;
+      sessionState.session
+        .account;
 
     const passwordMatches =
       await verifyPassword(
@@ -462,7 +640,9 @@ async function handleChangePasswordRequest(
         account
       );
 
-    if (!passwordMatches) {
+    if (
+      !passwordMatches
+    ) {
       throw new ApiRequestError(
         "The current password is incorrect.",
         401
@@ -480,7 +660,9 @@ async function handleChangePasswordRequest(
     }
 
     const salt =
-      randomBytes(16);
+      randomBytes(
+        16
+      );
 
     const passwordHash =
       await derivePasswordHash(
@@ -522,7 +704,8 @@ async function handleChangePasswordRequest(
       sessionVersion:
         getAccountSessionVersion(
           account
-        ) + 1,
+        ) +
+        1,
 
       updatedAt:
         now,
@@ -530,14 +713,17 @@ async function handleChangePasswordRequest(
 
     await putAccountRecord(
       env,
-      sessionState.session.accountKey,
+      sessionState.session
+        .accountKey,
       updatedAccount
     );
 
     return jsonResponse(
       {
         success: true,
-        authenticated: false,
+
+        authenticated:
+          false,
 
         message:
           "Password changed successfully. Log in again with your new password.",
@@ -548,7 +734,9 @@ async function handleChangePasswordRequest(
           buildClearedSessionCookie(),
       }
     );
-  } catch (error) {
+  } catch (
+    error
+  ) {
     console.error(
       "Change password request error:",
       error
@@ -560,12 +748,168 @@ async function handleChangePasswordRequest(
   }
 }
 
+async function upgradeAuthenticationResponse(
+  response,
+  env
+) {
+  if (
+    !response.ok
+  ) {
+    return response;
+  }
+
+  let result;
+
+  try {
+    result =
+      await response
+        .clone()
+        .json();
+  } catch {
+    return response;
+  }
+
+  if (
+    !result?.success ||
+    !result?.authenticated ||
+    !result?.account?.email ||
+    !result?.account?.id
+  ) {
+    return response;
+  }
+
+  try {
+    validateEnvironment(
+      env
+    );
+
+    const accountKey =
+      await getAccountKey(
+        result.account.email
+      );
+
+    const storedAccount =
+      await env.DOCUMENTS_KV.get(
+        accountKey,
+        "json"
+      );
+
+    const account =
+      storedAccount ||
+      result.account;
+
+    const sessionVersion =
+      getAccountSessionVersion(
+        account
+      );
+
+    if (
+      storedAccount &&
+      storedAccount.sessionVersion !==
+        sessionVersion
+    ) {
+      await putAccountRecord(
+        env,
+        accountKey,
+        {
+          ...storedAccount,
+          sessionVersion,
+        }
+      );
+    }
+
+    const token =
+      await createCustomerSessionToken(
+        {
+          ...account,
+          sessionVersion,
+        },
+        env
+      );
+
+    const headers =
+      new Headers(
+        response.headers
+      );
+
+    headers.set(
+      "Set-Cookie",
+      buildSessionCookie(
+        token
+      )
+    );
+
+    headers.set(
+      "Cache-Control",
+      "no-store"
+    );
+
+    headers.set(
+      "Content-Type",
+      "application/json; charset=utf-8"
+    );
+
+    headers.delete(
+      "Content-Length"
+    );
+
+    return new Response(
+      JSON.stringify({
+        ...result,
+
+        account:
+          toPublicAccount(
+            account
+          ),
+
+        requiresPasswordChange:
+          Boolean(
+            account.mustChangePassword
+          ),
+      }),
+      {
+        status:
+          response.status,
+
+        statusText:
+          response.statusText,
+
+        headers,
+      }
+    );
+  } catch (
+    error
+  ) {
+    console.error(
+      "Secure session upgrade failed:",
+      error
+    );
+
+    return jsonResponse(
+      {
+        success: false,
+        authenticated: false,
+
+        error:
+          "The account was accepted, but the secure session could not be finalized. Please log in again.",
+      },
+      503,
+      {
+        "Set-Cookie":
+          buildClearedSessionCookie(),
+      }
+    );
+  }
+}
+
 async function inspectCustomerSession(
   request,
   env
 ) {
   try {
-    validateEnvironment(env);
+    validateEnvironment(
+      env
+    );
 
     const token =
       getSessionToken(
@@ -574,8 +918,11 @@ async function inspectCustomerSession(
 
     if (!token) {
       return {
-        hasToken: false,
-        session: null,
+        hasToken:
+          false,
+
+        session:
+          null,
       };
     }
 
@@ -587,8 +934,11 @@ async function inspectCustomerSession(
 
     if (!payload) {
       return {
-        hasToken: true,
-        session: null,
+        hasToken:
+          true,
+
+        session:
+          null,
       };
     }
 
@@ -605,11 +955,14 @@ async function inspectCustomerSession(
 
     if (
       !account ||
-      account.status !== "active" ||
-      account.id !== payload.sub ||
+      account.status !==
+        "active" ||
+      account.id !==
+        payload.sub ||
       normalizeAccountEmail(
         account.email
-      ) !== payload.email ||
+      ) !==
+        payload.email ||
       getAccountSessionVersion(
         account
       ) !==
@@ -618,13 +971,17 @@ async function inspectCustomerSession(
         )
     ) {
       return {
-        hasToken: true,
-        session: null,
+        hasToken:
+          true,
+
+        session:
+          null,
       };
     }
 
     return {
-      hasToken: true,
+      hasToken:
+        true,
 
       session: {
         account,
@@ -632,7 +989,9 @@ async function inspectCustomerSession(
         payload,
       },
     };
-  } catch (error) {
+  } catch (
+    error
+  ) {
     console.error(
       "Customer session inspection failed:",
       error
@@ -682,21 +1041,36 @@ async function putAccountRecord(
 ) {
   await env.DOCUMENTS_KV.put(
     accountKey,
-
     JSON.stringify(
       account
     ),
-
     {
       metadata: {
         accountId:
           account.id,
+
+        firstName:
+          account.firstName ||
+          "",
+
+        lastName:
+          account.lastName ||
+          "",
 
         email:
           account.email,
 
         status:
           account.status,
+
+        mustChangePassword:
+          Boolean(
+            account.mustChangePassword
+          ),
+
+        temporaryPasswordIssuedAt:
+          account.temporaryPasswordIssuedAt ||
+          "",
 
         createdAt:
           account.createdAt ||
@@ -730,7 +1104,9 @@ async function enforceAuthenticationRateLimit(
             `auth:${action}:${clientIdentifier}`,
         }
       );
-  } catch (error) {
+  } catch (
+    error
+  ) {
     console.error(
       "Authentication rate limiter failed:",
       error
@@ -742,7 +1118,9 @@ async function enforceAuthenticationRateLimit(
     );
   }
 
-  if (!result.success) {
+  if (
+    !result.success
+  ) {
     throw new ApiRequestError(
       "Too many account attempts were received. Please wait one minute and try again.",
       429
@@ -772,7 +1150,7 @@ async function requireAdminAuthorization(
   const expectedSecret =
     String(
       env.DOCUMENT_ADMIN_SECRET ||
-      ""
+        ""
     );
 
   if (
@@ -803,17 +1181,19 @@ async function constantTimeStringEqual(
     await Promise.all([
       crypto.subtle.digest(
         "SHA-256",
-
         new TextEncoder().encode(
-          String(left)
+          String(
+            left
+          )
         )
       ),
 
       crypto.subtle.digest(
         "SHA-256",
-
         new TextEncoder().encode(
-          String(right)
+          String(
+            right
+          )
         )
       ),
     ]);
@@ -894,15 +1274,19 @@ function createTemporaryPassword(
 
   for (
     let index =
-      characters.length - 1;
+      characters.length -
+      1;
 
-    index > 0;
+    index >
+    0;
 
-    index -= 1
+    index -=
+      1
   ) {
     const swapIndex =
       randomIndex(
-        index + 1
+        index +
+          1
       );
 
     [
@@ -926,7 +1310,8 @@ function randomIndex(
     !Number.isSafeInteger(
       maximum
     ) ||
-    maximum <= 0
+    maximum <=
+      0
   ) {
     throw new Error(
       "A valid random range is required."
@@ -936,19 +1321,22 @@ function randomIndex(
   const limit =
     Math.floor(
       0x100000000 /
-      maximum
+        maximum
     ) *
     maximum;
 
   const values =
-    new Uint32Array(1);
+    new Uint32Array(
+      1
+    );
 
   do {
     crypto.getRandomValues(
       values
     );
   } while (
-    values[0] >= limit
+    values[0] >=
+    limit
   );
 
   return (
@@ -965,7 +1353,9 @@ function getClientIdentifier(
       "CF-Connecting-IP"
     );
 
-  if (cloudflareIp) {
+  if (
+    cloudflareIp
+  ) {
     return cleanText(
       cloudflareIp,
       100
@@ -977,7 +1367,9 @@ function getClientIdentifier(
       "X-Forwarded-For"
     );
 
-  if (forwardedFor) {
+  if (
+    forwardedFor
+  ) {
     return cleanText(
       forwardedFor.split(
         ","
@@ -1009,7 +1401,8 @@ function requireSameOrigin(
 
   if (
     origin &&
-    origin !== requestUrl.origin
+    origin !==
+      requestUrl.origin
   ) {
     throw new ApiRequestError(
       "Cross-site requests are not allowed.",
@@ -1064,7 +1457,8 @@ async function readJsonRequest(
     Number(
       request.headers.get(
         "Content-Length"
-      ) || 0
+      ) ||
+        0
     );
 
   if (
@@ -1126,7 +1520,8 @@ function validateAccountPassword(
 ) {
   const password =
     String(
-      value == null
+      value ==
+      null
         ? ""
         : value
     );
@@ -1270,7 +1665,9 @@ async function verifyPassword(
       submittedHash,
       expectedHash
     );
-  } catch (error) {
+  } catch (
+    error
+  ) {
     console.error(
       "Password verification failed:",
       error
@@ -1313,15 +1710,23 @@ function constantTimeBytesEqual(
     index <
     maximumLength;
 
-    index += 1
+    index +=
+      1
   ) {
     difference |=
-      (left[index] || 0) ^
-      (right[index] || 0);
+      (
+        left[index] ||
+        0
+      ) ^
+      (
+        right[index] ||
+        0
+      );
   }
 
   return (
-    difference === 0
+    difference ===
+    0
   );
 }
 
@@ -1360,15 +1765,21 @@ async function sha256Hex(
     )
   )
     .map(
-      (byte) =>
+      (
         byte
-          .toString(16)
+      ) =>
+        byte
+          .toString(
+            16
+          )
           .padStart(
             2,
             "0"
           )
     )
-    .join("");
+    .join(
+      ""
+    );
 }
 
 function getAccountSessionVersion(
@@ -1376,14 +1787,16 @@ function getAccountSessionVersion(
 ) {
   const sessionVersion =
     Number(
-      account?.sessionVersion
+      account
+        ?.sessionVersion
     );
 
   return (
     Number.isSafeInteger(
       sessionVersion
     ) &&
-    sessionVersion > 0
+    sessionVersion >
+      0
   )
     ? sessionVersion
     : 1;
@@ -1401,7 +1814,8 @@ function getPayloadSessionVersion(
     Number.isSafeInteger(
       sessionVersion
     ) &&
-    sessionVersion > 0
+    sessionVersion >
+      0
   )
     ? sessionVersion
     : 1;
@@ -1413,7 +1827,8 @@ async function createCustomerSessionToken(
 ) {
   const issuedAt =
     Math.floor(
-      Date.now() / 1000
+      Date.now() /
+        1000
     );
 
   const payload = {
@@ -1487,11 +1902,15 @@ async function verifyCustomerSessionToken(
 ) {
   const parts =
     String(
-      token || ""
-    ).split(".");
+      token ||
+        ""
+    ).split(
+      "."
+    );
 
   if (
-    parts.length !== 2 ||
+    parts.length !==
+      2 ||
     !parts[0] ||
     !parts[1]
   ) {
@@ -1537,17 +1956,21 @@ async function verifyCustomerSessionToken(
       )
     );
 
-  if (!signatureValid) {
+  if (
+    !signatureValid
+  ) {
     return null;
   }
 
   const now =
     Math.floor(
-      Date.now() / 1000
+      Date.now() /
+        1000
     );
 
   if (
-    payload.v !== 1 ||
+    payload.v !==
+      1 ||
     !payload.sub ||
     !payload.email ||
     !Number.isFinite(
@@ -1562,10 +1985,13 @@ async function verifyCustomerSessionToken(
     ) ||
     Number(
       payload.exp
-    ) <= now ||
+    ) <=
+      now ||
     Number(
       payload.iat
-    ) > now + 300
+    ) >
+      now +
+        300
   ) {
     return null;
   }
@@ -1651,13 +2077,10 @@ function getSessionToken(
       "Cookie"
     ) || "";
 
-  const cookies =
-    cookieHeader.split(
-      ";"
-    );
-
   for (
-    const cookie of cookies
+    const cookie of cookieHeader.split(
+      ";"
+    )
   ) {
     const separatorIndex =
       cookie.indexOf(
@@ -1665,7 +2088,8 @@ function getSessionToken(
       );
 
     if (
-      separatorIndex < 0
+      separatorIndex <
+      0
     ) {
       continue;
     }
@@ -1681,7 +2105,8 @@ function getSessionToken(
     const value =
       cookie
         .slice(
-          separatorIndex + 1
+          separatorIndex +
+            1
         )
         .trim();
 
@@ -1728,7 +2153,8 @@ function buildClearedSessionCookie() {
 function bytesToBase64Url(
   bytes
 ) {
-  let binary = "";
+  let binary =
+    "";
 
   for (
     const byte of bytes
@@ -1762,7 +2188,7 @@ function base64UrlToBytes(
   const normalized =
     String(
       value ||
-      ""
+        ""
     )
       .replace(
         /-/g,
@@ -1805,7 +2231,8 @@ function base64UrlToBytes(
     index <
     binary.length;
 
-    index += 1
+    index +=
+      1
   ) {
     bytes[index] =
       binary.charCodeAt(
@@ -1851,12 +2278,79 @@ function toPublicAccount(
   };
 }
 
+function toAdminAccountSummary(
+  account
+) {
+  return {
+    id:
+      String(
+        account.id ||
+          ""
+      ),
+
+    firstName:
+      cleanText(
+        account.firstName,
+        100
+      ),
+
+    lastName:
+      cleanText(
+        account.lastName,
+        100
+      ),
+
+    email:
+      cleanText(
+        account.email,
+        MAX_ACCOUNT_EMAIL_LENGTH
+      ).toLowerCase(),
+
+    status:
+      cleanText(
+        account.status ||
+          "active",
+        50
+      ),
+
+    researchAgreementAcceptedAt:
+      account.researchAgreementAcceptedAt ||
+      "",
+
+    createdAt:
+      account.createdAt ||
+      "",
+
+    updatedAt:
+      account.updatedAt ||
+      "",
+
+    mustChangePassword:
+      Boolean(
+        account.mustChangePassword
+      ),
+
+    temporaryPasswordIssuedAt:
+      account.temporaryPasswordIssuedAt ||
+      "",
+
+    passwordChangedAt:
+      account.passwordChangedAt ||
+      "",
+
+    passwordResetCompletedAt:
+      account.passwordResetCompletedAt ||
+      "",
+  };
+}
+
 function cleanText(
   value,
   maximumLength
 ) {
   return String(
-    value == null
+    value ==
+    null
       ? ""
       : value
   )
@@ -1912,13 +2406,15 @@ function handleApiError(
       : 500;
 
   const shouldClearSession =
-    status === 401 &&
+    status ===
+      401 &&
     error?.message ===
       "Customer authentication is required.";
 
   return jsonResponse(
     {
-      success: false,
+      success:
+        false,
 
       error:
         error?.message ||
