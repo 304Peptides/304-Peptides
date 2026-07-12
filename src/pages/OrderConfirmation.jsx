@@ -1,568 +1,1392 @@
-function OrderConfirmation({ onNavigate, latestOrder }) {
-  if (!latestOrder) {
-    return (
-      <main style={{ padding: "90px 60px" }}>
-        <section style={emptyPanelStyle}>
-          <p className="eyebrow">ORDER CONFIRMATION</p>
+import {
+  useMemo,
+  useState,
+} from "react";
 
-          <h1 style={titleStyle}>
-            No Recent Order
-          </h1>
+import {
+  products,
+} from "../data/products";
 
-          <p style={subtitleStyle}>
-            Place a test order to see the order confirmation page.
-          </p>
+function normalizeValue(
+  value
+) {
+  return String(
+    value || ""
+  )
+    .trim()
+    .toLowerCase();
+}
 
-          <div style={buttonRowStyle}>
-            <button
-              className="primary-btn"
-              onClick={() => onNavigate("products")}
-            >
-              Browse Products
-            </button>
+function buildCatalogVariants() {
+  return products.flatMap(
+    (
+      product
+    ) => {
+      const variants =
+        product.variants?.length
+          ? product.variants
+          : [product];
 
-            <button
-              className="secondary-btn"
-              onClick={() => onNavigate("dashboard")}
-            >
-              Research Hub
-            </button>
-          </div>
-        </section>
-      </main>
-    );
-  }
+      return variants.map(
+        (
+          variant
+        ) => ({
+          ...product,
+          ...variant,
 
-  const items = latestOrder.items || [];
+          name:
+            variant.name ||
+            product.name ||
+            "",
 
-  const subtotal = items.reduce(
-    (total, item) => total + (item.price || 0) * item.quantity,
-    0
-  );
+          category:
+            variant.category ||
+            product.category ||
+            "",
 
-  const customer = latestOrder.customer || {};
+          codeName:
+            variant.codeName ||
+            product.codeName ||
+            "",
 
-  const customerName =
-    customer.firstName || customer.lastName
-      ? `${customer.firstName || ""} ${customer.lastName || ""}`.trim()
-      : "Not saved on older test order";
+          strength:
+            variant.strength ||
+            product.strength ||
+            "",
 
-  const customerEmail = customer.email || "Not saved on older test order";
-
-  const customerAddress =
-    customer.address || customer.city || customer.state || customer.zip
-      ? `${customer.address || ""}, ${customer.city || ""}, ${customer.state || ""} ${customer.zip || ""}`.replace(/^,\s*/, "").trim()
-      : "Not saved on older test order";
-
-  return (
-    <main style={{ padding: "90px 60px" }}>
-      <section style={{ maxWidth: "1200px", margin: "0 auto" }}>
-
-        <div style={successPanelStyle}>
-          <div style={checkIconStyle}>
-            ✓
-          </div>
-
-          <p className="eyebrow">ORDER CONFIRMED</p>
-
-          <h1 style={titleStyle}>
-            Test Order Received
-          </h1>
-
-          <p style={subtitleStyle}>
-            Your prototype order has been saved to the Research Hub. This confirms
-            the front-end checkout flow is working.
-          </p>
-
-          <div style={orderNumberStyle}>
-            Order #{latestOrder.id}
-          </div>
-        </div>
-
-        <div style={orderLayoutStyle}>
-
-          <div style={detailsPanelStyle}>
-            <p className="eyebrow">ORDER DETAILS</p>
-
-            <h2 style={sectionTitleStyle}>
-              Order Summary
-            </h2>
-
-            <div style={summaryGridStyle}>
-              <div style={summaryBoxStyle}>
-                <span>Order Number</span>
-                <strong>{latestOrder.id}</strong>
-              </div>
-
-              <div style={summaryBoxStyle}>
-                <span>Order Date</span>
-                <strong>{latestOrder.date}</strong>
-              </div>
-
-              <div style={summaryBoxStyle}>
-                <span>Status</span>
-                <strong>{latestOrder.status}</strong>
-              </div>
-
-              <div style={summaryBoxStyle}>
-                <span>Total Items</span>
-                <strong>{latestOrder.totalQuantity}</strong>
-              </div>
-            </div>
-
-            <div style={customerPanelStyle}>
-              <p className="eyebrow">CUSTOMER INFORMATION</p>
-
-              <h2 style={smallSectionTitleStyle}>
-                Checkout Details
-              </h2>
-
-              <div style={customerGridStyle}>
-                <div style={customerBoxStyle}>
-                  <span>Name</span>
-                  <strong>{customerName}</strong>
-                </div>
-
-                <div style={customerBoxStyle}>
-                  <span>Email</span>
-                  <strong>{customerEmail}</strong>
-                </div>
-
-                <div style={{ ...customerBoxStyle, gridColumn: "1 / -1" }}>
-                  <span>Shipping Address</span>
-                  <strong>{customerAddress}</strong>
-                </div>
-              </div>
-            </div>
-
-            <div style={itemsPanelStyle}>
-              <p className="eyebrow">PRODUCTS ORDERED</p>
-
-              <h2 style={smallSectionTitleStyle}>
-                Research Products
-              </h2>
-
-              <div style={itemStackStyle}>
-                {items.map((item) => {
-                  const lineTotal = (item.price || 0) * item.quantity;
-
-                  return (
-                    <div key={item.name} style={itemCardStyle}>
-                      <div style={miniBottleWrapStyle}>
-                        <div style={miniBottleCapStyle}></div>
-
-                        <div style={miniBottleStyle}>
-                          <div style={miniLabelStyle}>
-                            <strong>304</strong>
-                            <span>{item.codeName}</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div>
-                        <p style={categoryStyle}>
-                          {item.category}
-                        </p>
-
-                        <h3 style={itemTitleStyle}>
-                          {item.name}
-                        </h3>
-
-                        <p style={mutedTextStyle}>
-                          {item.codeName} · {item.strength}
-                        </p>
-
-                        <p style={mutedTextStyle}>
-                          Qty: {item.quantity} · ${item.price} each
-                        </p>
-                      </div>
-
-                      <strong style={lineTotalStyle}>
-                        ${lineTotal}
-                      </strong>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          <aside style={sidePanelStyle}>
-            <p className="eyebrow">TOTAL</p>
-
-            <h2 style={sideTitleStyle}>
-              ${subtotal}
-            </h2>
-
-            <div style={summaryRowStyle}>
-              <span>Products</span>
-              <strong>{items.length}</strong>
-            </div>
-
-            <div style={summaryRowStyle}>
-              <span>Total Items</span>
-              <strong>{latestOrder.totalQuantity}</strong>
-            </div>
-
-            <div style={summaryRowStyle}>
-              <span>Subtotal</span>
-              <strong>${subtotal}</strong>
-            </div>
-
-            <div style={summaryRowStyle}>
-              <span>Shipping</span>
-              <strong>Later</strong>
-            </div>
-
-            <div style={summaryRowStyle}>
-              <span>Taxes</span>
-              <strong>Later</strong>
-            </div>
-
-            <div style={noticeBoxStyle}>
-              This is a prototype order. Real payment processing, taxes, shipping,
-              fulfillment, emails, and backend order records will be added later.
-            </div>
-
-            <button
-              className="primary-btn"
-              style={{ width: "100%", marginTop: "24px" }}
-              onClick={() => onNavigate("dashboard")}
-            >
-              Open Research Hub
-            </button>
-
-            <button
-              className="secondary-btn"
-              style={{ width: "100%", marginTop: "14px" }}
-              onClick={() => onNavigate("partnerApplication")}
-            >
-              Apply For Partner Code
-            </button>
-
-            <button
-              className="secondary-btn"
-              style={{ width: "100%", marginTop: "14px" }}
-              onClick={() => onNavigate("researchAgreement")}
-            >
-              Research Agreement
-            </button>
-
-            <button
-              className="secondary-btn"
-              style={{ width: "100%", marginTop: "14px" }}
-              onClick={() => onNavigate("products")}
-            >
-              Continue Shopping
-            </button>
-          </aside>
-
-        </div>
-
-        <div style={researchNoticeStyle}>
-          For Research Use Only. Products are not intended for human consumption.
-        </div>
-
-      </section>
-    </main>
+          image:
+            variant.image ||
+            product.image ||
+            "",
+        })
+      );
+    }
   );
 }
 
-const emptyPanelStyle = {
-  maxWidth: "900px",
-  margin: "0 auto",
-  textAlign: "center",
-  background:
-    "radial-gradient(circle at top, rgba(61, 165, 255, 0.18), transparent 40%), rgba(255, 255, 255, 0.035)",
-  border: "1px solid rgba(255, 255, 255, 0.09)",
-  borderRadius: "28px",
-  padding: "60px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
-};
+const catalogVariants =
+  buildCatalogVariants();
 
-const successPanelStyle = {
-  textAlign: "center",
-  background:
-    "radial-gradient(circle at top, rgba(61, 165, 255, 0.22), transparent 42%), rgba(255, 255, 255, 0.035)",
-  border: "1px solid rgba(255, 255, 255, 0.09)",
-  borderRadius: "34px",
-  padding: "64px 56px",
-  boxShadow: "0 30px 90px rgba(0,0,0,0.5)",
-  marginBottom: "30px",
-};
+function findCatalogVariant(
+  item
+) {
+  const itemCode =
+    normalizeValue(
+      item.codeName
+    );
 
-const checkIconStyle = {
-  width: "86px",
-  height: "86px",
-  margin: "0 auto 24px",
-  borderRadius: "50%",
-  background: "rgba(61,165,255,0.14)",
-  border: "1px solid rgba(61,165,255,0.35)",
-  color: "#9ed8ff",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  fontSize: "46px",
-  fontWeight: "900",
-};
+  const itemStrength =
+    normalizeValue(
+      item.strength
+    );
 
-const titleStyle = {
-  fontSize: "62px",
-  lineHeight: "1.05",
-  marginBottom: "20px",
-  background: "linear-gradient(180deg, #ffffff, #9d9d9d)",
-  WebkitBackgroundClip: "text",
-  WebkitTextFillColor: "transparent",
-};
+  const itemName =
+    normalizeValue(
+      item.name
+    );
 
-const subtitleStyle = {
-  maxWidth: "780px",
-  margin: "0 auto",
-  color: "#c8c8c8",
-  fontSize: "19px",
-  lineHeight: "1.8",
-};
+  const exactCodeMatch =
+    catalogVariants.find(
+      (
+        variant
+      ) =>
+        normalizeValue(
+          variant.codeName
+        ) === itemCode &&
+        normalizeValue(
+          variant.strength
+        ) === itemStrength
+    );
 
-const buttonRowStyle = {
-  display: "flex",
-  justifyContent: "center",
-  gap: "16px",
-  flexWrap: "wrap",
-  marginTop: "28px",
-};
+  if (
+    exactCodeMatch
+  ) {
+    return exactCodeMatch;
+  }
 
-const orderNumberStyle = {
-  display: "inline-flex",
-  marginTop: "30px",
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
-  color: "#9ed8ff",
-  borderRadius: "999px",
-  padding: "15px 24px",
-  fontWeight: "900",
-  fontSize: "20px",
-};
+  const exactNameMatch =
+    catalogVariants.find(
+      (
+        variant
+      ) =>
+        normalizeValue(
+          variant.name
+        ) === itemName &&
+        normalizeValue(
+          variant.strength
+        ) === itemStrength
+    );
 
-const orderLayoutStyle = {
-  display: "grid",
-  gridTemplateColumns: "1fr 370px",
-  gap: "30px",
-  alignItems: "start",
-};
+  if (
+    exactNameMatch
+  ) {
+    return exactNameMatch;
+  }
 
-const detailsPanelStyle = {
-  background:
-    "radial-gradient(circle at top left, rgba(61, 165, 255, 0.14), transparent 35%), rgba(255, 255, 255, 0.035)",
-  border: "1px solid rgba(255, 255, 255, 0.09)",
-  borderRadius: "30px",
-  padding: "38px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
-};
+  const codeMatch =
+    catalogVariants.find(
+      (
+        variant
+      ) =>
+        normalizeValue(
+          variant.codeName
+        ) === itemCode
+    );
 
-const sectionTitleStyle = {
-  fontSize: "38px",
-  lineHeight: "1.12",
-  marginBottom: "24px",
-  background: "linear-gradient(180deg, #ffffff, #9d9d9d)",
-  WebkitBackgroundClip: "text",
-  WebkitTextFillColor: "transparent",
-};
+  if (
+    codeMatch
+  ) {
+    return codeMatch;
+  }
 
-const smallSectionTitleStyle = {
-  fontSize: "32px",
-  lineHeight: "1.12",
-  marginBottom: "22px",
-  background: "linear-gradient(180deg, #ffffff, #9d9d9d)",
-  WebkitBackgroundClip: "text",
-  WebkitTextFillColor: "transparent",
-};
+  return catalogVariants.find(
+    (
+      variant
+    ) =>
+      normalizeValue(
+        variant.name
+      ) === itemName
+  );
+}
 
-const summaryGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: "14px",
-  marginBottom: "30px",
-};
+function getOrderItemDetails(
+  item
+) {
+  const catalogItem =
+    findCatalogVariant(
+      item
+    );
 
-const summaryBoxStyle = {
-  display: "grid",
-  gap: "6px",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "16px",
-  padding: "16px",
-  color: "#c8c8c8",
-};
+  return {
+    ...catalogItem,
+    ...item,
 
-const customerPanelStyle = {
-  background: "rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "24px",
-  padding: "26px",
-  marginBottom: "30px",
-};
+    name:
+      item.name ||
+      catalogItem?.name ||
+      "Research Product",
 
-const customerGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: "14px",
-};
+    category:
+      item.category ||
+      catalogItem?.category ||
+      "Research Product",
 
-const customerBoxStyle = {
-  display: "grid",
-  gap: "6px",
-  background: "rgba(61,165,255,0.10)",
-  border: "1px solid rgba(61,165,255,0.22)",
-  borderRadius: "16px",
-  padding: "16px",
-  color: "#c8eaff",
-};
+    codeName:
+      item.codeName ||
+      catalogItem?.codeName ||
+      "",
 
-const itemsPanelStyle = {
-  background: "rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "24px",
-  padding: "26px",
-};
+    strength:
+      item.strength ||
+      catalogItem?.strength ||
+      "",
 
-const itemStackStyle = {
-  display: "grid",
-  gap: "16px",
-};
+    image:
+      item.image ||
+      catalogItem?.image ||
+      "",
+  };
+}
 
-const itemCardStyle = {
-  display: "grid",
-  gridTemplateColumns: "90px 1fr auto",
-  gap: "18px",
-  alignItems: "center",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "20px",
-  padding: "18px",
-};
+function formatMoney(
+  amount
+) {
+  const numericAmount =
+    Number(
+      amount
+    );
 
-const miniBottleWrapStyle = {
-  display: "grid",
-  justifyContent: "center",
-};
+  return Number.isFinite(
+    numericAmount
+  )
+    ? numericAmount.toLocaleString(
+        "en-US",
+        {
+          style:
+            "currency",
 
-const miniBottleCapStyle = {
-  width: "34px",
-  height: "16px",
-  margin: "0 auto",
-  borderRadius: "7px 7px 3px 3px",
-  background: "linear-gradient(180deg, #d7d7d7, #777)",
-};
+          currency:
+            "USD",
+        }
+      )
+    : "$0.00";
+}
 
-const miniBottleStyle = {
-  width: "70px",
-  height: "100px",
-  borderRadius: "18px 18px 22px 22px",
-  background:
-    "linear-gradient(135deg, rgba(255,255,255,0.88), rgba(255,255,255,0.34))",
-  border: "1px solid rgba(255,255,255,0.7)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  boxShadow: "0 18px 45px rgba(0,0,0,0.35)",
-};
+function formatOrderDate(
+  value
+) {
+  if (
+    !value
+  ) {
+    return new Date().toLocaleDateString(
+      "en-US",
+      {
+        month:
+          "long",
 
-const miniLabelStyle = {
-  width: "54px",
-  minHeight: "48px",
-  borderRadius: "9px",
-  background: "linear-gradient(180deg, #050505, #171717)",
-  border: "1px solid rgba(61,165,255,0.35)",
-  color: "#ffffff",
-  display: "grid",
-  alignContent: "center",
-  justifyItems: "center",
-  gap: "2px",
-  padding: "6px",
-  textAlign: "center",
-  fontSize: "10px",
-};
+        day:
+          "numeric",
 
-const categoryStyle = {
-  color: "#9ed8ff",
-  fontSize: "12px",
-  fontWeight: "900",
-  textTransform: "uppercase",
-  letterSpacing: "1px",
-  marginBottom: "6px",
-};
+        year:
+          "numeric",
+      }
+    );
+  }
 
-const itemTitleStyle = {
-  color: "#ffffff",
-  fontSize: "24px",
-  marginBottom: "6px",
-};
+  const date =
+    new Date(
+      value
+    );
 
-const mutedTextStyle = {
-  color: "#aaa",
-  lineHeight: "1.6",
-  fontSize: "14px",
-};
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return value;
+  }
 
-const lineTotalStyle = {
-  color: "#9ed8ff",
-  fontSize: "22px",
-};
+  return date.toLocaleDateString(
+    "en-US",
+    {
+      month:
+        "long",
 
-const sidePanelStyle = {
-  position: "sticky",
-  top: "110px",
-  background:
-    "radial-gradient(circle at top left, rgba(61, 165, 255, 0.16), transparent 35%), rgba(255, 255, 255, 0.035)",
-  border: "1px solid rgba(255, 255, 255, 0.09)",
-  borderRadius: "28px",
-  padding: "32px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
-};
+      day:
+        "numeric",
 
-const sideTitleStyle = {
-  fontSize: "52px",
-  lineHeight: "1.05",
-  marginBottom: "24px",
-  color: "#9ed8ff",
-};
+      year:
+        "numeric",
+    }
+  );
+}
 
-const summaryRowStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: "18px",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "14px",
-  padding: "15px",
-  color: "#c8c8c8",
-  marginBottom: "12px",
-};
+function OrderConfirmation({
+  onNavigate = () => {},
+  latestOrder,
+}) {
+  if (
+    !latestOrder
+  ) {
+    return (
+      <>
+        <style>
+          {
+            orderConfirmationCss
+          }
+        </style>
 
-const noticeBoxStyle = {
-  marginTop: "20px",
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
-  color: "#9ed8ff",
-  borderRadius: "16px",
-  padding: "16px",
-  fontSize: "14px",
-  fontWeight: "800",
-  lineHeight: "1.6",
-};
+        <main className="confirmation-page">
+          <section className="confirmation-empty-panel">
+            <p className="eyebrow">
+              ORDER
+              CONFIRMATION
+            </p>
 
-const researchNoticeStyle = {
-  marginTop: "30px",
-  textAlign: "center",
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
-  color: "#9ed8ff",
-  borderRadius: "20px",
-  padding: "20px",
-  fontWeight: "900",
-  lineHeight: "1.6",
-  textTransform: "uppercase",
-  letterSpacing: "1px",
-};
+            <h1>
+              No Recent Order
+            </h1>
+
+            <p>
+              Submit an order
+              request to view
+              its confirmation
+              details.
+            </p>
+
+            <div className="confirmation-button-row">
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={() =>
+                  onNavigate(
+                    "products"
+                  )
+                }
+              >
+                Browse Products
+              </button>
+
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() =>
+                  onNavigate(
+                    "dashboard"
+                  )
+                }
+              >
+                Research Hub
+              </button>
+            </div>
+          </section>
+        </main>
+      </>
+    );
+  }
+
+  const rawItems =
+    latestOrder.items ||
+    latestOrder.cartItems ||
+    [];
+
+  const items =
+    useMemo(
+      () =>
+        rawItems.map(
+          getOrderItemDetails
+        ),
+      [
+        rawItems,
+      ]
+    );
+
+  const subtotal =
+    items.reduce(
+      (
+        total,
+        item
+      ) => {
+        const price =
+          Number(
+            item.price ||
+              0
+          );
+
+        const quantity =
+          Number(
+            item.quantity ||
+              0
+          );
+
+        return (
+          total +
+          price *
+            quantity
+        );
+      },
+      0
+    );
+
+  const totalQuantity =
+    latestOrder.totalQuantity ||
+    items.reduce(
+      (
+        total,
+        item
+      ) =>
+        total +
+        Number(
+          item.quantity ||
+            0
+        ),
+      0
+    );
+
+  const customer =
+    latestOrder.customer ||
+    latestOrder;
+
+  const customerName =
+    customer.firstName ||
+    customer.lastName
+      ? `${customer.firstName || ""} ${
+          customer.lastName || ""
+        }`.trim()
+      : "Not available";
+
+  const customerEmail =
+    customer.email ||
+    "Not available";
+
+  const addressParts = [
+    customer.address,
+    customer.city,
+    customer.state,
+    customer.zip,
+  ].filter(Boolean);
+
+  const customerAddress =
+    addressParts.length >
+    0
+      ? [
+          customer.address,
+
+          [
+            customer.city,
+            customer.state,
+          ]
+            .filter(
+              Boolean
+            )
+            .join(
+              ", "
+            ),
+
+          customer.zip,
+        ]
+          .filter(
+            Boolean
+          )
+          .join(
+            " "
+          )
+      : "Not available";
+
+  const orderNumber =
+    latestOrder.orderId ||
+    latestOrder.id ||
+    "Pending";
+
+  const orderStatus =
+    latestOrder.status ||
+    "Order Request Received";
+
+  const orderDate =
+    formatOrderDate(
+      latestOrder.date ||
+      latestOrder.createdAt ||
+      latestOrder.submittedAt
+    );
+
+  const paymentLabel =
+    latestOrder.preferredPaymentLabel ||
+    latestOrder.paymentLabel ||
+    "Not selected";
+
+  return (
+    <>
+      <style>
+        {
+          orderConfirmationCss
+        }
+      </style>
+
+      <main className="confirmation-page">
+        <section className="confirmation-inner">
+          <header className="confirmation-success-panel">
+            <div className="confirmation-check-icon">
+              ✓
+            </div>
+
+            <p className="eyebrow">
+              ORDER REQUEST
+              RECEIVED
+            </p>
+
+            <h1>
+              Thank You
+            </h1>
+
+            <p>
+              Your order
+              request was
+              successfully
+              submitted. Review
+              the details below
+              and watch your
+              email for the
+              invoice and
+              payment
+              instructions.
+            </p>
+
+            <div className="confirmation-order-number">
+              Order #
+              {
+                orderNumber
+              }
+            </div>
+          </header>
+
+          <div className="confirmation-layout">
+            <section className="confirmation-details-panel">
+              <p className="eyebrow">
+                ORDER DETAILS
+              </p>
+
+              <h2>
+                Order Summary
+              </h2>
+
+              <div className="confirmation-summary-grid">
+                <SummaryBox
+                  label="Order Number"
+                  value={
+                    orderNumber
+                  }
+                />
+
+                <SummaryBox
+                  label="Order Date"
+                  value={
+                    orderDate
+                  }
+                />
+
+                <SummaryBox
+                  label="Status"
+                  value={
+                    orderStatus
+                  }
+                />
+
+                <SummaryBox
+                  label="Total Items"
+                  value={
+                    totalQuantity
+                  }
+                />
+              </div>
+
+              <section className="confirmation-customer-panel">
+                <p className="eyebrow">
+                  CUSTOMER
+                  INFORMATION
+                </p>
+
+                <h2>
+                  Shipping
+                  Details
+                </h2>
+
+                <div className="confirmation-customer-grid">
+                  <SummaryBox
+                    label="Name"
+                    value={
+                      customerName
+                    }
+                  />
+
+                  <SummaryBox
+                    label="Email"
+                    value={
+                      customerEmail
+                    }
+                  />
+
+                  <div className="confirmation-address-box">
+                    <span>
+                      Shipping
+                      Address
+                    </span>
+
+                    <strong>
+                      {
+                        customerAddress
+                      }
+                    </strong>
+                  </div>
+                </div>
+              </section>
+
+              <section className="confirmation-items-panel">
+                <p className="eyebrow">
+                  PRODUCTS
+                  ORDERED
+                </p>
+
+                <h2>
+                  Research
+                  Products
+                </h2>
+
+                {items.length >
+                0 ? (
+                  <div className="confirmation-item-stack">
+                    {items.map(
+                      (
+                        item,
+                        index
+                      ) => {
+                        const quantity =
+                          Number(
+                            item.quantity ||
+                              0
+                          );
+
+                        const price =
+                          Number(
+                            item.price ||
+                              0
+                          );
+
+                        const lineTotal =
+                          price *
+                          quantity;
+
+                        return (
+                          <article
+                            key={`${item.codeName}-${item.strength}-${index}`}
+                            className="confirmation-item-card"
+                          >
+                            <ProductImage
+                              item={
+                                item
+                              }
+                            />
+
+                            <div className="confirmation-item-copy">
+                              <p className="confirmation-category">
+                                {
+                                  item.category
+                                }
+                              </p>
+
+                              <h3>
+                                {
+                                  item.name
+                                }
+                              </h3>
+
+                              <p>
+                                {
+                                  item.codeName
+                                }
+
+                                {item.codeName &&
+                                item.strength
+                                  ? " · "
+                                  : ""}
+
+                                {
+                                  item.strength
+                                }
+                              </p>
+
+                              <p>
+                                Quantity:{" "}
+                                {
+                                  quantity
+                                }{" "}
+                                ·{" "}
+                                {
+                                  formatMoney(
+                                    price
+                                  )
+                                }{" "}
+                                each
+                              </p>
+                            </div>
+
+                            <strong className="confirmation-line-total">
+                              {
+                                formatMoney(
+                                  lineTotal
+                                )
+                              }
+                            </strong>
+                          </article>
+                        );
+                      }
+                    )}
+                  </div>
+                ) : (
+                  <div className="confirmation-no-items">
+                    Product
+                    details were
+                    not included
+                    with this
+                    order record.
+                  </div>
+                )}
+              </section>
+            </section>
+
+            <aside className="confirmation-side-panel">
+              <p className="eyebrow">
+                PRODUCT
+                SUBTOTAL
+              </p>
+
+              <h2>
+                {
+                  formatMoney(
+                    subtotal
+                  )
+                }
+              </h2>
+
+              <SummaryRow
+                label="Products"
+                value={
+                  items.length
+                }
+              />
+
+              <SummaryRow
+                label="Total Items"
+                value={
+                  totalQuantity
+                }
+              />
+
+              <SummaryRow
+                label="Product Subtotal"
+                value={
+                  formatMoney(
+                    subtotal
+                  )
+                }
+              />
+
+              <SummaryRow
+                label="Shipping"
+                value="Confirmed By Invoice"
+              />
+
+              <SummaryRow
+                label="Taxes"
+                value="Confirmed By Invoice"
+              />
+
+              <SummaryRow
+                label="Payment Preference"
+                value={
+                  paymentLabel
+                }
+              />
+
+              <div className="confirmation-notice-box">
+                <strong>
+                  Payment has
+                  not been
+                  collected.
+                </strong>
+
+                <span>
+                  The final
+                  invoice may
+                  include
+                  applicable
+                  shipping and
+                  taxes. Review
+                  the invoice
+                  before sending
+                  payment.
+                </span>
+              </div>
+
+              <button
+                type="button"
+                className="primary-btn confirmation-full-button"
+                onClick={() =>
+                  onNavigate(
+                    "dashboard"
+                  )
+                }
+              >
+                Open Research
+                Hub
+              </button>
+
+              <button
+                type="button"
+                className="secondary-btn confirmation-full-button"
+                onClick={() =>
+                  onNavigate(
+                    "products"
+                  )
+                }
+              >
+                Continue
+                Shopping
+              </button>
+
+              <button
+                type="button"
+                className="secondary-btn confirmation-full-button"
+                onClick={() =>
+                  onNavigate(
+                    "researchAgreement"
+                  )
+                }
+              >
+                Research
+                Agreement
+              </button>
+            </aside>
+          </div>
+
+          <div className="confirmation-research-notice">
+            For Research Use
+            Only. Products are
+            not intended for
+            human consumption.
+          </div>
+        </section>
+      </main>
+    </>
+  );
+}
+
+function ProductImage({
+  item,
+}) {
+  const [
+    imageFailed,
+    setImageFailed,
+  ] = useState(false);
+
+  const imageAvailable =
+    Boolean(
+      item.image
+    ) &&
+    !imageFailed;
+
+  return (
+    <div className="confirmation-product-image-wrap">
+      {imageAvailable ? (
+        <img
+          src={
+            item.image
+          }
+          alt={`${item.name}${
+            item.strength
+              ? ` ${item.strength}`
+              : ""
+          } vial`}
+          loading="lazy"
+          onError={() =>
+            setImageFailed(
+              true
+            )
+          }
+        />
+      ) : (
+        <div className="confirmation-image-fallback">
+          <strong>
+            304
+          </strong>
+
+          <span>
+            {item.codeName ||
+              "PRODUCT"}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryBox({
+  label,
+  value,
+}) {
+  return (
+    <div className="confirmation-summary-box">
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
+    </div>
+  );
+}
+
+function SummaryRow({
+  label,
+  value,
+}) {
+  return (
+    <div className="confirmation-summary-row">
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
+    </div>
+  );
+}
+
+const orderConfirmationCss = `
+  .confirmation-page,
+  .confirmation-page *,
+  .confirmation-page *::before,
+  .confirmation-page *::after {
+    box-sizing: border-box;
+  }
+
+  .confirmation-page {
+    width: 100%;
+    max-width: 100%;
+    padding: 90px 60px;
+    overflow-x: hidden;
+  }
+
+  .confirmation-inner {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .confirmation-empty-panel,
+  .confirmation-success-panel {
+    padding: 60px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 30px;
+    background:
+      radial-gradient(
+        circle at top,
+        rgba(61,165,255,0.2),
+        transparent 42%
+      ),
+      rgba(255,255,255,0.035);
+    box-shadow:
+      0 30px 90px rgba(0,0,0,0.5);
+    text-align: center;
+  }
+
+  .confirmation-empty-panel {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  .confirmation-success-panel {
+    margin-bottom: 30px;
+  }
+
+  .confirmation-empty-panel h1,
+  .confirmation-success-panel h1 {
+    margin-bottom: 20px;
+    font-size: clamp(44px, 7vw, 62px);
+    line-height: 1.05;
+    background:
+      linear-gradient(
+        180deg,
+        #ffffff,
+        #9d9d9d
+      );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .confirmation-empty-panel > p:not(.eyebrow),
+  .confirmation-success-panel > p:not(.eyebrow) {
+    max-width: 780px;
+    margin: 0 auto;
+    color: #c8c8c8;
+    font-size: 19px;
+    line-height: 1.8;
+  }
+
+  .confirmation-button-row {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-top: 28px;
+  }
+
+  .confirmation-check-icon {
+    width: 86px;
+    height: 86px;
+    display: grid;
+    place-items: center;
+    margin: 0 auto 24px;
+    border: 1px solid rgba(61,165,255,0.35);
+    border-radius: 50%;
+    background: rgba(61,165,255,0.14);
+    color: #9ed8ff;
+    font-size: 46px;
+    font-weight: 900;
+  }
+
+  .confirmation-order-number {
+    display: inline-flex;
+    margin-top: 30px;
+    padding: 15px 24px;
+    border: 1px solid rgba(61,165,255,0.28);
+    border-radius: 999px;
+    background: rgba(61,165,255,0.12);
+    color: #9ed8ff;
+    font-size: 20px;
+    font-weight: 900;
+    overflow-wrap: anywhere;
+  }
+
+  .confirmation-layout {
+    display: grid;
+    grid-template-columns:
+      minmax(0, 1fr)
+      minmax(330px, 370px);
+    gap: 30px;
+    align-items: start;
+  }
+
+  .confirmation-details-panel,
+  .confirmation-side-panel {
+    min-width: 0;
+    padding: 38px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 30px;
+    background:
+      radial-gradient(
+        circle at top left,
+        rgba(61,165,255,0.14),
+        transparent 35%
+      ),
+      rgba(255,255,255,0.035);
+    box-shadow:
+      0 30px 80px rgba(0,0,0,0.45);
+  }
+
+  .confirmation-details-panel > h2,
+  .confirmation-customer-panel > h2,
+  .confirmation-items-panel > h2 {
+    margin-bottom: 24px;
+    font-size: clamp(29px, 4vw, 38px);
+    line-height: 1.12;
+    background:
+      linear-gradient(
+        180deg,
+        #ffffff,
+        #9d9d9d
+      );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .confirmation-summary-grid,
+  .confirmation-customer-grid {
+    display: grid;
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .confirmation-summary-grid {
+    margin-bottom: 30px;
+  }
+
+  .confirmation-summary-box,
+  .confirmation-address-box {
+    min-width: 0;
+    display: grid;
+    gap: 6px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 16px;
+    background: rgba(255,255,255,0.045);
+    color: #c8c8c8;
+    overflow-wrap: anywhere;
+  }
+
+  .confirmation-summary-box span,
+  .confirmation-address-box span {
+    color: #9ed8ff;
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+  }
+
+  .confirmation-summary-box strong,
+  .confirmation-address-box strong {
+    color: #ffffff;
+    line-height: 1.5;
+  }
+
+  .confirmation-customer-panel,
+  .confirmation-items-panel {
+    padding: 26px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 24px;
+    background: rgba(255,255,255,0.035);
+  }
+
+  .confirmation-customer-panel {
+    margin-bottom: 30px;
+  }
+
+  .confirmation-address-box {
+    grid-column: 1 / -1;
+    border-color: rgba(61,165,255,0.22);
+    background: rgba(61,165,255,0.1);
+  }
+
+  .confirmation-item-stack {
+    display: grid;
+    gap: 16px;
+  }
+
+  .confirmation-item-card {
+    min-width: 0;
+    display: grid;
+    grid-template-columns:
+      110px minmax(0, 1fr) auto;
+    gap: 20px;
+    align-items: center;
+    padding: 18px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 20px;
+    background: rgba(255,255,255,0.045);
+  }
+
+  .confirmation-product-image-wrap {
+    width: 110px;
+    height: 135px;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 18px;
+    background:
+      radial-gradient(
+        circle at center,
+        rgba(61,165,255,0.13),
+        transparent 65%
+      ),
+      rgba(0,0,0,0.18);
+  }
+
+  .confirmation-product-image-wrap img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: contain;
+    padding: 8px;
+  }
+
+  .confirmation-image-fallback {
+    width: 82px;
+    min-height: 74px;
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    gap: 5px;
+    padding: 10px;
+    border: 1px solid rgba(61,165,255,0.35);
+    border-radius: 12px;
+    background:
+      linear-gradient(
+        180deg,
+        #050505,
+        #171717
+      );
+    color: #ffffff;
+    text-align: center;
+  }
+
+  .confirmation-image-fallback strong {
+    color: #9ed8ff;
+    font-size: 20px;
+  }
+
+  .confirmation-image-fallback span {
+    max-width: 100%;
+    font-size: 10px;
+    overflow-wrap: anywhere;
+  }
+
+  .confirmation-item-copy {
+    min-width: 0;
+  }
+
+  .confirmation-category {
+    margin-bottom: 6px;
+    color: #9ed8ff;
+    font-size: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .confirmation-item-copy h3 {
+    margin-bottom: 6px;
+    color: #ffffff;
+    font-size: 24px;
+    overflow-wrap: anywhere;
+  }
+
+  .confirmation-item-copy p:not(.confirmation-category) {
+    margin-top: 4px;
+    color: #aaaaaa;
+    font-size: 14px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+
+  .confirmation-line-total {
+    color: #9ed8ff;
+    font-size: 22px;
+    white-space: nowrap;
+  }
+
+  .confirmation-no-items {
+    padding: 20px;
+    border: 1px dashed rgba(255,255,255,0.15);
+    border-radius: 16px;
+    color: #aaaaaa;
+    line-height: 1.6;
+    text-align: center;
+  }
+
+  .confirmation-side-panel {
+    position: sticky;
+    top: 110px;
+  }
+
+  .confirmation-side-panel > h2 {
+    margin-bottom: 24px;
+    color: #9ed8ff;
+    font-size: clamp(40px, 6vw, 52px);
+    line-height: 1.05;
+  }
+
+  .confirmation-summary-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 12px;
+    padding: 15px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 14px;
+    background: rgba(255,255,255,0.045);
+    color: #c8c8c8;
+  }
+
+  .confirmation-summary-row strong {
+    color: #ffffff;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+
+  .confirmation-notice-box {
+    display: grid;
+    gap: 7px;
+    margin-top: 20px;
+    padding: 16px;
+    border: 1px solid rgba(61,165,255,0.28);
+    border-radius: 16px;
+    background: rgba(61,165,255,0.12);
+    color: #9ed8ff;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .confirmation-full-button {
+    width: 100%;
+    margin-top: 14px;
+  }
+
+  .confirmation-side-panel .primary-btn {
+    margin-top: 24px;
+  }
+
+  .confirmation-research-notice {
+    margin-top: 30px;
+    padding: 20px;
+    border: 1px solid rgba(61,165,255,0.28);
+    border-radius: 20px;
+    background: rgba(61,165,255,0.12);
+    color: #9ed8ff;
+    font-weight: 900;
+    line-height: 1.6;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  @media (max-width: 1000px) {
+    .confirmation-page {
+      padding: 65px 24px;
+    }
+
+    .confirmation-layout {
+      grid-template-columns:
+        minmax(0, 1fr);
+    }
+
+    .confirmation-side-panel {
+      position: static;
+    }
+  }
+
+  @media (max-width: 720px) {
+    .confirmation-page {
+      padding: 44px 12px;
+    }
+
+    .confirmation-empty-panel,
+    .confirmation-success-panel,
+    .confirmation-details-panel,
+    .confirmation-side-panel {
+      padding: 22px 18px;
+      border-radius: 22px;
+    }
+
+    .confirmation-summary-grid,
+    .confirmation-customer-grid {
+      grid-template-columns:
+        minmax(0, 1fr);
+    }
+
+    .confirmation-address-box {
+      grid-column: auto;
+    }
+
+    .confirmation-item-card {
+      grid-template-columns:
+        90px minmax(0, 1fr);
+      align-items: center;
+    }
+
+    .confirmation-product-image-wrap {
+      width: 90px;
+      height: 115px;
+    }
+
+    .confirmation-line-total {
+      grid-column: 2;
+    }
+
+    .confirmation-button-row,
+    .confirmation-button-row button {
+      width: 100%;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .confirmation-page {
+      padding: 34px 8px;
+    }
+
+    .confirmation-empty-panel,
+    .confirmation-success-panel,
+    .confirmation-details-panel,
+    .confirmation-side-panel,
+    .confirmation-customer-panel,
+    .confirmation-items-panel {
+      padding: 15px;
+    }
+
+    .confirmation-item-card {
+      grid-template-columns:
+        minmax(0, 1fr);
+    }
+
+    .confirmation-product-image-wrap {
+      width: 100%;
+      height: 180px;
+    }
+
+    .confirmation-line-total {
+      grid-column: auto;
+    }
+
+    .confirmation-summary-row {
+      flex-direction: column;
+    }
+
+    .confirmation-summary-row strong {
+      text-align: left;
+    }
+  }
+`;
 
 export default OrderConfirmation;
