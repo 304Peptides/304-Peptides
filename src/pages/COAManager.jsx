@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -8,13 +9,15 @@ import {
   categories,
 } from "../data/products";
 
-const recordsStorageKey =
-  "304-document-records";
+const adminSessionKey =
+  "304-document-admin-session";
 
 const statusOptions = [
   "All Statuses",
   "Documentation Ready",
   "Needs Attention",
+  "Published",
+  "Not Published",
   "COA Ready",
   "COA Pending",
   "Batch Ready",
@@ -31,7 +34,9 @@ const emptyRecord = {
   verificationUrl: "",
   notes: "",
   reviewed: false,
+  published: false,
   updatedAt: "",
+  createdAt: "",
 };
 
 function hasText(value) {
@@ -47,7 +52,9 @@ function isValidHttpUrl(value) {
   }
 
   try {
-    const url = new URL(value.trim());
+    const url = new URL(
+      value.trim()
+    );
 
     return (
       url.protocol === "http:" ||
@@ -58,43 +65,37 @@ function isValidHttpUrl(value) {
   }
 }
 
-function loadRecords() {
+function getSavedAdminSecret() {
   try {
-    const savedRecords =
-      window.localStorage.getItem(
-        recordsStorageKey
-      );
-
-    if (!savedRecords) {
-      return {};
-    }
-
-    const parsedRecords =
-      JSON.parse(savedRecords);
-
-    return parsedRecords &&
-      typeof parsedRecords === "object"
-      ? parsedRecords
-      : {};
+    return (
+      window.sessionStorage.getItem(
+        adminSessionKey
+      ) || ""
+    );
   } catch {
-    return {};
+    return "";
   }
 }
 
-function saveRecords(records) {
-  window.localStorage.setItem(
-    recordsStorageKey,
-    JSON.stringify(records)
-  );
+function saveAdminSecret(secret) {
+  try {
+    window.sessionStorage.setItem(
+      adminSessionKey,
+      secret
+    );
+  } catch {
+    // Session storage may be unavailable.
+  }
+}
 
-  window.dispatchEvent(
-    new CustomEvent(
-      "304-document-records-updated",
-      {
-        detail: records,
-      }
-    )
-  );
+function clearAdminSecret() {
+  try {
+    window.sessionStorage.removeItem(
+      adminSessionKey
+    );
+  } catch {
+    // Session storage may be unavailable.
+  }
 }
 
 function getAllVariants() {
@@ -164,6 +165,9 @@ function getRecordAudit(
   const reviewed =
     Boolean(record.reviewed);
 
+  const published =
+    Boolean(record.published);
+
   const issues = [];
 
   if (!coaReady) {
@@ -208,20 +212,22 @@ function getRecordAudit(
     );
   }
 
+  const ready =
+    coaReady &&
+    batchReady &&
+    verificationReady &&
+    imageReady &&
+    reviewed;
+
   return {
     coaReady,
     batchReady,
     verificationReady,
     imageReady,
     reviewed,
+    published,
     issues,
-
-    ready:
-      coaReady &&
-      batchReady &&
-      verificationReady &&
-      imageReady &&
-      reviewed,
+    ready,
   };
 }
 
@@ -244,6 +250,26 @@ function formatUpdatedAt(value) {
   return parsedDate.toLocaleString();
 }
 
+function mapRecordsByCode(
+  records
+) {
+  return records.reduce(
+    (
+      recordMap,
+      record
+    ) => {
+      if (record?.codeName) {
+        recordMap[
+          record.codeName
+        ] = record;
+      }
+
+      return recordMap;
+    },
+    {}
+  );
+}
+
 function COAManager({
   onNavigate,
 }) {
@@ -260,8 +286,20 @@ function COAManager({
     setActiveStatus,
   ] = useState("All Statuses");
 
+  const [
+    adminSecret,
+    setAdminSecret,
+  ] = useState(
+    getSavedAdminSecret
+  );
+
+  const [
+    secretInput,
+    setSecretInput,
+  ] = useState("");
+
   const [records, setRecords] =
-    useState(loadRecords);
+    useState({});
 
   const [
     editingCode,
@@ -270,6 +308,22 @@ function COAManager({
 
   const [draft, setDraft] =
     useState(emptyRecord);
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [saving, setSaving] =
+    useState(false);
+
+  const [
+    connectionError,
+    setConnectionError,
+  ] = useState("");
+
+  const [
+    connectionMessage,
+    setConnectionMessage,
+  ] = useState("");
 
   const allVariants = useMemo(
     () => getAllVariants(),
@@ -300,6 +354,7 @@ function COAManager({
           (variant) => {
             const record = {
               ...emptyRecord,
+
               ...(records[
                 variant.codeName
               ] || {}),
@@ -308,6 +363,7 @@ function COAManager({
             return {
               ...variant,
               record,
+
               audit:
                 getRecordAudit(
                   variant,
@@ -320,10 +376,26 @@ function COAManager({
     );
 
   const stats = useMemo(() => {
+    const savedRecords =
+      auditedVariants.filter(
+        (variant) =>
+          Boolean(
+            records[
+              variant.codeName
+            ]
+          )
+      ).length;
+
     const documentationReady =
       auditedVariants.filter(
         (variant) =>
           variant.audit.ready
+      ).length;
+
+    const published =
+      auditedVariants.filter(
+        (variant) =>
+          variant.audit.published
       ).length;
 
     const coaReady =
@@ -355,18 +427,24 @@ function COAManager({
       total:
         auditedVariants.length,
 
+      savedRecords,
+
       documentationReady,
 
       pending:
         auditedVariants.length -
         documentationReady,
 
+      published,
       coaReady,
       batchReady,
       verificationReady,
       reviewed,
     };
-  }, [auditedVariants]);
+  }, [
+    auditedVariants,
+    records,
+  ]);
 
   const filteredVariants =
     useMemo(() => {
@@ -394,27 +472,43 @@ function COAManager({
           const matchesStatus =
             activeStatus ===
               "All Statuses" ||
+
             (activeStatus ===
               "Documentation Ready" &&
               audit.ready) ||
+
             (activeStatus ===
               "Needs Attention" &&
               !audit.ready) ||
+
+            (activeStatus ===
+              "Published" &&
+              audit.published) ||
+
+            (activeStatus ===
+              "Not Published" &&
+              !audit.published) ||
+
             (activeStatus ===
               "COA Ready" &&
               audit.coaReady) ||
+
             (activeStatus ===
               "COA Pending" &&
               !audit.coaReady) ||
+
             (activeStatus ===
               "Batch Ready" &&
               audit.batchReady) ||
+
             (activeStatus ===
               "Batch Pending" &&
               !audit.batchReady) ||
+
             (activeStatus ===
               "Verification Ready" &&
               audit.verificationReady) ||
+
             (activeStatus ===
               "Verification Pending" &&
               !audit.verificationReady);
@@ -455,11 +549,200 @@ function COAManager({
       searchTerm,
     ]);
 
+  useEffect(() => {
+    if (!adminSecret) {
+      return;
+    }
+
+    loadCloudRecords(
+      adminSecret
+    );
+  }, [adminSecret]);
+
+  async function adminRequest(
+    path,
+    options = {},
+    secret = adminSecret
+  ) {
+    const response =
+      await fetch(path, {
+        ...options,
+
+        headers: {
+          Authorization:
+            `Bearer ${secret}`,
+
+          ...(options.body
+            ? {
+                "Content-Type":
+                  "application/json",
+              }
+            : {}),
+
+          ...(options.headers ||
+            {}),
+        },
+      });
+
+    let result;
+
+    try {
+      result =
+        await response.json();
+    } catch {
+      throw new Error(
+        "The documentation service returned an invalid response."
+      );
+    }
+
+    if (!response.ok) {
+      const error =
+        new Error(
+          result.error ||
+            "The documentation request failed."
+        );
+
+      error.status =
+        response.status;
+
+      throw error;
+    }
+
+    return result;
+  }
+
+  async function loadCloudRecords(
+    secret = adminSecret
+  ) {
+    setLoading(true);
+    setConnectionError("");
+    setConnectionMessage("");
+
+    try {
+      const result =
+        await adminRequest(
+          "/api/admin/documents",
+          {
+            method: "GET",
+          },
+          secret
+        );
+
+      setRecords(
+        mapRecordsByCode(
+          result.records || []
+        )
+      );
+
+      setConnectionMessage(
+        `Connected to Cloudflare. ${
+          result.count || 0
+        } documentation record${
+          result.count === 1
+            ? ""
+            : "s"
+        } loaded.`
+      );
+    } catch (error) {
+      if (
+        error.status === 401
+      ) {
+        clearAdminSecret();
+        setAdminSecret("");
+        setSecretInput("");
+
+        setConnectionError(
+          "The administrator password was not accepted."
+        );
+      } else {
+        setConnectionError(
+          error.message ||
+            "The documentation records could not be loaded."
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleLogin(
+    event
+  ) {
+    event.preventDefault();
+
+    const cleanedSecret =
+      secretInput.trim();
+
+    if (!cleanedSecret) {
+      setConnectionError(
+        "Enter the documentation administrator password."
+      );
+
+      return;
+    }
+
+    setLoading(true);
+    setConnectionError("");
+    setConnectionMessage("");
+
+    try {
+      const result =
+        await adminRequest(
+          "/api/admin/documents",
+          {
+            method: "GET",
+          },
+          cleanedSecret
+        );
+
+      setRecords(
+        mapRecordsByCode(
+          result.records || []
+        )
+      );
+
+      saveAdminSecret(
+        cleanedSecret
+      );
+
+      setAdminSecret(
+        cleanedSecret
+      );
+
+      setSecretInput("");
+
+      setConnectionMessage(
+        "Administrator access confirmed."
+      );
+    } catch (error) {
+      setConnectionError(
+        error.message ||
+          "Administrator access could not be confirmed."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleLogout() {
+    clearAdminSecret();
+
+    setAdminSecret("");
+    setSecretInput("");
+    setRecords({});
+    setEditingCode("");
+    setDraft(emptyRecord);
+    setConnectionError("");
+    setConnectionMessage("");
+  }
+
   function resetFilters() {
     setSearchTerm("");
+
     setActiveCategory(
       "All Products"
     );
+
     setActiveStatus(
       "All Statuses"
     );
@@ -473,7 +756,20 @@ function COAManager({
     setDraft({
       ...emptyRecord,
       ...variant.record,
+
+      published:
+        Boolean(
+          variant.record.published
+        ),
+
+      reviewed:
+        Boolean(
+          variant.record.reviewed
+        ),
     });
+
+    setConnectionError("");
+    setConnectionMessage("");
   }
 
   function cancelEditing() {
@@ -503,42 +799,24 @@ function COAManager({
     );
   }
 
-  function handleSaveRecord(
+  async function handleSaveRecord(
     variant
   ) {
-    const cleanedRecord = {
-      batchNumber:
-        draft.batchNumber.trim(),
+    if (!adminSecret) {
+      setConnectionError(
+        "Administrator access is required."
+      );
 
-      labName:
-        draft.labName.trim(),
-
-      testDate:
-        draft.testDate,
-
-      coaUrl:
-        draft.coaUrl.trim(),
-
-      verificationUrl:
-        draft.verificationUrl.trim(),
-
-      notes:
-        draft.notes.trim(),
-
-      reviewed:
-        Boolean(draft.reviewed),
-
-      updatedAt:
-        new Date().toISOString(),
-    };
+      return;
+    }
 
     if (
-      cleanedRecord.coaUrl &&
+      draft.coaUrl &&
       !isValidHttpUrl(
-        cleanedRecord.coaUrl
+        draft.coaUrl
       )
     ) {
-      window.alert(
+      setConnectionError(
         "Enter a complete COA link beginning with http:// or https://."
       );
 
@@ -546,74 +824,176 @@ function COAManager({
     }
 
     if (
-      cleanedRecord
-        .verificationUrl &&
+      draft.verificationUrl &&
       !isValidHttpUrl(
-        cleanedRecord
-          .verificationUrl
+        draft.verificationUrl
       )
     ) {
-      window.alert(
+      setConnectionError(
         "Enter a complete verification link beginning with http:// or https://."
       );
 
       return;
     }
 
-    const nextRecords = {
-      ...records,
+    setSaving(true);
+    setConnectionError("");
+    setConnectionMessage("");
 
-      [variant.codeName]:
-        cleanedRecord,
-    };
+    try {
+      const result =
+        await adminRequest(
+          `/api/admin/documents/${encodeURIComponent(
+            variant.codeName
+          )}`,
+          {
+            method: "PUT",
 
-    setRecords(nextRecords);
-    saveRecords(nextRecords);
+            body: JSON.stringify({
+              record: {
+                batchNumber:
+                  draft.batchNumber.trim(),
 
-    setEditingCode("");
-    setDraft(emptyRecord);
+                labName:
+                  draft.labName.trim(),
+
+                testDate:
+                  draft.testDate,
+
+                coaUrl:
+                  draft.coaUrl.trim(),
+
+                verificationUrl:
+                  draft.verificationUrl.trim(),
+
+                notes:
+                  draft.notes.trim(),
+
+                reviewed:
+                  Boolean(
+                    draft.reviewed
+                  ),
+
+                published:
+                  Boolean(
+                    draft.published
+                  ),
+
+                category:
+                  variant.category,
+              },
+            }),
+          }
+        );
+
+      setRecords(
+        (currentRecords) => ({
+          ...currentRecords,
+
+          [variant.codeName]:
+            result.record,
+        })
+      );
+
+      setEditingCode("");
+      setDraft(emptyRecord);
+
+      setConnectionMessage(
+        `${variant.codeName} was saved to Cloudflare KV.`
+      );
+    } catch (error) {
+      if (
+        error.status === 401
+      ) {
+        handleLogout();
+
+        setConnectionError(
+          "Your administrator session expired or was rejected. Sign in again."
+        );
+      } else {
+        setConnectionError(
+          error.message ||
+            "The documentation record could not be saved."
+        );
+      }
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function handleClearRecord(
+  async function handleDeleteRecord(
     variant
   ) {
     const confirmed =
       window.confirm(
-        `Clear the saved documentation record for ${variant.codeName}?`
+        `Delete the permanent documentation record for ${variant.codeName}?`
       );
 
     if (!confirmed) {
       return;
     }
 
-    const nextRecords = {
-      ...records,
-    };
+    setSaving(true);
+    setConnectionError("");
+    setConnectionMessage("");
 
-    delete nextRecords[
-      variant.codeName
-    ];
+    try {
+      await adminRequest(
+        `/api/admin/documents/${encodeURIComponent(
+          variant.codeName
+        )}`,
+        {
+          method: "DELETE",
+        }
+      );
 
-    setRecords(nextRecords);
-    saveRecords(nextRecords);
+      setRecords(
+        (currentRecords) => {
+          const nextRecords = {
+            ...currentRecords,
+          };
 
-    if (
-      editingCode ===
-      variant.codeName
-    ) {
-      cancelEditing();
+          delete nextRecords[
+            variant.codeName
+          ];
+
+          return nextRecords;
+        }
+      );
+
+      if (
+        editingCode ===
+        variant.codeName
+      ) {
+        cancelEditing();
+      }
+
+      setConnectionMessage(
+        `${variant.codeName} was deleted from Cloudflare KV.`
+      );
+    } catch (error) {
+      setConnectionError(
+        error.message ||
+          "The documentation record could not be deleted."
+      );
+    } finally {
+      setSaving(false);
     }
   }
 
   function exportRecords() {
+    const recordList =
+      Object.values(records);
+
     const exportPayload = {
       exportedAt:
         new Date().toISOString(),
 
       recordCount:
-        Object.keys(records).length,
+        recordList.length,
 
-      records,
+      records:
+        recordList,
     };
 
     const fileBlob =
@@ -640,8 +1020,9 @@ function COAManager({
       document.createElement("a");
 
     link.href = downloadUrl;
+
     link.download =
-      "304-document-records.json";
+      "304-cloud-document-records.json";
 
     document.body.appendChild(
       link
@@ -652,6 +1033,115 @@ function COAManager({
 
     URL.revokeObjectURL(
       downloadUrl
+    );
+  }
+
+  if (!adminSecret) {
+    return (
+      <>
+        <style>
+          {coaManagerCss}
+        </style>
+
+        <main className="coa-manager-page">
+          <section className="coa-manager-inner">
+            <div className="coa-manager-login-panel">
+              <p className="eyebrow">
+                SECURE ADMINISTRATION
+              </p>
+
+              <h1 className="coa-manager-title">
+                COA Manager
+              </h1>
+
+              <p className="coa-manager-subtitle">
+                Enter the documentation
+                administrator password
+                you created with
+                Wrangler. The password
+                is used only for this
+                browser tab and is
+                never stored in the
+                website source code.
+              </p>
+
+              {connectionError && (
+                <div className="coa-manager-error">
+                  {connectionError}
+                </div>
+              )}
+
+              <form
+                className="coa-manager-login-form"
+                onSubmit={
+                  handleLogin
+                }
+              >
+                <label className="coa-manager-field">
+                  <span>
+                    Administrator
+                    Password
+                  </span>
+
+                  <input
+                    type="password"
+                    value={
+                      secretInput
+                    }
+                    onChange={(
+                      event
+                    ) =>
+                      setSecretInput(
+                        event.target
+                          .value
+                      )
+                    }
+                    autoComplete="current-password"
+                    placeholder="Enter administrator password"
+                  />
+                </label>
+
+                <button
+                  type="submit"
+                  className="primary-btn"
+                  disabled={loading}
+                >
+                  {loading
+                    ? "Connecting..."
+                    : "Open COA Manager"}
+                </button>
+              </form>
+
+              <div className="coa-manager-login-actions">
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() =>
+                    onNavigate(
+                      "missionControl"
+                    )
+                  }
+                >
+                  Back To Mission Control
+                </button>
+
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() =>
+                    onNavigate(
+                      "quality"
+                    )
+                  }
+                >
+                  View Public Quality
+                  Page
+                </button>
+              </div>
+            </div>
+          </section>
+        </main>
+      </>
     );
   }
 
@@ -674,14 +1164,15 @@ function COAManager({
               </h1>
 
               <p className="coa-manager-subtitle">
-                Track genuine
+                Manage permanent
+                Cloudflare records for
                 certificates of
                 analysis, batch
                 information, testing
-                laboratories, review
-                status, and
-                verification links for
-                every product strength.
+                laboratories,
+                verification links,
+                review status, and
+                public publication.
               </p>
             </div>
 
@@ -714,10 +1205,25 @@ function COAManager({
                 type="button"
                 className="primary-btn"
                 onClick={() =>
-                  onNavigate("quality")
+                  onNavigate(
+                    "quality"
+                  )
                 }
               >
                 View Quality Page
+              </button>
+
+              <button
+                type="button"
+                className="secondary-btn"
+                disabled={loading}
+                onClick={() =>
+                  loadCloudRecords()
+                }
+              >
+                {loading
+                  ? "Refreshing..."
+                  : "Refresh Records"}
               </button>
 
               <button
@@ -729,35 +1235,60 @@ function COAManager({
               >
                 Export Records
               </button>
+
+              <button
+                type="button"
+                className="coa-manager-danger-button"
+                onClick={
+                  handleLogout
+                }
+              >
+                End Admin Session
+              </button>
             </div>
           </div>
 
-          <div className="coa-manager-notice">
+          <div className="coa-manager-cloud-notice">
             <strong>
-              Local documentation
-              tracker
+              Cloudflare KV connected
             </strong>
 
             <p>
-              Records entered here are
-              saved only in this
-              browser. They do not
-              upload files, update the
-              customer-facing Quality
-              page, or synchronize
-              between devices. Only
-              enter links to genuine
-              laboratory documents that
-              match the listed product,
-              strength, and batch.
+              Saved documentation now
+              persists across devices.
+              Only records marked
+              complete, manually
+              reviewed, and published
+              will appear through the
+              public documentation API.
             </p>
           </div>
+
+          {connectionMessage && (
+            <div className="coa-manager-success">
+              {connectionMessage}
+            </div>
+          )}
+
+          {connectionError && (
+            <div className="coa-manager-error">
+              {connectionError}
+            </div>
+          )}
 
           <div className="coa-manager-stats">
             <StatCard
               label="Total Variants"
               value={stats.total}
-              detail="Individual strength records"
+              detail="Individual catalog strengths"
+            />
+
+            <StatCard
+              label="Saved Records"
+              value={
+                stats.savedRecords
+              }
+              detail="Stored in Cloudflare KV"
             />
 
             <StatCard
@@ -769,6 +1300,15 @@ function COAManager({
               positive={
                 stats.documentationReady >
                 0
+              }
+            />
+
+            <StatCard
+              label="Published"
+              value={stats.published}
+              detail="Visible through public API"
+              positive={
+                stats.published > 0
               }
             />
 
@@ -935,7 +1475,9 @@ function COAManager({
               <button
                 type="button"
                 className="primary-btn"
-                onClick={resetFilters}
+                onClick={
+                  resetFilters
+                }
               >
                 Reset Filters
               </button>
@@ -952,6 +1494,13 @@ function COAManager({
                   const isEditing =
                     editingCode ===
                     variant.codeName;
+
+                  const hasSavedRecord =
+                    Boolean(
+                      records[
+                        variant.codeName
+                      ]
+                    );
 
                   return (
                     <article
@@ -1015,6 +1564,18 @@ function COAManager({
                                       ? ""
                                       : "s"
                                   } Needed`}
+                            </span>
+
+                            <span
+                              className={
+                                audit.published
+                                  ? "coa-manager-published-badge"
+                                  : "coa-manager-draft-badge"
+                              }
+                            >
+                              {audit.published
+                                ? "Published"
+                                : "Not Published"}
                             </span>
                           </div>
 
@@ -1112,14 +1673,15 @@ function COAManager({
                         />
 
                         <StatusBox
-                          label="Testing Laboratory"
+                          label="Publication"
                           value={
-                            record.labName ||
-                            "Not Entered"
+                            audit.published
+                              ? "Published"
+                              : "Not Published"
                           }
-                          ready={hasText(
-                            record.labName
-                          )}
+                          ready={
+                            audit.published
+                          }
                         />
                       </div>
 
@@ -1128,6 +1690,14 @@ function COAManager({
                           label="Batch Number"
                           value={
                             record.batchNumber ||
+                            "Not entered"
+                          }
+                        />
+
+                        <SummaryItem
+                          label="Laboratory"
+                          value={
+                            record.labName ||
                             "Not entered"
                           }
                         />
@@ -1195,7 +1765,9 @@ function COAManager({
                         >
                           {isEditing
                             ? "Editing Record"
-                            : "Manage Record"}
+                            : hasSavedRecord
+                            ? "Edit Record"
+                            : "Create Record"}
                         </button>
 
                         {audit.coaReady && (
@@ -1224,19 +1796,31 @@ function COAManager({
                           </a>
                         )}
 
-                        {records[
-                          variant.codeName
-                        ] && (
+                        {audit.published && (
+                          <a
+                            className="secondary-btn coa-manager-link-button"
+                            href={`/api/documents/${encodeURIComponent(
+                              variant.codeName
+                            )}`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            View Public Record
+                          </a>
+                        )}
+
+                        {hasSavedRecord && (
                           <button
                             type="button"
                             className="coa-manager-danger-button"
+                            disabled={saving}
                             onClick={() =>
-                              handleClearRecord(
+                              handleDeleteRecord(
                                 variant
                               )
                             }
                           >
-                            Clear Record
+                            Delete Record
                           </button>
                         )}
                       </div>
@@ -1246,7 +1830,8 @@ function COAManager({
                           <div className="coa-manager-editor-heading">
                             <div>
                               <p className="eyebrow">
-                                DOCUMENT RECORD
+                                CLOUD DOCUMENT
+                                RECORD
                               </p>
 
                               <h3>
@@ -1366,35 +1951,64 @@ function COAManager({
                             <span>
                               I manually
                               reviewed the
+                              laboratory
                               document and
-                              confirmed that the
+                              confirmed the
                               product code,
                               strength, batch,
-                              and laboratory
-                              information match.
+                              testing
+                              laboratory, and
+                              results match
+                              this record.
+                            </span>
+                          </label>
+
+                          <label className="coa-manager-publish-check">
+                            <input
+                              type="checkbox"
+                              name="published"
+                              checked={
+                                draft.published
+                              }
+                              onChange={
+                                handleDraftChange
+                              }
+                            />
+
+                            <span>
+                              Publish this
+                              record through
+                              the public
+                              documentation
+                              API.
                             </span>
                           </label>
 
                           <div className="coa-manager-editor-warning">
-                            Do not mark a record
-                            reviewed unless the
-                            document is genuine
-                            and matches this exact
-                            product strength and
-                            batch.
+                            Cloudflare will
+                            reject publication
+                            unless the record
+                            contains complete
+                            batch information,
+                            valid COA and
+                            verification links,
+                            and manual review
+                            confirmation.
                           </div>
 
                           <button
                             type="button"
                             className="primary-btn"
+                            disabled={saving}
                             onClick={() =>
                               handleSaveRecord(
                                 variant
                               )
                             }
                           >
-                            Save Documentation
-                            Record
+                            {saving
+                              ? "Saving To Cloudflare..."
+                              : "Save Permanent Record"}
                           </button>
                         </div>
                       )}
@@ -1462,6 +2076,7 @@ function SummaryItem({
   return (
     <div>
       <span>{label}</span>
+
       <strong>{value}</strong>
     </div>
   );
@@ -1518,6 +2133,37 @@ const coaManagerCss = `
     margin: 0 auto;
   }
 
+  .coa-manager-login-panel {
+    width: 100%;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 48px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 34px;
+    background:
+      radial-gradient(
+        circle at top left,
+        rgba(61,165,255,0.2),
+        transparent 40%
+      ),
+      rgba(255,255,255,0.035);
+    box-shadow:
+      0 30px 90px rgba(0,0,0,0.5);
+  }
+
+  .coa-manager-login-form {
+    display: grid;
+    gap: 18px;
+    margin-top: 28px;
+  }
+
+  .coa-manager-login-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 18px;
+  }
+
   .coa-manager-hero {
     display: flex;
     justify-content: space-between;
@@ -1570,16 +2216,28 @@ const coaManagerCss = `
     gap: 10px;
   }
 
-  .coa-manager-notice {
+  .coa-manager-cloud-notice,
+  .coa-manager-success,
+  .coa-manager-error {
     display: grid;
     gap: 8px;
     margin-bottom: 24px;
-    padding: 20px;
-    border: 1px solid rgba(255,190,90,0.28);
-    border-radius: 20px;
-    background: rgba(255,170,60,0.08);
-    color: #ffe3b0;
+    padding: 18px;
+    border-radius: 18px;
     line-height: 1.7;
+  }
+
+  .coa-manager-cloud-notice,
+  .coa-manager-success {
+    border: 1px solid rgba(61,165,255,0.28);
+    background: rgba(61,165,255,0.09);
+    color: #bfe7ff;
+  }
+
+  .coa-manager-error {
+    border: 1px solid rgba(255,120,120,0.3);
+    background: rgba(255,70,70,0.09);
+    color: #ffd1d1;
   }
 
   .coa-manager-stats {
@@ -1739,7 +2397,9 @@ const coaManagerCss = `
 
   .coa-manager-category-badge,
   .coa-manager-ready-badge,
-  .coa-manager-warning-badge {
+  .coa-manager-warning-badge,
+  .coa-manager-published-badge,
+  .coa-manager-draft-badge {
     display: inline-flex;
     width: fit-content;
     padding: 7px 11px;
@@ -1756,7 +2416,8 @@ const coaManagerCss = `
     color: #9ed8ff;
   }
 
-  .coa-manager-ready-badge {
+  .coa-manager-ready-badge,
+  .coa-manager-published-badge {
     border: 1px solid rgba(61,165,255,0.42);
     background: rgba(61,165,255,0.16);
     color: #9ed8ff;
@@ -1766,6 +2427,12 @@ const coaManagerCss = `
     border: 1px solid rgba(255,130,130,0.35);
     background: rgba(255,90,90,0.1);
     color: #ffd1d1;
+  }
+
+  .coa-manager-draft-badge {
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.06);
+    color: #c8c8c8;
   }
 
   .coa-manager-product-title {
@@ -1828,7 +2495,7 @@ const coaManagerCss = `
   .coa-manager-record-summary {
     display: grid;
     grid-template-columns:
-      repeat(3, minmax(0, 1fr));
+      repeat(2, minmax(0, 1fr));
     gap: 10px;
     margin-top: 18px;
   }
@@ -1975,7 +2642,8 @@ const coaManagerCss = `
     grid-column: 1 / -1;
   }
 
-  .coa-manager-review-check {
+  .coa-manager-review-check,
+  .coa-manager-publish-check {
     display: flex;
     align-items: flex-start;
     gap: 12px;
@@ -1985,7 +2653,8 @@ const coaManagerCss = `
     cursor: pointer;
   }
 
-  .coa-manager-review-check input {
+  .coa-manager-review-check input,
+  .coa-manager-publish-check input {
     width: 20px;
     height: 20px;
     min-width: 20px;
@@ -2015,6 +2684,11 @@ const coaManagerCss = `
     text-align: center;
   }
 
+  button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
   @media (max-width: 900px) {
     .coa-manager-page {
       padding: 65px 24px;
@@ -2031,13 +2705,16 @@ const coaManagerCss = `
       padding: 44px 12px;
     }
 
-    .coa-manager-hero {
+    .coa-manager-hero,
+    .coa-manager-login-panel {
       padding: 30px 20px;
       border-radius: 24px;
     }
 
     .coa-manager-hero-buttons,
     .coa-manager-hero-buttons button,
+    .coa-manager-login-actions,
+    .coa-manager-login-actions button,
     .coa-manager-actions,
     .coa-manager-actions button,
     .coa-manager-actions a {
@@ -2076,6 +2753,7 @@ const coaManagerCss = `
     }
 
     .coa-manager-hero,
+    .coa-manager-login-panel,
     .coa-manager-filters,
     .coa-manager-card {
       padding: 15px;
