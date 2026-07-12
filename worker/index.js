@@ -1,11 +1,14 @@
-import {
-  getOrderCatalogItem,
-} from "./orderCatalog.js";
+import { getOrderCatalogItem } from "./orderCatalog.js";
 
 const MAX_REQUEST_LENGTH = 100000;
 const MAX_LINE_ITEMS = 50;
 const MAX_TOTAL_QUANTITY = 100;
 const MAX_TURNSTILE_TOKEN_LENGTH = 2048;
+
+const MAX_DOCUMENT_REQUEST_LENGTH = 50000;
+const MAX_DOCUMENT_URL_LENGTH = 2048;
+const MAX_DOCUMENT_NOTES_LENGTH = 2000;
+const DOCUMENT_KEY_PREFIX = "document:";
 
 const TURNSTILE_VERIFY_URL =
   "https://challenges.cloudflare.com/turnstile/v0/siteverify";
@@ -30,35 +33,1023 @@ export default {
       );
     }
 
-    if (url.pathname.startsWith("/api/")) {
+    if (
+      url.pathname ===
+        "/api/documents" ||
+      url.pathname.startsWith(
+        "/api/documents/"
+      )
+    ) {
+      return handlePublicDocumentsRequest(
+        request,
+        env,
+        url
+      );
+    }
+
+    if (
+      url.pathname ===
+        "/api/admin/documents" ||
+      url.pathname.startsWith(
+        "/api/admin/documents/"
+      )
+    ) {
+      return handleAdminDocumentsRequest(
+        request,
+        env,
+        url
+      );
+    }
+
+    if (
+      url.pathname.startsWith(
+        "/api/"
+      )
+    ) {
       return jsonResponse(
         {
           success: false,
-          error: "API route not found.",
+          error:
+            "API route not found.",
         },
         404
       );
     }
 
-    return env.ASSETS.fetch(request);
+    return env.ASSETS.fetch(
+      request
+    );
   },
 };
+
+/* -------------------------------------------------- */
+/* DOCUMENTATION API                                  */
+/* -------------------------------------------------- */
+
+async function handlePublicDocumentsRequest(
+  request,
+  env,
+  url
+) {
+  try {
+    validateDocumentStorage(env);
+
+    if (
+      request.method !== "GET"
+    ) {
+      throw new ApiRequestError(
+        "Method not allowed.",
+        405
+      );
+    }
+
+    const codeName =
+      getRouteCode(
+        url.pathname,
+        "/api/documents"
+      );
+
+    if (codeName) {
+      const record =
+        await getDocumentRecord(
+          env,
+          codeName
+        );
+
+      if (
+        !record ||
+        !record.published ||
+        !record.documentationReady
+      ) {
+        throw new ApiRequestError(
+          "Documentation record not found.",
+          404
+        );
+      }
+
+      return jsonResponse({
+        success: true,
+
+        record:
+          toPublicDocumentRecord(
+            record
+          ),
+      });
+    }
+
+    const records =
+      await listDocumentRecords(
+        env
+      );
+
+    const publishedRecords =
+      records
+        .filter(
+          (record) =>
+            record.published &&
+            record.documentationReady
+        )
+        .map(
+          toPublicDocumentRecord
+        );
+
+    return jsonResponse({
+      success: true,
+
+      records:
+        publishedRecords,
+
+      count:
+        publishedRecords.length,
+    });
+  } catch (error) {
+    console.error(
+      "Public documentation request error:",
+      error
+    );
+
+    return handleApiError(
+      error
+    );
+  }
+}
+
+async function handleAdminDocumentsRequest(
+  request,
+  env,
+  url
+) {
+  try {
+    validateDocumentStorage(env);
+
+    await requireDocumentAdmin(
+      request,
+      env
+    );
+
+    const codeName =
+      getRouteCode(
+        url.pathname,
+        "/api/admin/documents"
+      );
+
+    if (
+      !codeName &&
+      request.method === "GET"
+    ) {
+      const records =
+        await listDocumentRecords(
+          env
+        );
+
+      return jsonResponse({
+        success: true,
+        records,
+        count: records.length,
+      });
+    }
+
+    if (!codeName) {
+      throw new ApiRequestError(
+        "A product code is required.",
+        400
+      );
+    }
+
+    if (
+      request.method === "GET"
+    ) {
+      const record =
+        await getDocumentRecord(
+          env,
+          codeName
+        );
+
+      if (!record) {
+        throw new ApiRequestError(
+          "Documentation record not found.",
+          404
+        );
+      }
+
+      return jsonResponse({
+        success: true,
+        record,
+      });
+    }
+
+    if (
+      request.method === "PUT"
+    ) {
+      validateJsonContentType(
+        request
+      );
+
+      const body =
+        await readJsonRequest(
+          request,
+          MAX_DOCUMENT_REQUEST_LENGTH,
+          "documentation"
+        );
+
+      const existingRecord =
+        await getDocumentRecord(
+          env,
+          codeName
+        );
+
+      const record =
+        prepareDocumentRecord(
+          codeName,
+          body.record || body,
+          existingRecord
+        );
+
+      await putDocumentRecord(
+        env,
+        record
+      );
+
+      return jsonResponse(
+        {
+          success: true,
+          record,
+
+          message:
+            "Documentation record saved.",
+        },
+        existingRecord
+          ? 200
+          : 201
+      );
+    }
+
+    if (
+      request.method === "DELETE"
+    ) {
+      const existingRecord =
+        await getDocumentRecord(
+          env,
+          codeName
+        );
+
+      if (!existingRecord) {
+        throw new ApiRequestError(
+          "Documentation record not found.",
+          404
+        );
+      }
+
+      await env.DOCUMENTS_KV.delete(
+        getDocumentKey(
+          codeName
+        )
+      );
+
+      return jsonResponse({
+        success: true,
+
+        message:
+          "Documentation record deleted.",
+      });
+    }
+
+    throw new ApiRequestError(
+      "Method not allowed.",
+      405
+    );
+  } catch (error) {
+    console.error(
+      "Admin documentation request error:",
+      error
+    );
+
+    return handleApiError(
+      error
+    );
+  }
+}
+
+function validateDocumentStorage(
+  env
+) {
+  if (!env.DOCUMENTS_KV) {
+    throw new ApiRequestError(
+      "Documentation storage has not been configured.",
+      500
+    );
+  }
+}
+
+async function requireDocumentAdmin(
+  request,
+  env
+) {
+  if (
+    !env.DOCUMENT_ADMIN_SECRET
+  ) {
+    throw new ApiRequestError(
+      "Documentation administration has not been configured.",
+      500
+    );
+  }
+
+  const authorization =
+    request.headers.get(
+      "Authorization"
+    ) || "";
+
+  const match =
+    authorization.match(
+      /^Bearer\s+(.+)$/i
+    );
+
+  const submittedSecret =
+    match?.[1]?.trim() || "";
+
+  if (
+    !submittedSecret ||
+    !(await secretsMatch(
+      submittedSecret,
+      String(
+        env.DOCUMENT_ADMIN_SECRET
+      )
+    ))
+  ) {
+    throw new ApiRequestError(
+      "Administrator authorization is required.",
+      401
+    );
+  }
+}
+
+async function secretsMatch(
+  submittedSecret,
+  expectedSecret
+) {
+  const encoder =
+    new TextEncoder();
+
+  const [
+    submittedDigest,
+    expectedDigest,
+  ] = await Promise.all([
+    crypto.subtle.digest(
+      "SHA-256",
+
+      encoder.encode(
+        submittedSecret
+      )
+    ),
+
+    crypto.subtle.digest(
+      "SHA-256",
+
+      encoder.encode(
+        expectedSecret
+      )
+    ),
+  ]);
+
+  const submittedBytes =
+    new Uint8Array(
+      submittedDigest
+    );
+
+  const expectedBytes =
+    new Uint8Array(
+      expectedDigest
+    );
+
+  if (
+    submittedBytes.length !==
+    expectedBytes.length
+  ) {
+    return false;
+  }
+
+  let difference = 0;
+
+  for (
+    let index = 0;
+    index <
+    submittedBytes.length;
+    index += 1
+  ) {
+    difference |=
+      submittedBytes[index] ^
+      expectedBytes[index];
+  }
+
+  return difference === 0;
+}
+
+function getRouteCode(
+  pathname,
+  routeBase
+) {
+  if (
+    pathname === routeBase
+  ) {
+    return "";
+  }
+
+  const routePrefix =
+    `${routeBase}/`;
+
+  if (
+    !pathname.startsWith(
+      routePrefix
+    )
+  ) {
+    return "";
+  }
+
+  const encodedCode =
+    pathname.slice(
+      routePrefix.length
+    );
+
+  if (
+    !encodedCode ||
+    encodedCode.includes("/")
+  ) {
+    throw new ApiRequestError(
+      "The documentation route is invalid.",
+      404
+    );
+  }
+
+  let decodedCode;
+
+  try {
+    decodedCode =
+      decodeURIComponent(
+        encodedCode
+      );
+  } catch {
+    throw new ApiRequestError(
+      "The product code is invalid.",
+      400
+    );
+  }
+
+  return normalizeDocumentCode(
+    decodedCode
+  );
+}
+
+function normalizeDocumentCode(
+  value
+) {
+  const codeName =
+    cleanText(
+      value,
+      100
+    ).toUpperCase();
+
+  if (
+    !/^[A-Z0-9][A-Z0-9-]{1,99}$/.test(
+      codeName
+    )
+  ) {
+    throw new ApiRequestError(
+      "The product code is invalid.",
+      400
+    );
+  }
+
+  return codeName;
+}
+
+function getDocumentKey(
+  codeName
+) {
+  return `${DOCUMENT_KEY_PREFIX}${codeName}`;
+}
+
+async function getDocumentRecord(
+  env,
+  codeName
+) {
+  return env.DOCUMENTS_KV.get(
+    getDocumentKey(
+      codeName
+    ),
+    "json"
+  );
+}
+
+async function putDocumentRecord(
+  env,
+  record
+) {
+  await env.DOCUMENTS_KV.put(
+    getDocumentKey(
+      record.codeName
+    ),
+
+    JSON.stringify(
+      record
+    ),
+
+    {
+      metadata: {
+        codeName:
+          record.codeName,
+
+        published:
+          record.published,
+
+        updatedAt:
+          record.updatedAt,
+      },
+    }
+  );
+}
+
+async function listDocumentRecords(
+  env
+) {
+  const keys = [];
+  let cursor;
+
+  do {
+    const result =
+      await env.DOCUMENTS_KV.list({
+        prefix:
+          DOCUMENT_KEY_PREFIX,
+
+        ...(cursor
+          ? { cursor }
+          : {}),
+      });
+
+    keys.push(
+      ...result.keys
+    );
+
+    cursor =
+      result.list_complete
+        ? undefined
+        : result.cursor;
+  } while (cursor);
+
+  const records =
+    await Promise.all(
+      keys.map((key) =>
+        env.DOCUMENTS_KV.get(
+          key.name,
+          "json"
+        )
+      )
+    );
+
+  return records
+    .filter(Boolean)
+    .sort(
+      (left, right) =>
+        String(
+          left.codeName
+        ).localeCompare(
+          String(
+            right.codeName
+          )
+        )
+    );
+}
+
+function prepareDocumentRecord(
+  codeName,
+  rawRecord,
+  existingRecord
+) {
+  if (
+    !rawRecord ||
+    typeof rawRecord !==
+      "object" ||
+    Array.isArray(rawRecord)
+  ) {
+    throw new ApiRequestError(
+      "The documentation record is invalid.",
+      400
+    );
+  }
+
+  const catalogItem =
+    getOrderCatalogItem(
+      codeName
+    );
+
+  if (!catalogItem) {
+    throw new ApiRequestError(
+      `Product code ${codeName} is not available.`,
+      400
+    );
+  }
+
+  const batchNumber =
+    cleanText(
+      rawRecord.batchNumber,
+      150
+    );
+
+  const labName =
+    cleanText(
+      rawRecord.labName,
+      200
+    );
+
+  const testDate =
+    cleanText(
+      rawRecord.testDate,
+      10
+    );
+
+  const category =
+    cleanText(
+      rawRecord.category,
+      150
+    );
+
+  const notes =
+    cleanMultilineText(
+      rawRecord.notes,
+      MAX_DOCUMENT_NOTES_LENGTH
+    );
+
+  const coaUrl =
+    cleanUrl(
+      rawRecord.coaUrl,
+      "COA document"
+    );
+
+  const verificationUrl =
+    cleanUrl(
+      rawRecord.verificationUrl,
+      "verification"
+    );
+
+  const reviewed =
+    rawRecord.reviewed === true;
+
+  const published =
+    rawRecord.published === true;
+
+  if (
+    testDate &&
+    !isValidIsoDate(
+      testDate
+    )
+  ) {
+    throw new ApiRequestError(
+      "The test date is invalid.",
+      400
+    );
+  }
+
+  const batchReady =
+    Boolean(
+      batchNumber &&
+      labName &&
+      testDate
+    );
+
+  const coaReady =
+    Boolean(coaUrl);
+
+  const verificationReady =
+    Boolean(
+      verificationUrl
+    );
+
+  const documentationReady =
+    Boolean(
+      batchReady &&
+      coaReady &&
+      verificationReady &&
+      reviewed
+    );
+
+  if (
+    published &&
+    !documentationReady
+  ) {
+    throw new ApiRequestError(
+      "A record must include complete batch details, valid document links, and manual review before publication.",
+      400
+    );
+  }
+
+  const now =
+    new Date().toISOString();
+
+  return {
+    codeName,
+
+    productName:
+      catalogItem.name,
+
+    strength:
+      catalogItem.strength,
+
+    ...(catalogItem.composition
+      ? {
+          composition:
+            catalogItem.composition,
+        }
+      : {}),
+
+    category,
+    batchNumber,
+    labName,
+    testDate,
+    coaUrl,
+    verificationUrl,
+    notes,
+    reviewed,
+    published,
+    batchReady,
+    coaReady,
+    verificationReady,
+    documentationReady,
+
+    createdAt:
+      existingRecord?.createdAt ||
+      now,
+
+    updatedAt: now,
+  };
+}
+
+function toPublicDocumentRecord(
+  record
+) {
+  return {
+    codeName:
+      record.codeName,
+
+    productName:
+      record.productName,
+
+    strength:
+      record.strength,
+
+    ...(record.composition
+      ? {
+          composition:
+            record.composition,
+        }
+      : {}),
+
+    category:
+      record.category || "",
+
+    batchNumber:
+      record.batchNumber,
+
+    labName:
+      record.labName,
+
+    testDate:
+      record.testDate,
+
+    coaUrl:
+      record.coaUrl,
+
+    verificationUrl:
+      record.verificationUrl,
+
+    documentationReady:
+      record.documentationReady,
+
+    updatedAt:
+      record.updatedAt,
+  };
+}
+
+function cleanUrl(
+  value,
+  label
+) {
+  const cleanedValue =
+    String(
+      value == null
+        ? ""
+        : value
+    ).trim();
+
+  if (!cleanedValue) {
+    return "";
+  }
+
+  if (
+    cleanedValue.length >
+    MAX_DOCUMENT_URL_LENGTH
+  ) {
+    throw new ApiRequestError(
+      `The ${label} link is too long.`,
+      400
+    );
+  }
+
+  let url;
+
+  try {
+    url = new URL(
+      cleanedValue
+    );
+  } catch {
+    throw new ApiRequestError(
+      `Enter a valid ${label} link beginning with http:// or https://.`,
+      400
+    );
+  }
+
+  if (
+    url.protocol !== "http:" &&
+    url.protocol !== "https:"
+  ) {
+    throw new ApiRequestError(
+      `Enter a valid ${label} link beginning with http:// or https://.`,
+      400
+    );
+  }
+
+  return url.toString();
+}
+
+function isValidIsoDate(
+  value
+) {
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(
+      value
+    )
+  ) {
+    return false;
+  }
+
+  const date =
+    new Date(
+      `${value}T00:00:00.000Z`
+    );
+
+  return (
+    !Number.isNaN(
+      date.getTime()
+    ) &&
+    date
+      .toISOString()
+      .slice(0, 10) === value
+  );
+}
+
+function cleanMultilineText(
+  value,
+  maximumLength
+) {
+  return String(
+    value == null ? "" : value
+  )
+    .replace(
+      /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
+      " "
+    )
+    .replace(
+      /\r\n?/g,
+      "\n"
+    )
+    .trim()
+    .slice(
+      0,
+      maximumLength
+    );
+}
+
+function validateJsonContentType(
+  request
+) {
+  const contentType =
+    request.headers.get(
+      "content-type"
+    ) || "";
+
+  if (
+    !contentType
+      .toLowerCase()
+      .includes(
+        "application/json"
+      )
+  ) {
+    throw new ApiRequestError(
+      "The request must contain JSON.",
+      415
+    );
+  }
+}
+
+async function readJsonRequest(
+  request,
+  maximumLength,
+  label
+) {
+  const declaredLength =
+    Number(
+      request.headers.get(
+        "content-length"
+      )
+    ) || 0;
+
+  if (
+    declaredLength >
+    maximumLength
+  ) {
+    throw new ApiRequestError(
+      `The ${label} request is too large.`,
+      413
+    );
+  }
+
+  const text =
+    await request.text();
+
+  if (
+    text.length >
+    maximumLength
+  ) {
+    throw new ApiRequestError(
+      `The ${label} request is too large.`,
+      413
+    );
+  }
+
+  if (!text.trim()) {
+    throw new ApiRequestError(
+      `The ${label} request is empty.`,
+      400
+    );
+  }
+
+  try {
+    return JSON.parse(
+      text
+    );
+  } catch {
+    throw new ApiRequestError(
+      "The request contains invalid JSON.",
+      400
+    );
+  }
+}
+
+function handleApiError(
+  error
+) {
+  const status =
+    error instanceof
+    ApiRequestError
+      ? error.status
+      : 500;
+
+  return jsonResponse(
+    {
+      success: false,
+
+      error:
+        error.message ||
+        "The request could not be completed.",
+    },
+    status
+  );
+}
+
+/* -------------------------------------------------- */
+/* ORDER API                                          */
+/* -------------------------------------------------- */
 
 async function handleOrderRequest(
   request,
   env
 ) {
   try {
-    validateEnvironment_(env);
-    validateContentType_(request);
+    validateEnvironment(
+      env
+    );
 
-    await enforceOrderRateLimit_(
+    validateContentType(
+      request
+    );
+
+    await enforceOrderRateLimit(
       request,
       env
     );
 
     const requestBody =
-      await readRequestBody_(request);
+      await readRequestBody(
+        request
+      );
 
     const turnstileToken =
       requestBody.turnstileToken ||
@@ -67,7 +1058,7 @@ async function handleOrderRequest(
       ] ||
       "";
 
-    await validateTurnstile_(
+    await validateTurnstile(
       request,
       env,
       turnstileToken
@@ -78,27 +1069,31 @@ async function handleOrderRequest(
       requestBody;
 
     const protectedOrder =
-      prepareOrder_(submittedOrder);
+      prepareOrder(
+        submittedOrder
+      );
 
-    const response = await fetch(
-      env.ORDER_WEB_APP_URL,
-      {
-        method: "POST",
-        redirect: "follow",
+    const response =
+      await fetch(
+        env.ORDER_WEB_APP_URL,
+        {
+          method: "POST",
+          redirect: "follow",
 
-        headers: {
-          "Content-Type":
-            "application/json",
-        },
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
 
-        body: JSON.stringify({
-          secret:
-            env.ORDER_API_SECRET,
+          body: JSON.stringify({
+            secret:
+              env.ORDER_API_SECRET,
 
-          order: protectedOrder,
-        }),
-      }
-    );
+            order:
+              protectedOrder,
+          }),
+        }
+      );
 
     const responseText =
       await response.text();
@@ -106,9 +1101,10 @@ async function handleOrderRequest(
     let result;
 
     try {
-      result = JSON.parse(
-        responseText
-      );
+      result =
+        JSON.parse(
+          responseText
+        );
     } catch {
       throw new OrderRequestError(
         "The order service returned an invalid response.",
@@ -163,7 +1159,9 @@ async function handleOrderRequest(
   }
 }
 
-function validateEnvironment_(env) {
+function validateEnvironment(
+  env
+) {
   if (
     !env.ORDER_WEB_APP_URL ||
     !env.ORDER_API_SECRET ||
@@ -177,7 +1175,9 @@ function validateEnvironment_(env) {
   }
 }
 
-function validateContentType_(request) {
+function validateContentType(
+  request
+) {
   const contentType =
     request.headers.get(
       "content-type"
@@ -197,21 +1197,25 @@ function validateContentType_(request) {
   }
 }
 
-async function enforceOrderRateLimit_(
+async function enforceOrderRateLimit(
   request,
   env
 ) {
   const clientIdentifier =
-    getClientIdentifier_(request);
+    getClientIdentifier(
+      request
+    );
 
   let result;
 
   try {
     result =
-      await env.ORDER_RATE_LIMITER.limit({
-        key:
-          `order:${clientIdentifier}`,
-      });
+      await env.ORDER_RATE_LIMITER.limit(
+        {
+          key:
+            `order:${clientIdentifier}`,
+        }
+      );
   } catch (error) {
     console.error(
       "Order rate limiter failed:",
@@ -232,7 +1236,7 @@ async function enforceOrderRateLimit_(
   }
 }
 
-function getClientIdentifier_(
+function getClientIdentifier(
   request
 ) {
   const cloudflareIp =
@@ -241,7 +1245,7 @@ function getClientIdentifier_(
     );
 
   if (cloudflareIp) {
-    return cleanText_(
+    return cleanText(
       cloudflareIp,
       100
     );
@@ -253,8 +1257,9 @@ function getClientIdentifier_(
     );
 
   if (forwardedFor) {
-    return cleanText_(
-      forwardedFor.split(",")[0],
+    return cleanText(
+      forwardedFor
+        .split(",")[0],
       100
     );
   }
@@ -262,7 +1267,7 @@ function getClientIdentifier_(
   return "unknown-client";
 }
 
-async function readRequestBody_(
+async function readRequestBody(
   request
 ) {
   const declaredLength =
@@ -303,7 +1308,9 @@ async function readRequestBody_(
   }
 
   try {
-    return JSON.parse(text);
+    return JSON.parse(
+      text
+    );
   } catch {
     throw new OrderRequestError(
       "The request contains invalid JSON.",
@@ -312,15 +1319,16 @@ async function readRequestBody_(
   }
 }
 
-async function validateTurnstile_(
+async function validateTurnstile(
   request,
   env,
   submittedToken
 ) {
-  const token = cleanText_(
-    submittedToken,
-    MAX_TURNSTILE_TOKEN_LENGTH
-  );
+  const token =
+    cleanText(
+      submittedToken,
+      MAX_TURNSTILE_TOKEN_LENGTH
+    );
 
   if (!token) {
     throw new OrderRequestError(
@@ -337,34 +1345,36 @@ async function validateTurnstile_(
   let response;
 
   try {
-    response = await fetch(
-      TURNSTILE_VERIFY_URL,
-      {
-        method: "POST",
+    response =
+      await fetch(
+        TURNSTILE_VERIFY_URL,
+        {
+          method: "POST",
 
-        headers: {
-          "Content-Type":
-            "application/json",
-        },
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
 
-        body: JSON.stringify({
-          secret:
-            env.TURNSTILE_SECRET_KEY,
+          body: JSON.stringify({
+            secret:
+              env.TURNSTILE_SECRET_KEY,
 
-          response: token,
+            response:
+              token,
 
-          idempotency_key:
-            crypto.randomUUID(),
+            idempotency_key:
+              crypto.randomUUID(),
 
-          ...(clientIp
-            ? {
-                remoteip:
-                  clientIp,
-              }
-            : {}),
-        }),
-      }
-    );
+            ...(clientIp
+              ? {
+                  remoteip:
+                    clientIp,
+                }
+              : {}),
+          }),
+        }
+      );
   } catch (error) {
     console.error(
       "Turnstile request failed:",
@@ -409,7 +1419,9 @@ async function validateTurnstile_(
   if (!result.success) {
     console.warn(
       "Turnstile verification failed:",
-      result["error-codes"] || []
+      result[
+        "error-codes"
+      ] || []
     );
 
     throw new OrderRequestError(
@@ -449,10 +1461,13 @@ async function validateTurnstile_(
   }
 }
 
-function prepareOrder_(rawOrder) {
+function prepareOrder(
+  rawOrder
+) {
   if (
     !rawOrder ||
-    typeof rawOrder !== "object" ||
+    typeof rawOrder !==
+      "object" ||
     Array.isArray(rawOrder)
   ) {
     throw new OrderRequestError(
@@ -462,16 +1477,16 @@ function prepareOrder_(rawOrder) {
   }
 
   const customer =
-    prepareCustomer_(
+    prepareCustomer(
       rawOrder.customer ||
-        rawOrder
+      rawOrder
     );
 
   const paymentMethod =
-    normalizePaymentMethod_(
+    normalizePaymentMethod(
       rawOrder.preferredPaymentLabel ||
-        rawOrder.preferredPaymentMethod ||
-        rawOrder.paymentMethod
+      rawOrder.preferredPaymentMethod ||
+      rawOrder.paymentMethod
     );
 
   if (!paymentMethod) {
@@ -505,13 +1520,14 @@ function prepareOrder_(rawOrder) {
 
   const items =
     rawOrder.items.map(
-      prepareItem_
+      prepareItem
     );
 
   const totalQuantity =
     items.reduce(
       (total, item) =>
-        total + item.quantity,
+        total +
+        item.quantity,
       0
     );
 
@@ -532,15 +1548,15 @@ function prepareOrder_(rawOrder) {
         Math.round(
           item.price * 100
         ) *
-          item.quantity,
+        item.quantity,
       0
     );
 
   return {
-    id: createOrderId_(),
+    id:
+      createOrderId(),
 
     customer,
-
     paymentMethod,
 
     preferredPaymentLabel:
@@ -555,13 +1571,16 @@ function prepareOrder_(rawOrder) {
   };
 }
 
-function prepareCustomer_(
+function prepareCustomer(
   rawCustomer
 ) {
   if (
     !rawCustomer ||
-    typeof rawCustomer !== "object" ||
-    Array.isArray(rawCustomer)
+    typeof rawCustomer !==
+      "object" ||
+    Array.isArray(
+      rawCustomer
+    )
   ) {
     throw new OrderRequestError(
       "Customer information is missing.",
@@ -570,40 +1589,47 @@ function prepareCustomer_(
   }
 
   const customer = {
-    firstName: cleanText_(
-      rawCustomer.firstName,
-      100
-    ),
+    firstName:
+      cleanText(
+        rawCustomer.firstName,
+        100
+      ),
 
-    lastName: cleanText_(
-      rawCustomer.lastName,
-      100
-    ),
+    lastName:
+      cleanText(
+        rawCustomer.lastName,
+        100
+      ),
 
-    email: cleanText_(
-      rawCustomer.email,
-      254
-    ).toLowerCase(),
+    email:
+      cleanText(
+        rawCustomer.email,
+        254
+      ).toLowerCase(),
 
-    address: cleanText_(
-      rawCustomer.address,
-      200
-    ),
+    address:
+      cleanText(
+        rawCustomer.address,
+        200
+      ),
 
-    city: cleanText_(
-      rawCustomer.city,
-      100
-    ),
+    city:
+      cleanText(
+        rawCustomer.city,
+        100
+      ),
 
-    state: cleanText_(
-      rawCustomer.state,
-      100
-    ),
+    state:
+      cleanText(
+        rawCustomer.state,
+        100
+      ),
 
-    zip: cleanText_(
-      rawCustomer.zip,
-      20
-    ),
+    zip:
+      cleanText(
+        rawCustomer.zip,
+        20
+      ),
   };
 
   if (
@@ -635,13 +1661,14 @@ function prepareCustomer_(
   return customer;
 }
 
-function prepareItem_(
+function prepareItem(
   rawItem,
   index
 ) {
   if (
     !rawItem ||
-    typeof rawItem !== "object" ||
+    typeof rawItem !==
+      "object" ||
     Array.isArray(rawItem)
   ) {
     throw new OrderRequestError(
@@ -651,7 +1678,7 @@ function prepareItem_(
   }
 
   const codeName =
-    cleanText_(
+    cleanText(
       rawItem.codeName,
       100
     );
@@ -676,10 +1703,14 @@ function prepareItem_(
   }
 
   const quantity =
-    Number(rawItem.quantity);
+    Number(
+      rawItem.quantity
+    );
 
   if (
-    !Number.isInteger(quantity) ||
+    !Number.isInteger(
+      quantity
+    ) ||
     quantity < 1 ||
     quantity > 100
   ) {
@@ -690,12 +1721,18 @@ function prepareItem_(
   }
 
   return {
-    name: catalogItem.name,
+    name:
+      catalogItem.name,
+
     codeName,
+
     strength:
       catalogItem.strength,
+
     quantity,
-    price: catalogItem.price,
+
+    price:
+      catalogItem.price,
 
     ...(catalogItem.composition
       ? {
@@ -706,11 +1743,11 @@ function prepareItem_(
   };
 }
 
-function normalizePaymentMethod_(
+function normalizePaymentMethod(
   value
 ) {
   const normalized =
-    cleanText_(
+    cleanText(
       value,
       50
     ).toLowerCase();
@@ -730,7 +1767,7 @@ function normalizePaymentMethod_(
   );
 }
 
-function createOrderId_() {
+function createOrderId() {
   const randomValues =
     new Uint32Array(1);
 
@@ -740,13 +1777,19 @@ function createOrderId_() {
 
   const number =
     10000000 +
-    (randomValues[0] %
-      90000000);
+    (
+      randomValues[0] %
+      90000000
+    );
 
   return `304-${number}`;
 }
 
-function cleanText_(
+/* -------------------------------------------------- */
+/* SHARED UTILITIES                                   */
+/* -------------------------------------------------- */
+
+function cleanText(
   value,
   maximumLength
 ) {
@@ -757,7 +1800,10 @@ function cleanText_(
       /[\u0000-\u001F\u007F]/g,
       " "
     )
-    .replace(/\s+/g, " ")
+    .replace(
+      /\s+/g,
+      " "
+    )
     .trim()
     .slice(
       0,
@@ -770,7 +1816,9 @@ function jsonResponse(
   status = 200
 ) {
   return new Response(
-    JSON.stringify(payload),
+    JSON.stringify(
+      payload
+    ),
     {
       status,
 
@@ -785,7 +1833,8 @@ function jsonResponse(
   );
 }
 
-class OrderRequestError extends Error {
+class OrderRequestError
+  extends Error {
   constructor(
     message,
     status = 400
@@ -794,6 +1843,22 @@ class OrderRequestError extends Error {
 
     this.name =
       "OrderRequestError";
+
+    this.status =
+      status;
+  }
+}
+
+class ApiRequestError
+  extends Error {
+  constructor(
+    message,
+    status = 400
+  ) {
+    super(message);
+
+    this.name =
+      "ApiRequestError";
 
     this.status =
       status;
