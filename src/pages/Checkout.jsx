@@ -11,6 +11,7 @@ import venmoLogo from "../assets/images/payments/venmo.png";
 import cashAppLogo from "../assets/images/payments/cashapp.png";
 
 const storageKey = "304-site-settings";
+const customerAccountSessionKey = "304-customer-account";
 const turnstileSiteKey = "0x4AAAAAAD0F6auvBsjzeYVA";
 const turnstileScriptId = "cloudflare-turnstile-script";
 
@@ -22,21 +23,9 @@ const defaultSettings = {
 };
 
 const paymentOptions = [
-  {
-    id: "zelle",
-    label: "Zelle",
-    logo: zelleLogo,
-  },
-  {
-    id: "venmo",
-    label: "Venmo",
-    logo: venmoLogo,
-  },
-  {
-    id: "cash-app",
-    label: "Cash App",
-    logo: cashAppLogo,
-  },
+  { id: "zelle", label: "Zelle", logo: zelleLogo },
+  { id: "venmo", label: "Venmo", logo: venmoLogo },
+  { id: "cash-app", label: "Cash App", logo: cashAppLogo },
 ];
 
 const stateOptions = [
@@ -95,10 +84,7 @@ const stateOptions = [
 
 function loadSettings() {
   try {
-    const savedSettings =
-      window.localStorage.getItem(
-        storageKey
-      );
+    const savedSettings = window.localStorage.getItem(storageKey);
 
     if (!savedSettings) {
       return defaultSettings;
@@ -106,226 +92,206 @@ function loadSettings() {
 
     return {
       ...defaultSettings,
-      ...JSON.parse(
-        savedSettings
-      ),
+      ...JSON.parse(savedSettings),
     };
   } catch {
     return defaultSettings;
   }
 }
 
-function loadTurnstileScript() {
-  if (window.turnstile) {
-    return Promise.resolve(
-      window.turnstile
+function loadCachedAccount() {
+  try {
+    const savedAccount = window.sessionStorage.getItem(
+      customerAccountSessionKey
+    );
+
+    if (!savedAccount) {
+      return null;
+    }
+
+    const account = JSON.parse(savedAccount);
+
+    return account && typeof account === "object"
+      ? account
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedAccount(account) {
+  try {
+    window.sessionStorage.setItem(
+      customerAccountSessionKey,
+      JSON.stringify(account)
+    );
+  } catch {
+    // The HTTP-only cookie remains the authentication source.
+  }
+}
+
+function clearCachedAccount() {
+  try {
+    window.sessionStorage.removeItem(customerAccountSessionKey);
+  } catch {
+    // Session storage may be unavailable.
+  }
+}
+
+async function readApiJson(response, fallbackMessage) {
+  const responseText = await response.text();
+  let result;
+
+  try {
+    result = JSON.parse(responseText);
+  } catch {
+    throw new Error(
+      fallbackMessage ||
+        "The service returned an invalid response."
     );
   }
 
-  if (
-    turnstileScriptPromise
-  ) {
+  if (!response.ok || !result.success) {
+    throw new Error(
+      result.error ||
+        fallbackMessage ||
+        "The request could not be completed."
+    );
+  }
+
+  return result;
+}
+
+function loadTurnstileScript() {
+  if (window.turnstile) {
+    return Promise.resolve(window.turnstile);
+  }
+
+  if (turnstileScriptPromise) {
     return turnstileScriptPromise;
   }
 
-  turnstileScriptPromise =
-    new Promise(
-      (
-        resolve,
-        reject
-      ) => {
-        const finishLoading =
-          () => {
-            let attempts =
-              0;
+  turnstileScriptPromise = new Promise((resolve, reject) => {
+    const finishLoading = () => {
+      let attempts = 0;
 
-            const checkReady =
-              () => {
-                if (
-                  window.turnstile
-                ) {
-                  resolve(
-                    window.turnstile
-                  );
+      const checkReady = () => {
+        if (window.turnstile) {
+          resolve(window.turnstile);
+          return;
+        }
 
-                  return;
-                }
+        attempts += 1;
 
-                attempts +=
-                  1;
+        if (attempts >= 100) {
+          turnstileScriptPromise = null;
 
-                if (
-                  attempts >=
-                  100
-                ) {
-                  turnstileScriptPromise =
-                    null;
-
-                  reject(
-                    new Error(
-                      "Cloudflare Turnstile did not become ready."
-                    )
-                  );
-
-                  return;
-                }
-
-                window.setTimeout(
-                  checkReady,
-                  50
-                );
-              };
-
-            checkReady();
-          };
-
-        const existingScript =
-          document.getElementById(
-            turnstileScriptId
+          reject(
+            new Error(
+              "Cloudflare Turnstile did not become ready."
+            )
           );
-
-        if (
-          existingScript
-        ) {
-          existingScript.addEventListener(
-            "load",
-            finishLoading,
-            {
-              once: true,
-            }
-          );
-
-          existingScript.addEventListener(
-            "error",
-            () => {
-              turnstileScriptPromise =
-                null;
-
-              reject(
-                new Error(
-                  "Cloudflare Turnstile could not be loaded."
-                )
-              );
-            },
-            {
-              once: true,
-            }
-          );
-
-          finishLoading();
 
           return;
         }
 
-        const script =
-          document.createElement(
-            "script"
-          );
+        window.setTimeout(checkReady, 50);
+      };
 
-        script.id =
-          turnstileScriptId;
+      checkReady();
+    };
 
-        script.src =
-          "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-
-        script.async =
-          true;
-
-        script.defer =
-          true;
-
-        script.onload =
-          finishLoading;
-
-        script.onerror =
-          () => {
-            turnstileScriptPromise =
-              null;
-
-            reject(
-              new Error(
-                "Cloudflare Turnstile could not be loaded."
-              )
-            );
-          };
-
-        document.head.appendChild(
-          script
-        );
-      }
+    const existingScript = document.getElementById(
+      turnstileScriptId
     );
+
+    if (existingScript) {
+      existingScript.addEventListener("load", finishLoading, {
+        once: true,
+      });
+
+      existingScript.addEventListener(
+        "error",
+        () => {
+          turnstileScriptPromise = null;
+
+          reject(
+            new Error(
+              "Cloudflare Turnstile could not be loaded."
+            )
+          );
+        },
+        {
+          once: true,
+        }
+      );
+
+      finishLoading();
+      return;
+    }
+
+    const script = document.createElement("script");
+
+    script.id = turnstileScriptId;
+
+    script.src =
+      "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+
+    script.async = true;
+    script.defer = true;
+    script.onload = finishLoading;
+
+    script.onerror = () => {
+      turnstileScriptPromise = null;
+
+      reject(
+        new Error(
+          "Cloudflare Turnstile could not be loaded."
+        )
+      );
+    };
+
+    document.head.appendChild(script);
+  });
 
   return turnstileScriptPromise;
 }
 
-function validateCheckoutForm(
-  formData
-) {
+function validateCheckoutForm(formData) {
   const errors = {};
 
-  const email =
-    formData.email.trim();
+  const email = formData.email.trim();
+  const zip = formData.zip.trim();
 
-  const zip =
-    formData.zip.trim();
-
-  if (
-    formData.firstName
-      .trim().length < 2
-  ) {
-    errors.firstName =
-      "Enter a valid first name.";
+  if (formData.firstName.trim().length < 2) {
+    errors.firstName = "Enter a valid first name.";
   }
 
-  if (
-    formData.lastName
-      .trim().length < 2
-  ) {
-    errors.lastName =
-      "Enter a valid last name.";
+  if (formData.lastName.trim().length < 2) {
+    errors.lastName = "Enter a valid last name.";
   }
 
-  if (
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-      email
-    )
-  ) {
-    errors.email =
-      "Enter a valid email address.";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errors.email = "Enter a valid email address.";
   }
 
-  if (
-    formData.address
-      .trim().length < 5
-  ) {
-    errors.address =
-      "Enter a complete shipping address.";
+  if (formData.address.trim().length < 5) {
+    errors.address = "Enter a complete shipping address.";
   }
 
-  if (
-    formData.city
-      .trim().length < 2
-  ) {
-    errors.city =
-      "Enter a valid city.";
+  if (formData.city.trim().length < 2) {
+    errors.city = "Enter a valid city.";
   }
 
   if (
     !stateOptions.some(
-      ([code]) =>
-        code ===
-        formData.state
+      ([code]) => code === formData.state
     )
   ) {
-    errors.state =
-      "Select a state.";
+    errors.state = "Select a state.";
   }
 
-  if (
-    !/^\d{5}(-\d{4})?$/.test(
-      zip
-    )
-  ) {
+  if (!/^\d{5}(-\d{4})?$/.test(zip)) {
     errors.zip =
       "Enter a 5-digit ZIP code or ZIP+4.";
   }
@@ -333,15 +299,14 @@ function validateCheckoutForm(
   return errors;
 }
 
-function formatPrice(
-  price
-) {
-  return Number.isFinite(
-    price
-  )
-    ? `$${price.toFixed(
-        2
-      )}`
+function formatPrice(value) {
+  const price = Number(value);
+
+  return Number.isFinite(price)
+    ? price.toLocaleString("en-US", {
+        style: "currency",
+        currency: "USD",
+      })
     : "Unavailable";
 }
 
@@ -351,200 +316,107 @@ function TurnstileWidget({
   disabled = false,
   onTokenChange,
 }) {
-  const containerRef =
-    useRef(null);
+  const containerRef = useRef(null);
+  const widgetIdRef = useRef(null);
 
-  const widgetIdRef =
-    useRef(null);
-
-  const [
-    status,
-    setStatus,
-  ] = useState(
-    "loading"
-  );
+  const [status, setStatus] = useState("loading");
 
   useEffect(() => {
-    let cancelled =
-      false;
+    let cancelled = false;
 
-    setStatus(
-      "loading"
-    );
-
+    setStatus("loading");
     onTokenChange("");
 
     loadTurnstileScript()
-      .then(
-        (
-          turnstile
-        ) => {
-          if (
-            cancelled ||
-            !containerRef.current
-          ) {
-            return;
-          }
+      .then((turnstile) => {
+        if (cancelled || !containerRef.current) {
+          return;
+        }
 
-          containerRef.current.innerHTML =
-            "";
+        containerRef.current.innerHTML = "";
 
-          widgetIdRef.current =
-            turnstile.render(
-              containerRef.current,
-              {
-                sitekey:
-                  siteKey,
+        widgetIdRef.current = turnstile.render(
+          containerRef.current,
+          {
+            sitekey: siteKey,
+            theme: "dark",
+            size: "flexible",
+            appearance: "always",
+            action: "checkout_order",
 
-                theme:
-                  "dark",
-
-                size:
-                  "flexible",
-
-                appearance:
-                  "always",
-
-                action:
-                  "checkout_order",
-
-                callback:
-                  (
-                    token
-                  ) => {
-                    if (
-                      cancelled
-                    ) {
-                      return;
-                    }
-
-                    setStatus(
-                      "verified"
-                    );
-
-                    onTokenChange(
-                      token
-                    );
-                  },
-
-                "expired-callback":
-                  () => {
-                    if (
-                      cancelled
-                    ) {
-                      return;
-                    }
-
-                    setStatus(
-                      "expired"
-                    );
-
-                    onTokenChange(
-                      ""
-                    );
-                  },
-
-                "timeout-callback":
-                  () => {
-                    if (
-                      cancelled
-                    ) {
-                      return;
-                    }
-
-                    setStatus(
-                      "expired"
-                    );
-
-                    onTokenChange(
-                      ""
-                    );
-                  },
-
-                "error-callback":
-                  () => {
-                    if (
-                      cancelled
-                    ) {
-                      return;
-                    }
-
-                    setStatus(
-                      "error"
-                    );
-
-                    onTokenChange(
-                      ""
-                    );
-                  },
+            callback: (token) => {
+              if (cancelled) {
+                return;
               }
-            );
 
-          setStatus(
-            "ready"
-          );
-        }
-      )
-      .catch(
-        (
-          error
-        ) => {
-          console.error(
-            "Turnstile loading error:",
-            error
-          );
+              setStatus("verified");
+              onTokenChange(token);
+            },
 
-          if (
-            !cancelled
-          ) {
-            setStatus(
-              "error"
-            );
+            "expired-callback": () => {
+              if (cancelled) {
+                return;
+              }
 
-            onTokenChange(
-              ""
-            );
+              setStatus("expired");
+              onTokenChange("");
+            },
+
+            "timeout-callback": () => {
+              if (cancelled) {
+                return;
+              }
+
+              setStatus("expired");
+              onTokenChange("");
+            },
+
+            "error-callback": () => {
+              if (cancelled) {
+                return;
+              }
+
+              setStatus("error");
+              onTokenChange("");
+            },
           }
+        );
+
+        setStatus("ready");
+      })
+      .catch((error) => {
+        console.error("Turnstile loading error:", error);
+
+        if (!cancelled) {
+          setStatus("error");
+          onTokenChange("");
         }
-      );
+      });
 
     return () => {
-      cancelled =
-        true;
+      cancelled = true;
 
       if (
-        widgetIdRef.current !==
-          null &&
+        widgetIdRef.current !== null &&
         window.turnstile
       ) {
         try {
-          window.turnstile.remove(
-            widgetIdRef.current
-          );
+          window.turnstile.remove(widgetIdRef.current);
         } catch {
-          // Widget may already
-          // be removed.
+          // Widget may already have been removed.
         }
       }
 
-      widgetIdRef.current =
-        null;
+      widgetIdRef.current = null;
     };
-  }, [
-    siteKey,
-    resetKey,
-    onTokenChange,
-  ]);
+  }, [siteKey, resetKey, onTokenChange]);
 
   const statusMessage =
-    status ===
-    "verified"
+    status === "verified"
       ? "Security verification complete."
-      : status ===
-        "expired"
+      : status === "expired"
       ? "Verification expired. Complete it again."
-      : status ===
-        "error"
+      : status === "error"
       ? "Security verification could not load. Refresh the page and try again."
       : "Security verification is loading.";
 
@@ -557,29 +429,21 @@ function TurnstileWidget({
       }
     >
       <div
-        ref={
-          containerRef
-        }
+        ref={containerRef}
         className="checkout-turnstile-container"
       />
 
       <p
         className={
-          status ===
-          "verified"
+          status === "verified"
             ? "checkout-turnstile-status checkout-turnstile-verified"
-            : status ===
-                "error" ||
-              status ===
-                "expired"
+            : status === "error" || status === "expired"
             ? "checkout-turnstile-status checkout-turnstile-warning"
             : "checkout-turnstile-status"
         }
         aria-live="polite"
       >
-        {
-          statusMessage
-        }
+        {statusMessage}
       </p>
     </div>
   );
@@ -590,119 +454,83 @@ function Checkout({
   onNavigate = () => {},
   onPlaceOrder = () => {},
 }) {
-  const [
-    settings,
-    setSettings,
-  ] = useState(
-    loadSettings
+  const initialCachedAccount = useMemo(
+    loadCachedAccount,
+    []
   );
 
-  const [
-    formData,
-    setFormData,
-  ] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
+  const [settings, setSettings] = useState(loadSettings);
+
+  const [account, setAccount] = useState(
+    initialCachedAccount
+  );
+
+  const [accountStatus, setAccountStatus] =
+    useState("checking");
+
+  const [accountError, setAccountError] = useState("");
+
+  const [formData, setFormData] = useState({
+    firstName: initialCachedAccount?.firstName || "",
+    lastName: initialCachedAccount?.lastName || "",
+
+    email: String(initialCachedAccount?.email || "")
+      .trim()
+      .toLowerCase(),
+
     address: "",
     city: "",
     state: "",
     zip: "",
   });
 
-  const [
-    touched,
-    setTouched,
-  ] = useState({});
+  const [touched, setTouched] = useState({});
+  const [paymentMethod, setPaymentMethod] = useState("");
 
-  const [
-    paymentMethod,
-    setPaymentMethod,
-  ] = useState("");
+  const [researchAgreement, setResearchAgreement] =
+    useState(false);
 
-  const [
-    researchAgreement,
-    setResearchAgreement,
-  ] = useState(false);
+  const [ageAgreement, setAgeAgreement] =
+    useState(false);
 
-  const [
-    ageAgreement,
-    setAgeAgreement,
-  ] = useState(false);
+  const [isSubmitting, setIsSubmitting] =
+    useState(false);
 
-  const [
-    isSubmitting,
-    setIsSubmitting,
-  ] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
-  const [
-    submitError,
-    setSubmitError,
-  ] = useState("");
+  const [turnstileToken, setTurnstileToken] =
+    useState("");
 
-  const [
-    turnstileToken,
-    setTurnstileToken,
-  ] = useState("");
+  const [turnstileResetKey, setTurnstileResetKey] =
+    useState(0);
 
-  const [
-    turnstileResetKey,
-    setTurnstileResetKey,
-  ] = useState(0);
+  const submissionLockRef = useRef(false);
 
-  const submissionLockRef =
-    useRef(false);
-
-  const handleTurnstileTokenChange =
-    useCallback(
-      (
-        token
-      ) => {
-        setSubmitError(
-          ""
-        );
-
-        setTurnstileToken(
-          token
-        );
-      },
-      []
-    );
+  const handleTurnstileTokenChange = useCallback(
+    (token) => {
+      setSubmitError("");
+      setTurnstileToken(token);
+    },
+    []
+  );
 
   useEffect(() => {
-    function updateSettings(
-      event
-    ) {
-      if (
-        event.detail
-      ) {
-        setSettings(
-          (
-            currentSettings
-          ) => ({
-            ...currentSettings,
-            ...event.detail,
-          })
-        );
+    function updateSettings(event) {
+      if (event.detail) {
+        setSettings((currentSettings) => ({
+          ...currentSettings,
+          ...event.detail,
+        }));
 
         return;
       }
 
-      setSettings(
-        loadSettings()
-      );
+      setSettings(loadSettings());
     }
 
-    function handleStorageChange(
-      event
-    ) {
-      if (
-        event.key ===
-        storageKey
-      ) {
-        setSettings(
-          loadSettings()
-        );
+    function handleStorageChange(event) {
+      if (event.key === storageKey) {
+        setSettings(loadSettings());
       }
     }
 
@@ -729,202 +557,210 @@ function Checkout({
     };
   }, []);
 
-  const totalQuantity =
-    useMemo(
-      () =>
-        cartItems.reduce(
-          (
-            total,
-            item
-          ) =>
-            total +
-            Number(
-              item.quantity ||
-                0
-            ),
-          0
-        ),
-      [
-        cartItems,
-      ]
-    );
+  useEffect(() => {
+    let isMounted = true;
 
-  const subtotal =
-    useMemo(
-      () =>
-        cartItems.reduce(
-          (
-            total,
-            item
-          ) => {
-            const price =
-              Number.isFinite(
-                item.price
-              )
-                ? item.price
-                : 0;
+    async function verifySecureAccount() {
+      setAccountStatus("checking");
+      setAccountError("");
 
-            const quantity =
-              Number(
-                item.quantity ||
-                  0
-              );
+      try {
+        const response = await fetch(
+          "/api/auth/session",
+          {
+            method: "GET",
 
-            return (
-              total +
-              price *
-                quantity
-            );
-          },
-          0
-        ),
-      [
-        cartItems,
-      ]
-    );
+            headers: {
+              Accept: "application/json",
+            },
 
-  const invalidPriceItems =
-    useMemo(
-      () =>
-        cartItems.filter(
-          (
-            item
-          ) =>
-            !Number.isFinite(
-              item.price
-            )
-        ),
-      [
-        cartItems,
-      ]
-    );
+            credentials: "same-origin",
+            cache: "no-store",
+          }
+        );
 
-  const formErrors =
-    useMemo(
-      () =>
-        validateCheckoutForm(
-          formData
-        ),
-      [
-        formData,
-      ]
-    );
+        const result = await readApiJson(
+          response,
+          "Your secure account could not be verified."
+        );
+
+        if (!isMounted) {
+          return;
+        }
+
+        if (!result.authenticated || !result.account) {
+          throw new Error(
+            "Your secure session has expired. Log in again before submitting this order."
+          );
+        }
+
+        const verifiedAccount = result.account;
+
+        const verifiedEmail = String(
+          verifiedAccount.email || ""
+        )
+          .trim()
+          .toLowerCase();
+
+        if (!verifiedEmail) {
+          throw new Error(
+            "The signed-in account does not have a valid email address."
+          );
+        }
+
+        setAccount(verifiedAccount);
+        saveCachedAccount(verifiedAccount);
+
+        setFormData((currentData) => ({
+          ...currentData,
+
+          firstName:
+            currentData.firstName.trim() ||
+            verifiedAccount.firstName ||
+            "",
+
+          lastName:
+            currentData.lastName.trim() ||
+            verifiedAccount.lastName ||
+            "",
+
+          email: verifiedEmail,
+        }));
+
+        setAccountStatus("verified");
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        clearCachedAccount();
+
+        setAccount(null);
+        setAccountStatus("error");
+
+        setAccountError(
+          error.message ||
+            "Your secure account could not be verified."
+        );
+      }
+    }
+
+    verifySecureAccount();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const totalQuantity = useMemo(
+    () =>
+      cartItems.reduce(
+        (total, item) =>
+          total + Number(item.quantity || 0),
+        0
+      ),
+    [cartItems]
+  );
+
+  const subtotal = useMemo(
+    () =>
+      cartItems.reduce((total, item) => {
+        const price = Number(item.price);
+        const quantity = Number(item.quantity || 0);
+
+        return (
+          total +
+          (Number.isFinite(price) ? price : 0) *
+            quantity
+        );
+      }, 0),
+    [cartItems]
+  );
+
+  const invalidPriceItems = useMemo(
+    () =>
+      cartItems.filter(
+        (item) => !Number.isFinite(Number(item.price))
+      ),
+    [cartItems]
+  );
+
+  const formErrors = useMemo(
+    () => validateCheckoutForm(formData),
+    [formData]
+  );
 
   const purchasingEnabled =
-    settings.storeStatus ===
-    "open";
+    settings.storeStatus === "open";
 
   const checkoutAvailable =
     settings.catalogEnabled &&
     purchasingEnabled &&
-    invalidPriceItems.length ===
-      0;
+    invalidPriceItems.length === 0;
 
-  const selectedPaymentOption =
-    paymentOptions.find(
-      (
-        option
-      ) =>
-        option.id ===
-        paymentMethod
-    );
+  const selectedPaymentOption = paymentOptions.find(
+    (option) => option.id === paymentMethod
+  );
+
+  const accountEmail = String(account?.email || "")
+    .trim()
+    .toLowerCase();
+
+  const accountEmailMatches =
+    accountStatus === "verified" &&
+    Boolean(accountEmail) &&
+    formData.email.trim().toLowerCase() ===
+      accountEmail;
 
   const formComplete =
-    Object.keys(
-      formErrors
-    ).length === 0;
+    Object.keys(formErrors).length === 0;
 
   const canPlaceOrder =
     cartItems.length > 0 &&
     checkoutAvailable &&
     formComplete &&
-    Boolean(
-      paymentMethod
-    ) &&
+    Boolean(paymentMethod) &&
     researchAgreement &&
     ageAgreement &&
-    Boolean(
-      turnstileToken
-    ) &&
+    Boolean(turnstileToken) &&
+    accountEmailMatches &&
     !isSubmitting;
 
   const storeStatusLabel =
-    settings.storeStatus ===
-    "open"
+    settings.storeStatus === "open"
       ? "Store Open"
-      : settings.storeStatus ===
-        "maintenance"
+      : settings.storeStatus === "maintenance"
       ? "Maintenance Mode"
       : "Coming Soon";
 
-  function handleChange(
-    event
-  ) {
-    const {
-      name,
-      value,
-    } = event.target;
+  function handleChange(event) {
+    const { name, value } = event.target;
 
-    let nextValue =
-      value;
-
-    if (
-      name === "zip"
-    ) {
-      nextValue =
-        value
-          .replace(
-            /[^\d-]/g,
-            ""
-          )
-          .slice(
-            0,
-            10
-          );
+    if (name === "email") {
+      return;
     }
 
-    setSubmitError(
-      ""
-    );
+    let nextValue = value;
 
-    setFormData(
-      (
-        currentData
-      ) => ({
-        ...currentData,
+    if (name === "zip") {
+      nextValue = value
+        .replace(/[^\d-]/g, "")
+        .slice(0, 10);
+    }
 
-        [name]:
-          nextValue,
-      })
-    );
+    setSubmitError("");
+
+    setFormData((currentData) => ({
+      ...currentData,
+      [name]: nextValue,
+    }));
   }
 
-  function handleBlur(
-    event
-  ) {
-    setTouched(
-      (
-        currentTouched
-      ) => ({
-        ...currentTouched,
-
-        [event.target
-          .name]:
-          true,
-      })
-    );
-  }
-
-  function handlePaymentChange(
-    value
-  ) {
-    setSubmitError(
-      ""
-    );
-
-    setPaymentMethod(
-      value
-    );
+  function handleBlur(event) {
+    setTouched((currentTouched) => ({
+      ...currentTouched,
+      [event.target.name]: true,
+    }));
   }
 
   function markAllFieldsTouched() {
@@ -939,12 +775,20 @@ function Checkout({
     });
   }
 
-  async function handlePlaceOrder(
-    event
-  ) {
-    event?.preventDefault();
-
+  async function handlePlaceOrder(event) {
+    event.preventDefault();
     markAllFieldsTouched();
+
+    if (
+      accountStatus !== "verified" ||
+      !accountEmailMatches
+    ) {
+      setSubmitError(
+        "Your secure account email could not be confirmed. Refresh checkout or log in again."
+      );
+
+      return;
+    }
 
     if (
       !canPlaceOrder ||
@@ -954,215 +798,142 @@ function Checkout({
       return;
     }
 
-    submissionLockRef.current =
-      true;
+    submissionLockRef.current = true;
 
-    setSubmitError(
-      ""
-    );
-
-    setIsSubmitting(
-      true
-    );
+    setSubmitError("");
+    setIsSubmitting(true);
 
     const orderPayload = {
-      firstName:
-        formData.firstName.trim(),
+      firstName: formData.firstName.trim(),
+      lastName: formData.lastName.trim(),
+      email: accountEmail,
+      address: formData.address.trim(),
+      city: formData.city.trim(),
+      state: formData.state,
+      zip: formData.zip.trim(),
 
-      lastName:
-        formData.lastName.trim(),
-
-      email:
-        formData.email
-          .trim()
-          .toLowerCase(),
-
-      address:
-        formData.address.trim(),
-
-      city:
-        formData.city.trim(),
-
-      state:
-        formData.state,
-
-      zip:
-        formData.zip.trim(),
-
-      preferredPaymentMethod:
-        paymentMethod,
+      preferredPaymentMethod: paymentMethod,
 
       preferredPaymentLabel:
-        selectedPaymentOption?.label ||
-        "",
+        selectedPaymentOption?.label || "",
 
-      items:
-        cartItems.map(
-          (
-            item
-          ) => ({
-            name:
-              item.name ||
-              "",
-
-            codeName:
-              item.codeName ||
-              "",
-
-            strength:
-              item.strength ||
-              "",
-
-            quantity:
-              Number(
-                item.quantity ||
-                  1
-              ),
-
-            price:
-              Number(
-                item.price ||
-                  0
-              ),
-          })
-        ),
+      items: cartItems.map((item) => ({
+        name: item.name || "",
+        codeName: item.codeName || "",
+        strength: item.strength || "",
+        quantity: Number(item.quantity || 1),
+        price: Number(item.price || 0),
+      })),
     };
 
-    const controller =
-      new AbortController();
+    const controller = new AbortController();
 
-    const timeoutId =
-      window.setTimeout(
-        () =>
-          controller.abort(),
-        25000
-      );
+    const timeoutId = window.setTimeout(
+      () => controller.abort(),
+      25000
+    );
 
     try {
-      const response =
-        await fetch(
-          "/api/order",
-          {
-            method:
-              "POST",
+      const response = await fetch("/api/order", {
+        method: "POST",
 
-            headers: {
-              "Content-Type":
-                "application/json",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
 
-              Accept:
-                "application/json",
-            },
+        credentials: "same-origin",
 
-            body:
-              JSON.stringify(
-                {
-                  order:
-                    orderPayload,
+        body: JSON.stringify({
+          order: orderPayload,
+          turnstileToken,
+        }),
 
-                  turnstileToken,
-                }
-              ),
+        signal: controller.signal,
+      });
 
-            signal:
-              controller.signal,
-          }
-        );
+      const result = await readApiJson(
+        response,
+        "The order request could not be submitted."
+      );
 
-      const responseText =
-        await response.text();
-
-      let result;
-
-      try {
-        result =
-          JSON.parse(
-            responseText
-          );
-      } catch {
-        throw new Error(
-          "The order service returned an invalid response. Please try again."
-        );
-      }
-
-      if (
-        !response.ok ||
-        !result.success
-      ) {
-        throw new Error(
-          result.error ||
-            "The order request could not be submitted."
-        );
-      }
+      const createdAt =
+        result.createdAt || new Date().toISOString();
 
       onPlaceOrder({
-        ...formData,
+        ...orderPayload,
 
-        email:
-          formData.email
-            .trim()
-            .toLowerCase(),
-
-        id:
-          result.orderId,
-
-        orderId:
-          result.orderId,
+        id: result.orderId,
+        orderId: result.orderId,
+        createdAt,
 
         status:
+          result.status ||
           "Order Request Received",
 
-        preferredPaymentMethod:
-          paymentMethod,
-
-        preferredPaymentLabel:
-          selectedPaymentOption?.label ||
-          "",
+        totalQuantity,
+        subtotal,
       });
-    } catch (
-      error
-    ) {
+    } catch (error) {
       console.error(
         "Checkout submission error:",
         error
       );
 
-      setTurnstileToken(
-        ""
-      );
+      setTurnstileToken("");
 
       setTurnstileResetKey(
-        (
-          currentKey
-        ) =>
-          currentKey +
-          1
+        (currentKey) => currentKey + 1
       );
 
       setSubmitError(
-        error?.name ===
-        "AbortError"
+        error?.name === "AbortError"
           ? "The order service took too long to respond. Please try again."
           : error?.message ||
               "The order request could not be submitted. Please try again."
       );
     } finally {
-      window.clearTimeout(
-        timeoutId
-      );
+      window.clearTimeout(timeoutId);
 
-      submissionLockRef.current =
-        false;
-
-      setIsSubmitting(
-        false
-      );
+      submissionLockRef.current = false;
+      setIsSubmitting(false);
     }
   }
 
-  if (
-    !settings.catalogEnabled
-  ) {
+  if (accountStatus === "checking") {
+    return (
+      <CheckoutState
+        eyebrow="SECURE CHECKOUT"
+        title="Confirming Your Account"
+        message="Your secure customer session is being verified before checkout loads."
+        notice="Account Verification In Progress"
+        primaryLabel="Return To Cart"
+        onPrimary={() => onNavigate("cart")}
+        secondaryLabel="Return Home"
+        onSecondary={() => onNavigate("home")}
+      />
+    );
+  }
+
+  if (accountStatus === "error") {
+    return (
+      <CheckoutState
+        eyebrow="SECURE CHECKOUT"
+        title="Login Required"
+        message={
+          accountError ||
+          "Your secure customer account could not be verified."
+        }
+        notice="Your Cart Has Been Preserved"
+        primaryLabel="Login Again"
+        onPrimary={() => onNavigate("login")}
+        secondaryLabel="Return To Cart"
+        onSecondary={() => onNavigate("cart")}
+      />
+    );
+  }
+
+  if (!settings.catalogEnabled) {
     return (
       <CheckoutState
         eyebrow="CHECKOUT"
@@ -1170,147 +941,83 @@ function Checkout({
         message="Checkout is unavailable because the research product catalog is currently disabled."
         notice="For Research Use Only. Not intended for human consumption."
         primaryLabel="Return Home"
-        onPrimary={() =>
-          onNavigate(
-            "home"
-          )
-        }
+        onPrimary={() => onNavigate("home")}
         secondaryLabel="Research Agreement"
         onSecondary={() =>
-          onNavigate(
-            "researchAgreement"
-          )
+          onNavigate("researchAgreement")
         }
       />
     );
   }
 
-  if (
-    cartItems.length ===
-    0
-  ) {
+  if (cartItems.length === 0) {
     return (
       <CheckoutState
         eyebrow="CHECKOUT"
         title="Your Cart Is Empty"
         message="Add research-use products to your cart before continuing to checkout."
-        notice={
-          storeStatusLabel
-        }
+        notice={storeStatusLabel}
         primaryLabel="Browse Products"
-        onPrimary={() =>
-          onNavigate(
-            "products"
-          )
-        }
+        onPrimary={() => onNavigate("products")}
         secondaryLabel="Research Agreement"
         onSecondary={() =>
-          onNavigate(
-            "researchAgreement"
-          )
+          onNavigate("researchAgreement")
         }
       />
     );
   }
 
-  if (
-    !purchasingEnabled
-  ) {
+  if (!purchasingEnabled) {
     return (
       <CheckoutState
         eyebrow="CHECKOUT"
         title="Checkout Is Unavailable"
         message={`Your cart has been preserved, but orders cannot be placed while the store status is ${storeStatusLabel}.`}
-        notice={
-          storeStatusLabel
-        }
+        notice={storeStatusLabel}
         primaryLabel="Return To Cart"
-        onPrimary={() =>
-          onNavigate(
-            "cart"
-          )
-        }
+        onPrimary={() => onNavigate("cart")}
         secondaryLabel="Browse Products"
-        onSecondary={() =>
-          onNavigate(
-            "products"
-          )
-        }
+        onSecondary={() => onNavigate("products")}
       />
     );
   }
 
-  if (
-    invalidPriceItems.length >
-    0
-  ) {
+  if (invalidPriceItems.length > 0) {
     return (
       <>
-        <style>
-          {
-            checkoutCss
-          }
-        </style>
+        <style>{checkoutCss}</style>
 
         <main className="checkout-page">
           <section className="checkout-state-panel">
-            <p className="eyebrow">
-              CHECKOUT
-            </p>
+            <p className="eyebrow">CHECKOUT</p>
 
-            <h1>
-              Cart Update
-              Required
-            </h1>
+            <h1>Cart Update Required</h1>
 
             <p>
-              One or more
-              products in your
-              cart no longer
-              have valid
-              pricing. Return
-              to the cart and
-              remove those
-              products before
+              One or more products in your cart no
+              longer have valid pricing. Return to the
+              cart and remove those products before
               continuing.
             </p>
 
             <div className="checkout-invalid-list">
-              {invalidPriceItems.map(
-                (
-                  item
-                ) => (
-                  <div
-                    key={`${item.codeName}-${item.strength}`}
-                  >
-                    <strong>
-                      {
-                        item.name
-                      }
-                    </strong>
+              {invalidPriceItems.map((item) => (
+                <div
+                  key={`${item.codeName}-${item.strength}`}
+                >
+                  <strong>{item.name}</strong>
 
-                    <span>
-                      {
-                        item.codeName
-                      }{" "}
-                      ·{" "}
-                      {
-                        item.strength
-                      }
-                    </span>
-                  </div>
-                )
-              )}
+                  <span>
+                    {item.codeName} · {item.strength}
+                  </span>
+                </div>
+              ))}
             </div>
 
             <button
               type="button"
               className="primary-btn"
-              onClick={() =>
-                onNavigate(
-                  "cart"
-                )
-              }
+              onClick={() => onNavigate("cart")}
             >
               Return To Cart
             </button>
@@ -1322,73 +1029,56 @@ function Checkout({
 
   return (
     <>
-      <style>
-        {checkoutCss}
-      </style>
+      <style>{checkoutCss}</style>
 
       <main className="checkout-page">
         <section className="checkout-inner">
           <header className="checkout-hero">
             <div className="checkout-hero-status">
-              <p className="eyebrow">
-                CHECKOUT
-              </p>
-
-              <span>
-                {
-                  storeStatusLabel
-                }
-              </span>
+              <p className="eyebrow">CHECKOUT</p>
+              <span>{storeStatusLabel}</span>
             </div>
 
-            <h1>
-              Order Request
-              Checkout
-            </h1>
+            <h1>Order Request Checkout</h1>
 
             <p>
-              Enter your
-              shipping details,
-              select your
-              preferred invoice
-              payment method,
-              and complete the
-              required
-              confirmations
-              before submitting
-              your order
-              request.
+              Enter your shipping details, select your
+              preferred invoice payment method, and
+              complete the required confirmations
+              before submitting your order request.
             </p>
           </header>
 
           <form
             className="checkout-layout"
-            onSubmit={
-              handlePlaceOrder
-            }
+            onSubmit={handlePlaceOrder}
             noValidate
           >
             <section className="checkout-main-panel">
               <p className="eyebrow">
-                CUSTOMER
-                INFORMATION
+                CUSTOMER INFORMATION
               </p>
 
-              <h2>
-                Shipping Details
-              </h2>
+              <h2>Shipping Details</h2>
 
               <div className="checkout-country-note">
-                Shipping address
-                must be within
-                the United
-                States. Shipping
-                availability and
-                the final
-                shipping charge
-                are confirmed
-                during order
-                review.
+                Shipping address must be within the
+                United States. Shipping availability
+                and the final shipping charge are
+                confirmed during order review.
+              </div>
+
+              <div className="checkout-account-note">
+                <div>
+                  <strong>Secure Account Order</strong>
+
+                  <span>
+                    This order will be linked to{" "}
+                    {accountEmail}.
+                  </span>
+                </div>
+
+                <span>Account Verified</span>
               </div>
 
               <div className="checkout-form-grid">
@@ -1396,19 +1086,11 @@ function Checkout({
                   name="firstName"
                   label="First Name"
                   placeholder="First Name"
-                  value={
-                    formData.firstName
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  onBlur={
-                    handleBlur
-                  }
+                  value={formData.firstName}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
                   autoComplete="given-name"
-                  disabled={
-                    isSubmitting
-                  }
+                  disabled={isSubmitting}
                   error={
                     touched.firstName
                       ? formErrors.firstName
@@ -1420,19 +1102,11 @@ function Checkout({
                   name="lastName"
                   label="Last Name"
                   placeholder="Last Name"
-                  value={
-                    formData.lastName
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  onBlur={
-                    handleBlur
-                  }
+                  value={formData.lastName}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
                   autoComplete="family-name"
-                  disabled={
-                    isSubmitting
-                  }
+                  disabled={isSubmitting}
                   error={
                     touched.lastName
                       ? formErrors.lastName
@@ -1445,19 +1119,13 @@ function Checkout({
                   label="Email Address"
                   type="email"
                   placeholder="name@example.com"
-                  value={
-                    formData.email
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  onBlur={
-                    handleBlur
-                  }
+                  value={formData.email}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
                   autoComplete="email"
-                  disabled={
-                    isSubmitting
-                  }
+                  disabled={isSubmitting}
+                  readOnly
+                  helper="Verified account email. This cannot be changed during checkout."
                   error={
                     touched.email
                       ? formErrors.email
@@ -1470,19 +1138,11 @@ function Checkout({
                   name="address"
                   label="Shipping Address"
                   placeholder="Street address"
-                  value={
-                    formData.address
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  onBlur={
-                    handleBlur
-                  }
+                  value={formData.address}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
                   autoComplete="street-address"
-                  disabled={
-                    isSubmitting
-                  }
+                  disabled={isSubmitting}
                   error={
                     touched.address
                       ? formErrors.address
@@ -1495,19 +1155,11 @@ function Checkout({
                   name="city"
                   label="City"
                   placeholder="City"
-                  value={
-                    formData.city
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  onBlur={
-                    handleBlur
-                  }
+                  value={formData.city}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
                   autoComplete="address-level2"
-                  disabled={
-                    isSubmitting
-                  }
+                  disabled={isSubmitting}
                   error={
                     touched.city
                       ? formErrors.city
@@ -1518,19 +1170,11 @@ function Checkout({
                 <SelectField
                   name="state"
                   label="State"
-                  value={
-                    formData.state
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  onBlur={
-                    handleBlur
-                  }
+                  value={formData.state}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
                   autoComplete="address-level1"
-                  disabled={
-                    isSubmitting
-                  }
+                  disabled={isSubmitting}
                   error={
                     touched.state
                       ? formErrors.state
@@ -1542,20 +1186,12 @@ function Checkout({
                   name="zip"
                   label="ZIP Code"
                   placeholder="##### or #####-####"
-                  value={
-                    formData.zip
-                  }
-                  onChange={
-                    handleChange
-                  }
-                  onBlur={
-                    handleBlur
-                  }
+                  value={formData.zip}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
                   autoComplete="postal-code"
                   inputMode="numeric"
-                  disabled={
-                    isSubmitting
-                  }
+                  disabled={isSubmitting}
                   error={
                     touched.zip
                       ? formErrors.zip
@@ -1567,223 +1203,142 @@ function Checkout({
 
               <section className="checkout-section-card">
                 <p className="eyebrow">
-                  PAYMENT
-                  PREFERENCE
+                  PAYMENT PREFERENCE
                 </p>
 
                 <h2>
-                  Choose An
-                  Invoice Payment
-                  Method
+                  Choose An Invoice Payment Method
                 </h2>
 
                 <p className="checkout-section-copy">
-                  This selection
-                  records your
-                  preference only.
-                  No payment is
-                  collected on
-                  this page.
-                  Payment
-                  instructions are
-                  sent only after
-                  the order
-                  request has been
+                  This selection records your preference
+                  only. No payment is collected on this
+                  page. Payment instructions are sent
+                  only after the order request has been
                   reviewed.
                 </p>
 
                 <div className="checkout-payment-grid">
-                  {paymentOptions.map(
-                    (
-                      option
-                    ) => {
-                      const selected =
-                        paymentMethod ===
-                        option.id;
+                  {paymentOptions.map((option) => {
+                    const selected =
+                      paymentMethod === option.id;
 
-                      return (
-                        <label
-                          key={
-                            option.id
-                          }
-                          className={
-                            selected
-                              ? "checkout-payment-option checkout-payment-selected"
-                              : "checkout-payment-option"
-                          }
-                        >
-                          <input
-                            type="radio"
-                            name="paymentMethod"
-                            value={
-                              option.id
-                            }
-                            checked={
-                              selected
-                            }
-                            disabled={
-                              isSubmitting
-                            }
-                            onChange={(
-                              event
-                            ) =>
-                              handlePaymentChange(
-                                event.target
-                                  .value
-                              )
-                            }
-                          />
+                    return (
+                      <label
+                        key={option.id}
+                        className={
+                          selected
+                            ? "checkout-payment-option checkout-payment-selected"
+                            : "checkout-payment-option"
+                        }
+                      >
+                        <input
+                          type="radio"
+                          name="paymentMethod"
+                          value={option.id}
+                          checked={selected}
+                          disabled={isSubmitting}
+                          onChange={(event) => {
+                            setSubmitError("");
 
-                          <span className="checkout-payment-check">
-                            ✓
-                          </span>
+                            setPaymentMethod(
+                              event.target.value
+                            );
+                          }}
+                        />
 
-                          <img
-                            src={
-                              option.logo
-                            }
-                            alt={`${option.label} logo`}
-                          />
+                        <span className="checkout-payment-check">
+                          ✓
+                        </span>
 
-                          <strong>
-                            {
-                              option.label
-                            }
-                          </strong>
-                        </label>
-                      );
-                    }
-                  )}
+                        <img
+                          src={option.logo}
+                          alt={`${option.label} logo`}
+                        />
+
+                        <strong>{option.label}</strong>
+                      </label>
+                    );
+                  })}
                 </div>
 
                 <div className="checkout-invoice-notice">
-                  Selecting a
-                  payment
-                  preference does
-                  not guarantee
-                  availability.
-                  Final payment
-                  instructions
-                  and the
-                  complete invoice
-                  amount will be
-                  confirmed by
+                  Selecting a payment preference does
+                  not guarantee availability. Final
+                  payment instructions and the complete
+                  invoice amount will be confirmed by
                   email.
                 </div>
               </section>
 
               <section className="checkout-section-card">
                 <p className="eyebrow">
-                  REQUIRED
-                  AGREEMENTS
+                  REQUIRED AGREEMENTS
                 </p>
 
-                <h2>
-                  Research-Use
-                  Confirmation
-                </h2>
+                <h2>Research-Use Confirmation</h2>
 
                 <div className="checkout-agreement-info">
                   <strong>
-                    Review the
-                    Research
-                    Agreement
+                    Review the Research Agreement
                   </strong>
 
                   <p>
-                    Review the
-                    full
-                    research-use
-                    terms before
-                    submitting an
-                    order request.
+                    Review the full research-use terms
+                    before submitting an order request.
                   </p>
 
                   <button
                     type="button"
                     className="secondary-btn"
-                    disabled={
-                      isSubmitting
-                    }
+                    disabled={isSubmitting}
                     onClick={() =>
-                      onNavigate(
-                        "researchAgreement"
-                      )
+                      onNavigate("researchAgreement")
                     }
                   >
-                    View Research
-                    Agreement
+                    View Research Agreement
                   </button>
                 </div>
 
                 <label className="checkout-checkbox-row">
                   <input
                     type="checkbox"
-                    checked={
-                      researchAgreement
-                    }
-                    disabled={
-                      isSubmitting
-                    }
-                    onChange={(
-                      event
-                    ) => {
-                      setSubmitError(
-                        ""
-                      );
+                    checked={researchAgreement}
+                    disabled={isSubmitting}
+                    onChange={(event) => {
+                      setSubmitError("");
 
                       setResearchAgreement(
-                        event.target
-                          .checked
+                        event.target.checked
                       );
                     }}
                   />
 
                   <span>
-                    I understand
-                    these products
-                    are sold for
-                    research use
-                    only and are
-                    not intended
-                    for human
-                    consumption.
+                    I understand these products are sold
+                    for research use only and are not
+                    intended for human consumption.
                   </span>
                 </label>
 
                 <label className="checkout-checkbox-row">
                   <input
                     type="checkbox"
-                    checked={
-                      ageAgreement
-                    }
-                    disabled={
-                      isSubmitting
-                    }
-                    onChange={(
-                      event
-                    ) => {
-                      setSubmitError(
-                        ""
-                      );
+                    checked={ageAgreement}
+                    disabled={isSubmitting}
+                    onChange={(event) => {
+                      setSubmitError("");
 
                       setAgeAgreement(
-                        event.target
-                          .checked
+                        event.target.checked
                       );
                     }}
                   />
 
                   <span>
-                    I confirm I am
-                    at least 21
-                    years old and
-                    agree to
-                    follow all
-                    applicable
-                    laws, rules,
-                    and
-                    research-use
+                    I confirm I am at least 21 years old
+                    and agree to follow all applicable
+                    laws, rules, and research-use
                     restrictions.
                   </span>
                 </label>
@@ -1791,90 +1346,55 @@ function Checkout({
             </section>
 
             <aside className="checkout-summary-panel">
-              <p className="eyebrow">
-                ORDER SUMMARY
-              </p>
+              <p className="eyebrow">ORDER SUMMARY</p>
 
-              <h2>
-                Review Order
-              </h2>
+              <h2>Review Order</h2>
 
               <div className="checkout-summary-items">
-                {cartItems.map(
-                  (
-                    item
-                  ) => {
-                    const lineTotal =
-                      Number(
-                        item.price ||
-                          0
-                      ) *
-                      Number(
-                        item.quantity ||
-                          0
-                      );
+                {cartItems.map((item) => {
+                  const lineTotal =
+                    Number(item.price || 0) *
+                    Number(item.quantity || 0);
 
-                    return (
-                      <div
-                        key={`${item.codeName}-${item.strength}`}
-                        className="checkout-summary-item"
-                      >
-                        <div>
-                          <strong>
-                            {
-                              item.name
-                            }
-                          </strong>
+                  return (
+                    <div
+                      key={`${item.codeName}-${item.strength}`}
+                      className="checkout-summary-item"
+                    >
+                      <div>
+                        <strong>{item.name}</strong>
 
-                          <p>
-                            {
-                              item.codeName
-                            }{" "}
-                            ·{" "}
-                            {
-                              item.strength
-                            }
-                          </p>
+                        <p>
+                          {item.codeName} ·{" "}
+                          {item.strength}
+                        </p>
 
-                          <p>
-                            Quantity:{" "}
-                            {
-                              item.quantity
-                            }
-                          </p>
-                        </div>
-
-                        <strong>
-                          $
-                          {lineTotal.toFixed(
-                            2
-                          )}
-                        </strong>
+                        <p>
+                          Quantity: {item.quantity}
+                        </p>
                       </div>
-                    );
-                  }
-                )}
+
+                      <strong>
+                        {formatPrice(lineTotal)}
+                      </strong>
+                    </div>
+                  );
+                })}
               </div>
 
               <SummaryRow
                 label="Total Products"
-                value={
-                  cartItems.length
-                }
+                value={cartItems.length}
               />
 
               <SummaryRow
                 label="Total Items"
-                value={
-                  totalQuantity
-                }
+                value={totalQuantity}
               />
 
               <SummaryRow
                 label="Product Subtotal"
-                value={formatPrice(
-                  subtotal
-                )}
+                value={formatPrice(subtotal)}
               />
 
               <SummaryRow
@@ -1897,50 +1417,29 @@ function Checkout({
 
               <div className="checkout-final-total-note">
                 <strong>
-                  This is an
-                  order
-                  request—not a
-                  payment.
+                  This is an order request—not a payment.
                 </strong>
 
                 <span>
-                  The final
-                  invoice may
-                  include
-                  applicable
-                  shipping and
-                  taxes. Review
-                  the complete
-                  invoice before
-                  sending
+                  The final invoice may include
+                  applicable shipping and taxes. Review
+                  the complete invoice before sending
                   payment.
                 </span>
               </div>
 
               <section className="checkout-security-panel">
-                <strong>
-                  Security
-                  Verification
-                </strong>
+                <strong>Security Verification</strong>
 
                 <p>
-                  Complete the
-                  verification
-                  before
-                  submitting your
-                  order request.
+                  Complete the verification before
+                  submitting your order request.
                 </p>
 
                 <TurnstileWidget
-                  siteKey={
-                    turnstileSiteKey
-                  }
-                  resetKey={
-                    turnstileResetKey
-                  }
-                  disabled={
-                    isSubmitting
-                  }
+                  siteKey={turnstileSiteKey}
+                  resetKey={turnstileResetKey}
+                  disabled={isSubmitting}
                   onTokenChange={
                     handleTurnstileTokenChange
                   }
@@ -1954,15 +1453,10 @@ function Checkout({
                   aria-live="assertive"
                 >
                   <strong>
-                    Order request
-                    not sent
+                    Order request not sent
                   </strong>
 
-                  <span>
-                    {
-                      submitError
-                    }
-                  </span>
+                  <span>{submitError}</span>
                 </div>
               )}
 
@@ -1970,8 +1464,7 @@ function Checkout({
                 type="submit"
                 className="primary-btn checkout-submit-button"
                 disabled={
-                  !canPlaceOrder ||
-                  isSubmitting
+                  !canPlaceOrder || isSubmitting
                 }
               >
                 {isSubmitting
@@ -1982,42 +1475,27 @@ function Checkout({
               <button
                 type="button"
                 className="secondary-btn checkout-back-button"
-                disabled={
-                  isSubmitting
-                }
-                onClick={() =>
-                  onNavigate(
-                    "cart"
-                  )
-                }
+                disabled={isSubmitting}
+                onClick={() => onNavigate("cart")}
               >
                 Back To Cart
               </button>
 
-              {!canPlaceOrder &&
-                !isSubmitting && (
-                  <p className="checkout-helper-text">
-                    Complete all
-                    required
-                    fields, select
-                    a payment
-                    preference,
-                    accept both
-                    confirmations,
-                    and complete
-                    the security
-                    verification.
-                  </p>
-                )}
+              {!canPlaceOrder && !isSubmitting && (
+                <p className="checkout-helper-text">
+                  Complete all required fields, select a
+                  payment preference, accept both
+                  confirmations, and complete the
+                  security verification.
+                </p>
+              )}
 
               {isSubmitting && (
                 <p
                   className="checkout-submitting-text"
                   aria-live="polite"
                 >
-                  Your order
-                  request is
-                  being securely
+                  Your order request is being securely
                   submitted.
                 </p>
               )}
@@ -2025,10 +1503,8 @@ function Checkout({
           </form>
 
           <div className="checkout-research-notice">
-            For Research Use
-            Only. Products are
-            not intended for
-            human consumption.
+            For Research Use Only. Products are not
+            intended for human consumption.
           </div>
         </section>
       </main>
@@ -2048,23 +1524,15 @@ function CheckoutState({
 }) {
   return (
     <>
-      <style>
-        {checkoutCss}
-      </style>
+      <style>{checkoutCss}</style>
 
       <main className="checkout-page">
         <section className="checkout-state-panel">
-          <p className="eyebrow">
-            {eyebrow}
-          </p>
+          <p className="eyebrow">{eyebrow}</p>
 
-          <h1>
-            {title}
-          </h1>
+          <h1>{title}</h1>
 
-          <p>
-            {message}
-          </p>
+          <p>{message}</p>
 
           <div className="checkout-state-notice">
             {notice}
@@ -2074,25 +1542,17 @@ function CheckoutState({
             <button
               type="button"
               className="primary-btn"
-              onClick={
-                onPrimary
-              }
+              onClick={onPrimary}
             >
-              {
-                primaryLabel
-              }
+              {primaryLabel}
             </button>
 
             <button
               type="button"
               className="secondary-btn"
-              onClick={
-                onSecondary
-              }
+              onClick={onSecondary}
             >
-              {
-                secondaryLabel
-              }
+              {secondaryLabel}
             </button>
           </div>
         </section>
@@ -2113,8 +1573,16 @@ function InputField({
   inputMode,
   fullWidth = false,
   disabled = false,
+  readOnly = false,
+  helper = "",
   error = "",
 }) {
+  const describedBy = error
+    ? `${name}-error`
+    : helper
+    ? `${name}-helper`
+    : undefined;
+
   return (
     <label
       className={
@@ -2123,51 +1591,34 @@ function InputField({
           : "checkout-field"
       }
     >
-      <span>
-        {label}
-      </span>
+      <span>{label}</span>
 
       <input
         name={name}
         type={type}
-        placeholder={
-          placeholder
-        }
+        placeholder={placeholder}
         value={value}
-        onChange={
-          onChange
-        }
-        onBlur={
-          onBlur
-        }
-        autoComplete={
-          autoComplete
-        }
-        inputMode={
-          inputMode
-        }
-        disabled={
-          disabled
-        }
-        aria-invalid={
-          Boolean(
-            error
-          )
-        }
-        aria-describedby={
-          error
-            ? `${name}-error`
-            : undefined
-        }
+        onChange={onChange}
+        onBlur={onBlur}
+        autoComplete={autoComplete}
+        inputMode={inputMode}
+        disabled={disabled}
+        readOnly={readOnly}
+        aria-readonly={readOnly}
+        aria-invalid={Boolean(error)}
+        aria-describedby={describedBy}
       />
 
-      {error && (
+      {error ? (
+        <small id={`${name}-error`}>{error}</small>
+      ) : helper ? (
         <small
-          id={`${name}-error`}
+          id={`${name}-helper`}
+          className="checkout-field-helper"
         >
-          {error}
+          {helper}
         </small>
-      )}
+      ) : null}
     </label>
   );
 }
@@ -2184,69 +1635,31 @@ function SelectField({
 }) {
   return (
     <label className="checkout-field">
-      <span>
-        {label}
-      </span>
+      <span>{label}</span>
 
       <select
         name={name}
         value={value}
-        onChange={
-          onChange
-        }
-        onBlur={
-          onBlur
-        }
-        autoComplete={
-          autoComplete
-        }
-        disabled={
-          disabled
-        }
-        aria-invalid={
-          Boolean(
-            error
-          )
-        }
+        onChange={onChange}
+        onBlur={onBlur}
+        autoComplete={autoComplete}
+        disabled={disabled}
+        aria-invalid={Boolean(error)}
         aria-describedby={
-          error
-            ? `${name}-error`
-            : undefined
+          error ? `${name}-error` : undefined
         }
       >
-        <option value="">
-          Select State
-        </option>
+        <option value="">Select State</option>
 
-        {stateOptions.map(
-          (
-            [
-              code,
-              stateName,
-            ]
-          ) => (
-            <option
-              key={
-                code
-              }
-              value={
-                code
-              }
-            >
-              {
-                stateName
-              }
-            </option>
-          )
-        )}
+        {stateOptions.map(([code, stateName]) => (
+          <option key={code} value={code}>
+            {stateName}
+          </option>
+        ))}
       </select>
 
       {error && (
-        <small
-          id={`${name}-error`}
-        >
-          {error}
-        </small>
+        <small id={`${name}-error`}>{error}</small>
       )}
     </label>
   );
@@ -2258,13 +1671,8 @@ function SummaryRow({
 }) {
   return (
     <div className="checkout-summary-row">
-      <span>
-        {label}
-      </span>
-
-      <strong>
-        {value}
-      </strong>
+      <span>{label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }
@@ -2302,8 +1710,7 @@ const checkoutCss = `
         transparent 42%
       ),
       rgba(255,255,255,0.035);
-    box-shadow:
-      0 30px 80px rgba(0,0,0,0.45);
+    box-shadow: 0 30px 80px rgba(0,0,0,0.45);
     text-align: center;
   }
 
@@ -2316,12 +1723,7 @@ const checkoutCss = `
     margin-bottom: 20px;
     font-size: clamp(42px, 6vw, 62px);
     line-height: 1.05;
-    background:
-      linear-gradient(
-        180deg,
-        #ffffff,
-        #9d9d9d
-      );
+    background: linear-gradient(180deg, #ffffff, #9d9d9d);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
   }
@@ -2383,7 +1785,7 @@ const checkoutCss = `
     display: grid;
     gap: 10px;
     max-width: 620px;
-    margin: 26px auto 0;
+    margin: 26px auto;
   }
 
   .checkout-invalid-list > div {
@@ -2420,8 +1822,12 @@ const checkoutCss = `
         transparent 35%
       ),
       rgba(255,255,255,0.035);
-    box-shadow:
-      0 30px 80px rgba(0,0,0,0.45);
+    box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+  }
+
+  .checkout-summary-panel {
+    position: sticky;
+    top: 110px;
   }
 
   .checkout-main-panel h2,
@@ -2430,17 +1836,13 @@ const checkoutCss = `
     margin-bottom: 24px;
     font-size: clamp(28px, 4vw, 36px);
     line-height: 1.12;
-    background:
-      linear-gradient(
-        180deg,
-        #ffffff,
-        #9d9d9d
-      );
+    background: linear-gradient(180deg, #ffffff, #9d9d9d);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
   }
 
   .checkout-country-note,
+  .checkout-account-note,
   .checkout-invoice-notice,
   .checkout-final-total-note,
   .checkout-agreement-info {
@@ -2453,13 +1855,49 @@ const checkoutCss = `
   }
 
   .checkout-country-note {
+    margin-bottom: 14px;
+  }
+
+  .checkout-account-note {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 18px;
     margin-bottom: 20px;
+  }
+
+  .checkout-account-note > div {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+  }
+
+  .checkout-account-note > div > strong {
+    color: #ffffff;
+  }
+
+  .checkout-account-note > div > span {
+    color: #b8dff4;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+  }
+
+  .checkout-account-note > span {
+    flex: 0 0 auto;
+    padding: 7px 10px;
+    border: 1px solid rgba(61,165,255,0.35);
+    border-radius: 999px;
+    background: rgba(61,165,255,0.13);
+    color: #bde8ff;
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
   }
 
   .checkout-form-grid {
     display: grid;
-    grid-template-columns:
-      repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px;
   }
 
@@ -2501,8 +1939,7 @@ const checkoutCss = `
   .checkout-field input:focus,
   .checkout-field select:focus {
     border-color: rgba(61,165,255,0.65);
-    box-shadow:
-      0 0 0 3px rgba(61,165,255,0.12);
+    box-shadow: 0 0 0 3px rgba(61,165,255,0.12);
   }
 
   .checkout-field input[aria-invalid="true"],
@@ -2522,6 +1959,17 @@ const checkoutCss = `
     cursor: not-allowed;
   }
 
+  .checkout-field input:read-only:not(:disabled) {
+    border-color: rgba(61,165,255,0.3);
+    background: rgba(61,165,255,0.08);
+    color: #c9ebff;
+    cursor: not-allowed;
+  }
+
+  .checkout-field .checkout-field-helper {
+    color: #8fb9d0;
+  }
+
   .checkout-section-card {
     margin-top: 32px;
     padding: 26px;
@@ -2538,8 +1986,7 @@ const checkoutCss = `
 
   .checkout-payment-grid {
     display: grid;
-    grid-template-columns:
-      repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 14px;
   }
 
@@ -2596,41 +2043,40 @@ const checkoutCss = `
     place-items: center;
     border: 1px solid rgba(255,255,255,0.16);
     border-radius: 999px;
-    background: rgba(255,255,255,0.05);
+    background: rgba(255,255,255,0.04);
     color: transparent;
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 900;
   }
 
   .checkout-payment-selected .checkout-payment-check {
-    border-color: rgba(61,165,255,0.82);
-    background: #3da5ff;
-    color: #06111a;
+    border-color: rgba(61,165,255,0.7);
+    background: rgba(61,165,255,0.3);
+    color: #ffffff;
   }
 
   .checkout-invoice-notice {
-    margin-top: 20px;
-    text-align: center;
-    font-weight: 800;
+    margin-top: 16px;
+    font-size: 13px;
   }
 
   .checkout-agreement-info {
-    margin-bottom: 20px;
+    margin-bottom: 18px;
   }
 
   .checkout-agreement-info p {
-    margin-top: 9px;
-    color: #b8d8eb;
+    margin-top: 7px;
+    color: #b8d9eb;
   }
 
   .checkout-agreement-info button {
-    margin-top: 16px;
+    margin-top: 15px;
   }
 
   .checkout-checkbox-row {
     display: flex;
-    gap: 14px;
     align-items: flex-start;
+    gap: 13px;
     margin-top: 16px;
     color: #c8c8c8;
     line-height: 1.7;
@@ -2640,55 +2086,58 @@ const checkoutCss = `
   .checkout-checkbox-row input {
     width: 20px;
     height: 20px;
+    flex: 0 0 auto;
     margin-top: 3px;
     accent-color: #3da5ff;
   }
 
-  .checkout-summary-panel {
-    position: sticky;
-    top: 110px;
-  }
-
   .checkout-summary-items {
     display: grid;
-    gap: 14px;
-    margin-bottom: 24px;
+    gap: 12px;
+    margin-bottom: 20px;
   }
 
   .checkout-summary-item {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
     gap: 16px;
-    padding: 16px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 16px;
-    background: rgba(255,255,255,0.045);
-    color: #ffffff;
+    padding: 15px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 15px;
+    background: rgba(0,0,0,0.18);
   }
 
   .checkout-summary-item > div {
     min-width: 0;
   }
 
+  .checkout-summary-item strong {
+    color: #ffffff;
+    overflow-wrap: anywhere;
+  }
+
+  .checkout-summary-item > strong {
+    color: #9ed8ff;
+    white-space: nowrap;
+  }
+
   .checkout-summary-item p {
     margin-top: 4px;
-    color: #aaaaaa;
-    font-size: 13px;
-    line-height: 1.6;
-    overflow-wrap: anywhere;
+    color: #929ba3;
+    font-size: 12px;
+    line-height: 1.5;
   }
 
   .checkout-summary-row {
     display: flex;
     justify-content: space-between;
     gap: 18px;
-    margin-bottom: 12px;
-    padding: 15px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 14px;
-    background: rgba(255,255,255,0.045);
-    color: #c8c8c8;
+    padding: 13px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+  }
+
+  .checkout-summary-row span {
+    color: #aeb7bf;
   }
 
   .checkout-summary-row strong {
@@ -2702,38 +2151,41 @@ const checkoutCss = `
     margin-top: 20px;
   }
 
+  .checkout-final-total-note strong {
+    color: #ffffff;
+  }
+
+  .checkout-final-total-note span {
+    color: #b6d9ec;
+    font-size: 13px;
+  }
+
   .checkout-security-panel {
-    margin-top: 18px;
+    margin-top: 22px;
     padding: 18px;
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 16px;
-    background: rgba(255,255,255,0.035);
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 18px;
+    background: rgba(0,0,0,0.18);
   }
 
   .checkout-security-panel > strong {
-    display: block;
     color: #ffffff;
-    font-size: 14px;
-    font-weight: 900;
-    text-transform: uppercase;
-    letter-spacing: 0.7px;
   }
 
   .checkout-security-panel > p {
-    margin-top: 8px;
-    color: #b8b8b8;
+    margin: 7px 0 15px;
+    color: #aeb7bf;
     font-size: 13px;
-    line-height: 1.6;
+    line-height: 1.55;
   }
 
   .checkout-turnstile {
-    display: grid;
-    gap: 10px;
-    margin-top: 14px;
+    width: 100%;
+    overflow: hidden;
   }
 
   .checkout-turnstile-disabled {
-    opacity: 0.65;
+    opacity: 0.62;
     pointer-events: none;
   }
 
@@ -2743,65 +2195,55 @@ const checkoutCss = `
   }
 
   .checkout-turnstile-status {
-    margin: 0;
-    color: #aaaaaa;
+    margin-top: 9px;
+    color: #8f9ba6;
     font-size: 12px;
     line-height: 1.5;
   }
 
   .checkout-turnstile-verified {
     color: #9ed8ff;
-    font-weight: 800;
   }
 
   .checkout-turnstile-warning {
-    color: #ffd1d1;
+    color: #ffd0a8;
   }
 
   .checkout-submit-error {
     display: grid;
-    gap: 6px;
+    gap: 5px;
     margin-top: 18px;
-    padding: 16px;
-    border: 1px solid rgba(255,95,95,0.45);
-    border-radius: 16px;
-    background: rgba(255,70,70,0.12);
-    color: #ffd1d1;
-    font-size: 14px;
-    line-height: 1.6;
+    padding: 15px;
+    border: 1px solid rgba(255,95,95,0.4);
+    border-radius: 15px;
+    background: rgba(255,70,70,0.1);
+    color: #ffd0d0;
+    line-height: 1.55;
   }
 
   .checkout-submit-button,
   .checkout-back-button {
     width: 100%;
-  }
-
-  .checkout-submit-button {
-    margin-top: 24px;
-  }
-
-  .checkout-back-button {
-    margin-top: 14px;
+    margin-top: 16px;
   }
 
   .checkout-submit-button:disabled,
   .checkout-back-button:disabled {
-    opacity: 0.45;
+    opacity: 0.5;
     cursor: not-allowed;
   }
 
   .checkout-helper-text,
   .checkout-submitting-text {
-    margin-top: 14px;
-    color: #aaaaaa;
-    font-size: 13px;
+    margin-top: 13px;
+    color: #929ba3;
+    font-size: 12px;
     line-height: 1.6;
     text-align: center;
   }
 
   .checkout-submitting-text {
     color: #9ed8ff;
-    font-weight: 800;
   }
 
   .checkout-research-notice {
@@ -2824,8 +2266,7 @@ const checkoutCss = `
     }
 
     .checkout-layout {
-      grid-template-columns:
-        minmax(0, 1fr);
+      grid-template-columns: minmax(0, 1fr);
     }
 
     .checkout-summary-panel {
@@ -2848,8 +2289,7 @@ const checkoutCss = `
 
     .checkout-form-grid,
     .checkout-payment-grid {
-      grid-template-columns:
-        minmax(0, 1fr);
+      grid-template-columns: minmax(0, 1fr);
     }
 
     .checkout-field-full {
@@ -2881,6 +2321,11 @@ const checkoutCss = `
     }
 
     .checkout-summary-row {
+      flex-direction: column;
+    }
+
+    .checkout-account-note {
+      align-items: flex-start;
       flex-direction: column;
     }
 
