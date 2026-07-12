@@ -5,10 +5,10 @@ import {
   useState,
 } from "react";
 
-const adminSessionKey =
+const ADMIN_SESSION_KEY =
   "304-document-admin-session";
 
-const orderStatuses = [
+const ORDER_STATUSES = [
   "Order Request Received",
   "Invoice Sent",
   "Awaiting Payment",
@@ -19,11 +19,11 @@ const orderStatuses = [
   "Cancelled",
 ];
 
-function getStoredAdminSecret() {
+function getStoredSecret() {
   try {
     return (
-      window.sessionStorage.getItem(
-        adminSessionKey
+      sessionStorage.getItem(
+        ADMIN_SESSION_KEY
       ) || ""
     );
   } catch {
@@ -31,27 +31,26 @@ function getStoredAdminSecret() {
   }
 }
 
-function saveAdminSecret(
+function storeSecret(
   secret
 ) {
   try {
-    window.sessionStorage.setItem(
-      adminSessionKey,
+    sessionStorage.setItem(
+      ADMIN_SESSION_KEY,
       secret
     );
   } catch {
-    // The secret remains available
-    // during the current render session.
+    // The secret remains in React state for this page session.
   }
 }
 
-function clearAdminSecret() {
+function removeStoredSecret() {
   try {
-    window.sessionStorage.removeItem(
-      adminSessionKey
+    sessionStorage.removeItem(
+      ADMIN_SESSION_KEY
     );
   } catch {
-    // Storage may be blocked.
+    // Storage may be unavailable.
   }
 }
 
@@ -62,82 +61,6 @@ function getOrderId(
     order?.orderId ||
       order?.id ||
       ""
-  );
-}
-
-function getOrderItems(
-  order
-) {
-  return Array.isArray(
-    order?.items
-  )
-    ? order.items
-    : [];
-}
-
-function getOrderQuantity(
-  order
-) {
-  if (
-    Number.isFinite(
-      Number(
-        order?.totalQuantity
-      )
-    )
-  ) {
-    return Number(
-      order.totalQuantity
-    );
-  }
-
-  return getOrderItems(
-    order
-  ).reduce(
-    (
-      total,
-      item
-    ) =>
-      total +
-      Number(
-        item.quantity ||
-          0
-      ),
-    0
-  );
-}
-
-function getOrderSubtotal(
-  order
-) {
-  if (
-    Number.isFinite(
-      Number(
-        order?.subtotal
-      )
-    )
-  ) {
-    return Number(
-      order.subtotal
-    );
-  }
-
-  return getOrderItems(
-    order
-  ).reduce(
-    (
-      total,
-      item
-    ) =>
-      total +
-      Number(
-        item.price ||
-          0
-      ) *
-        Number(
-          item.quantity ||
-            0
-        ),
-    0
   );
 }
 
@@ -158,66 +81,107 @@ function getCustomerName(
       order
     );
 
-  const name =
+  return (
     `${customer.firstName || ""} ${
       customer.lastName || ""
-    }`.trim();
-
-  return (
-    name ||
-    "Customer name unavailable"
+    }`.trim() ||
+    "Customer unavailable"
   );
 }
 
-function getCustomerAddress(
+function getItems(
   order
 ) {
-  const customer =
-    getCustomer(
-      order
+  return Array.isArray(
+    order?.items
+  )
+    ? order.items
+    : [];
+}
+
+function getQuantity(
+  order
+) {
+  const saved =
+    Number(
+      order?.totalQuantity
     );
 
-  const cityState =
-    [
-      customer.city,
-      customer.state,
-    ]
-      .filter(Boolean)
-      .join(", ");
-
-  const address =
-    [
-      customer.address,
-      cityState,
-      customer.zip,
-    ]
-      .filter(Boolean)
-      .join(" ");
-
-  return (
-    address ||
-    "Shipping address unavailable"
-  );
+  return Number.isFinite(
+    saved
+  )
+    ? saved
+    : getItems(
+        order
+      ).reduce(
+        (
+          sum,
+          item
+        ) =>
+          sum +
+          Number(
+            item.quantity ||
+              0
+          ),
+        0
+      );
 }
 
-function getOrderDateValue(
+function getSubtotal(
   order
 ) {
-  return (
-    order?.createdAt ||
-    order?.updatedAt ||
-    order?.date ||
-    ""
+  const saved =
+    Number(
+      order?.subtotal
+    );
+
+  return Number.isFinite(
+    saved
+  )
+    ? saved
+    : getItems(
+        order
+      ).reduce(
+        (
+          sum,
+          item
+        ) =>
+          sum +
+          Number(
+            item.price ||
+              0
+          ) *
+            Number(
+              item.quantity ||
+                0
+            ),
+        0
+      );
+}
+
+function formatMoney(
+  value
+) {
+  return Number(
+    value ||
+      0
+  ).toLocaleString(
+    "en-US",
+    {
+      style:
+        "currency",
+
+      currency:
+        "USD",
+    }
   );
 }
 
 function formatDate(
   value
 ) {
-  if (
-    !value
-  ) {
-    return "Date unavailable";
+  if (!value) {
+    return "Unavailable";
   }
 
   const date =
@@ -225,117 +189,94 @@ function formatDate(
       value
     );
 
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
-    return String(
+  return Number.isNaN(
+    date.getTime()
+  )
+    ? String(
+        value
+      )
+    : date.toLocaleString(
+        "en-US",
+        {
+          month:
+            "short",
+
+          day:
+            "numeric",
+
+          year:
+            "numeric",
+
+          hour:
+            "numeric",
+
+          minute:
+            "2-digit",
+        }
+      );
+}
+
+function normalizeEmail(
+  value
+) {
+  return String(
+    value ||
+      ""
+  )
+    .trim()
+    .toLowerCase();
+}
+
+function validEmail(
+  value
+) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+    normalizeEmail(
       value
-    );
-  }
-
-  return date.toLocaleString(
-    "en-US",
-    {
-      month:
-        "short",
-
-      day:
-        "numeric",
-
-      year:
-        "numeric",
-
-      hour:
-        "numeric",
-
-      minute:
-        "2-digit",
-    }
+    )
   );
 }
 
-function formatMoney(
-  value
-) {
-  const amount =
-    Number(
-      value
-    );
-
-  return Number.isFinite(
-    amount
-  )
-    ? amount.toLocaleString(
-        "en-US",
-        {
-          style:
-            "currency",
-
-          currency:
-            "USD",
-        }
-      )
-    : "$0.00";
-}
-
-function normalizeOrders(
+function sortOrders(
   records
 ) {
-  if (
-    !Array.isArray(
+  return (
+    Array.isArray(
       records
     )
-  ) {
-    return [];
-  }
-
-  return records
+      ? records
+      : []
+  )
     .filter(
       (
-        order
+        record
       ) =>
-        order &&
-        typeof order ===
+        record &&
+        typeof record ===
           "object"
     )
     .sort(
       (
         left,
         right
-      ) => {
-        const leftDate =
-          new Date(
-            getOrderDateValue(
-              left
-            )
-          ).getTime();
-
-        const rightDate =
-          new Date(
-            getOrderDateValue(
-              right
-            )
-          ).getTime();
-
-        return (
-          (Number.isFinite(
-            rightDate
+      ) =>
+        String(
+          right.createdAt ||
+            right.updatedAt ||
+            right.date ||
+            ""
+        ).localeCompare(
+          String(
+            left.createdAt ||
+              left.updatedAt ||
+              left.date ||
+              ""
           )
-            ? rightDate
-            : 0) -
-          (Number.isFinite(
-            leftDate
-          )
-            ? leftDate
-            : 0)
-        );
-      }
+        )
     );
 }
 
-async function readJsonResponse(
+async function readJson(
   response
 ) {
   const text =
@@ -350,7 +291,7 @@ async function readJsonResponse(
       );
   } catch {
     throw new Error(
-      "The order service returned an invalid response."
+      "The protected admin service returned an invalid response."
     );
   }
 
@@ -360,7 +301,7 @@ async function readJsonResponse(
   ) {
     throw new Error(
       result.error ||
-        "The order request could not be completed."
+        "The protected admin request could not be completed."
     );
   }
 
@@ -369,94 +310,158 @@ async function readJsonResponse(
 
 function CustomerManager({
   orders = [],
-  partnerApplication,
   onNavigate = () => {},
 }) {
   const [
     adminSecret,
     setAdminSecret,
-  ] = useState(
-    getStoredAdminSecret
-  );
+  ] =
+    useState(
+      getStoredSecret
+    );
 
   const [
     secretInput,
     setSecretInput,
-  ] = useState("");
+  ] =
+    useState(
+      ""
+    );
 
   const [
-    backendOrders,
-    setBackendOrders,
-  ] = useState([]);
+    records,
+    setRecords,
+  ] =
+    useState(
+      []
+    );
 
   const [
     backendReady,
     setBackendReady,
-  ] = useState(false);
+  ] =
+    useState(
+      false
+    );
 
   const [
-    isLoading,
-    setIsLoading,
-  ] = useState(
-    Boolean(
-      adminSecret
-    )
-  );
+    loading,
+    setLoading,
+  ] =
+    useState(
+      Boolean(
+        adminSecret
+      )
+    );
 
   const [
-    loadError,
-    setLoadError,
-  ] = useState("");
+    message,
+    setMessage,
+  ] =
+    useState(
+      ""
+    );
 
   const [
-    searchTerm,
-    setSearchTerm,
-  ] = useState("");
+    error,
+    setError,
+  ] =
+    useState(
+      ""
+    );
+
+  const [
+    search,
+    setSearch,
+  ] =
+    useState(
+      ""
+    );
 
   const [
     statusFilter,
     setStatusFilter,
-  ] = useState("all");
+  ] =
+    useState(
+      "all"
+    );
 
   const [
-    expandedOrderId,
-    setExpandedOrderId,
-  ] = useState("");
+    expandedId,
+    setExpandedId,
+  ] =
+    useState(
+      ""
+    );
 
   const [
-    editingOrderId,
-    setEditingOrderId,
-  ] = useState("");
+    editingId,
+    setEditingId,
+  ] =
+    useState(
+      ""
+    );
 
   const [
     draftStatus,
     setDraftStatus,
-  ] = useState("");
+  ] =
+    useState(
+      ""
+    );
 
   const [
     draftNotes,
     setDraftNotes,
-  ] = useState("");
+  ] =
+    useState(
+      ""
+    );
 
   const [
-    updatingOrderId,
-    setUpdatingOrderId,
-  ] = useState("");
+    busyId,
+    setBusyId,
+  ] =
+    useState(
+      ""
+    );
 
   const [
-    actionError,
-    setActionError,
-  ] = useState("");
+    resetEmail,
+    setResetEmail,
+  ] =
+    useState(
+      ""
+    );
 
   const [
-    actionMessage,
-    setActionMessage,
-  ] = useState("");
+    resetting,
+    setResetting,
+  ] =
+    useState(
+      false
+    );
+
+  const [
+    resetResult,
+    setResetResult,
+  ] =
+    useState(
+      null
+    );
+
+  const [
+    copyMessage,
+    setCopyMessage,
+  ] =
+    useState(
+      ""
+    );
 
   const localOrders =
     useMemo(
       () =>
-        normalizeOrders(
+        sortOrders(
           orders
         ),
       [
@@ -464,45 +469,32 @@ function CustomerManager({
       ]
     );
 
-  const loadBackendOrders =
+  const displayedOrders =
+    backendReady
+      ? records
+      : localOrders;
+
+  const loadOrders =
     useCallback(
       async (
         secret =
           adminSecret
       ) => {
-        const cleanedSecret =
+        const cleaned =
           String(
             secret ||
               ""
           ).trim();
 
-        if (
-          !cleanedSecret
-        ) {
-          setBackendReady(
-            false
-          );
-
-          setBackendOrders(
-            []
-          );
-
-          setIsLoading(
-            false
-          );
-
+        if (!cleaned) {
           return;
         }
 
-        setIsLoading(
+        setLoading(
           true
         );
 
-        setLoadError(
-          ""
-        );
-
-        setActionError(
+        setError(
           ""
         );
 
@@ -511,16 +503,16 @@ function CustomerManager({
             await fetch(
               "/api/admin/orders",
               {
-                method:
-                  "GET",
-
                 headers: {
                   Accept:
                     "application/json",
 
                   Authorization:
-                    `Bearer ${cleanedSecret}`,
+                    `Bearer ${cleaned}`,
                 },
+
+                credentials:
+                  "same-origin",
 
                 cache:
                   "no-store",
@@ -528,45 +520,38 @@ function CustomerManager({
             );
 
           const result =
-            await readJsonResponse(
+            await readJson(
               response
             );
 
-          const records =
-            normalizeOrders(
+          setRecords(
+            sortOrders(
               result.records ||
                 result.orders ||
                 []
-            );
-
-          setBackendOrders(
-            records
+            )
           );
 
           setBackendReady(
             true
           );
-
-          setLoadError(
-            ""
-          );
         } catch (
-          error
+          requestError
         ) {
           setBackendReady(
             false
           );
 
-          setBackendOrders(
+          setRecords(
             []
           );
 
-          setLoadError(
-            error.message ||
-              "Stored orders could not be loaded."
+          setError(
+            requestError.message ||
+              "Orders could not be loaded."
           );
         } finally {
-          setIsLoading(
+          setLoading(
             false
           );
         }
@@ -580,31 +565,19 @@ function CustomerManager({
     if (
       adminSecret
     ) {
-      loadBackendOrders(
+      loadOrders(
         adminSecret
       );
     }
   }, [
     adminSecret,
-    loadBackendOrders,
+    loadOrders,
   ]);
-
-  const displayedOrders =
-    backendReady
-      ? backendOrders
-      : localOrders;
-
-  const dataSourceLabel =
-    backendReady
-      ? "Cloudflare KV"
-      : adminSecret
-      ? "Local Browser Fallback"
-      : "Admin Login Required";
 
   const filteredOrders =
     useMemo(() => {
-      const normalizedSearch =
-        searchTerm
+      const term =
+        search
           .trim()
           .toLowerCase();
 
@@ -617,12 +590,7 @@ function CustomerManager({
               order
             );
 
-          const items =
-            getOrderItems(
-              order
-            );
-
-          const searchText =
+          const searchable =
             [
               getOrderId(
                 order
@@ -630,11 +598,7 @@ function CustomerManager({
 
               order.status,
 
-              order.date,
-
-              order.createdAt,
-
-              order.updatedAt,
+              order.adminNotes,
 
               customer.firstName,
 
@@ -650,177 +614,126 @@ function CustomerManager({
 
               customer.zip,
 
-              order.preferredPaymentLabel,
-
-              order.paymentMethod,
-
-              order.adminNotes,
-
-              ...items.flatMap(
+              ...getItems(
+                order
+              ).flatMap(
                 (
                   item
                 ) => [
                   item.name,
                   item.codeName,
                   item.strength,
-                  item.composition,
                 ]
               ),
             ]
-              .filter(Boolean)
-              .join(" ")
+              .filter(
+                Boolean
+              )
+              .join(
+                " "
+              )
               .toLowerCase();
 
-          const matchesSearch =
-            !normalizedSearch ||
-            searchText.includes(
-              normalizedSearch
-            );
-
-          const matchesStatus =
-            statusFilter ===
-              "all" ||
-            order.status ===
-              statusFilter;
-
           return (
-            matchesSearch &&
-            matchesStatus
+            (
+              !term ||
+              searchable.includes(
+                term
+              )
+            ) &&
+            (
+              statusFilter ===
+                "all" ||
+              order.status ===
+                statusFilter
+            )
           );
         }
       );
     }, [
       displayedOrders,
-      searchTerm,
+      search,
       statusFilter,
     ]);
 
-  const stats =
-    useMemo(() => {
-      const totalOrders =
-        displayedOrders.length;
+  const totals =
+    useMemo(
+      () => ({
+        orders:
+          displayedOrders.length,
 
-      const totalItems =
-        displayedOrders.reduce(
-          (
-            total,
-            order
-          ) =>
-            total +
-            getOrderQuantity(
+        items:
+          displayedOrders.reduce(
+            (
+              sum,
               order
-            ),
-          0
-        );
+            ) =>
+              sum +
+              getQuantity(
+                order
+              ),
+            0
+          ),
 
-      const requestedValue =
-        displayedOrders.reduce(
-          (
-            total,
-            order
-          ) =>
-            total +
-            getOrderSubtotal(
+        value:
+          displayedOrders.reduce(
+            (
+              sum,
               order
-            ),
-          0
-        );
+            ) =>
+              sum +
+              getSubtotal(
+                order
+              ),
+            0
+          ),
+      }),
+      [
+        displayedOrders,
+      ]
+    );
 
-      const activeOrders =
-        displayedOrders.filter(
-          (
-            order
-          ) =>
-            ![
-              "Completed",
-              "Cancelled",
-            ].includes(
-              order.status
-            )
-        ).length;
-
-      return {
-        totalOrders,
-        totalItems,
-        requestedValue,
-        activeOrders,
-      };
-    }, [
-      displayedOrders,
-    ]);
-
-  const latestOrder =
-    displayedOrders[0] ||
-    null;
-
-  const latestCustomer =
-    latestOrder
-      ? getCustomer(
-          latestOrder
-        )
-      : {};
-
-  const latestCustomerName =
-    latestOrder
-      ? getCustomerName(
-          latestOrder
-        )
-      : "No customer saved yet";
-
-  const latestCustomerEmail =
-    latestCustomer.email ||
-    "No email saved yet";
-
-  const latestCustomerAddress =
-    latestOrder
-      ? getCustomerAddress(
-          latestOrder
-        )
-      : "No address saved yet";
-
-  async function handleAdminLogin(
+  function login(
     event
   ) {
     event.preventDefault();
 
-    const cleanedSecret =
+    const cleaned =
       secretInput.trim();
 
-    if (
-      !cleanedSecret
-    ) {
-      setLoadError(
+    if (!cleaned) {
+      setError(
         "Enter the administrator secret."
       );
 
       return;
     }
 
-    setLoadError(
-      ""
-    );
-
-    saveAdminSecret(
-      cleanedSecret
+    storeSecret(
+      cleaned
     );
 
     setAdminSecret(
-      cleanedSecret
+      cleaned
     );
 
     setSecretInput(
       ""
     );
+
+    setError(
+      ""
+    );
   }
 
-  function handleClearAdminSession() {
-    clearAdminSecret();
+  function logoutAdmin() {
+    removeStoredSecret();
 
     setAdminSecret(
       ""
     );
 
-    setBackendOrders(
+    setRecords(
       []
     );
 
@@ -828,39 +741,29 @@ function CustomerManager({
       false
     );
 
-    setLoadError(
+    setMessage(
       ""
     );
 
-    setActionError(
+    setError(
       ""
     );
 
-    setActionMessage(
-      ""
-    );
-
-    setEditingOrderId(
-      ""
-    );
-
-    setExpandedOrderId(
-      ""
+    setResetResult(
+      null
     );
   }
 
-  function beginEditing(
+  function beginEdit(
     order
   ) {
-    setActionError(
-      ""
+    setEditingId(
+      getOrderId(
+        order
+      )
     );
 
-    setActionMessage(
-      ""
-    );
-
-    setEditingOrderId(
+    setExpandedId(
       getOrderId(
         order
       )
@@ -868,7 +771,7 @@ function CustomerManager({
 
     setDraftStatus(
       order.status ||
-        "Order Request Received"
+        ORDER_STATUSES[0]
     );
 
     setDraftNotes(
@@ -876,65 +779,36 @@ function CustomerManager({
         ""
     );
 
-    setExpandedOrderId(
-      getOrderId(
-        order
-      )
-    );
-  }
-
-  function cancelEditing() {
-    setEditingOrderId(
+    setMessage(
       ""
     );
 
-    setDraftStatus(
-      ""
-    );
-
-    setDraftNotes(
+    setError(
       ""
     );
   }
 
-  async function saveOrderUpdate(
+  async function saveOrder(
     order
   ) {
-    if (
-      !backendReady ||
-      !adminSecret
-    ) {
-      setActionError(
-        "Connect to the protected Cloudflare order records before updating an order."
-      );
-
-      return;
-    }
-
     const orderId =
       getOrderId(
         order
       );
 
-    if (
-      !orderId
-    ) {
-      setActionError(
-        "This order does not have a valid order number."
+    if (!backendReady) {
+      setError(
+        "Load Cloudflare orders before updating a record."
       );
 
       return;
     }
 
-    setUpdatingOrderId(
+    setBusyId(
       orderId
     );
 
-    setActionError(
-      ""
-    );
-
-    setActionMessage(
+    setError(
       ""
     );
 
@@ -959,6 +833,9 @@ function CustomerManager({
                 `Bearer ${adminSecret}`,
             },
 
+            credentials:
+              "same-origin",
+
             body:
               JSON.stringify({
                 status:
@@ -971,57 +848,49 @@ function CustomerManager({
         );
 
       const result =
-        await readJsonResponse(
+        await readJson(
           response
         );
 
-      const updatedOrder =
+      const updated =
         result.order ||
         result.record;
 
-      setBackendOrders(
+      setRecords(
         (
-          currentOrders
+          current
         ) =>
-          normalizeOrders(
-            currentOrders.map(
+          sortOrders(
+            current.map(
               (
-                currentOrder
+                item
               ) =>
                 getOrderId(
-                  currentOrder
+                  item
                 ) ===
                 orderId
-                  ? updatedOrder
-                  : currentOrder
+                  ? updated
+                  : item
             )
           )
       );
 
-      setEditingOrderId(
+      setEditingId(
         ""
       );
 
-      setDraftStatus(
-        ""
-      );
-
-      setDraftNotes(
-        ""
-      );
-
-      setActionMessage(
+      setMessage(
         `Order ${orderId} was updated.`
       );
     } catch (
-      error
+      requestError
     ) {
-      setActionError(
-        error.message ||
+      setError(
+        requestError.message ||
           "The order could not be updated."
       );
     } finally {
-      setUpdatingOrderId(
+      setBusyId(
         ""
       );
     }
@@ -1030,42 +899,25 @@ function CustomerManager({
   async function deleteOrder(
     order
   ) {
-    if (
-      !backendReady ||
-      !adminSecret
-    ) {
-      setActionError(
-        "Only Cloudflare-stored orders can be deleted."
-      );
-
-      return;
-    }
-
     const orderId =
       getOrderId(
         order
       );
 
-    const shouldDelete =
-      window.confirm(
-        `Delete order ${orderId}? This permanently removes the order record from Cloudflare KV.`
-      );
-
     if (
-      !shouldDelete
+      !backendReady ||
+      !window.confirm(
+        `Delete order ${orderId} from Cloudflare KV?`
+      )
     ) {
       return;
     }
 
-    setUpdatingOrderId(
+    setBusyId(
       orderId
     );
 
-    setActionError(
-      ""
-    );
-
-    setActionMessage(
+    setError(
       ""
     );
 
@@ -1086,57 +938,211 @@ function CustomerManager({
               Authorization:
                 `Bearer ${adminSecret}`,
             },
+
+            credentials:
+              "same-origin",
           }
         );
 
-      await readJsonResponse(
+      await readJson(
         response
       );
 
-      setBackendOrders(
+      setRecords(
         (
-          currentOrders
+          current
         ) =>
-          currentOrders.filter(
+          current.filter(
             (
-              currentOrder
+              item
             ) =>
               getOrderId(
-                currentOrder
+                item
               ) !==
               orderId
           )
       );
 
-      if (
-        expandedOrderId ===
-        orderId
-      ) {
-        setExpandedOrderId(
-          ""
-        );
-      }
-
-      if (
-        editingOrderId ===
-        orderId
-      ) {
-        cancelEditing();
-      }
-
-      setActionMessage(
+      setMessage(
         `Order ${orderId} was deleted.`
       );
     } catch (
-      error
+      requestError
     ) {
-      setActionError(
-        error.message ||
+      setError(
+        requestError.message ||
           "The order could not be deleted."
       );
     } finally {
-      setUpdatingOrderId(
+      setBusyId(
         ""
+      );
+    }
+  }
+
+  function chooseResetEmail(
+    email
+  ) {
+    setResetEmail(
+      normalizeEmail(
+        email
+      )
+    );
+
+    setResetResult(
+      null
+    );
+
+    setCopyMessage(
+      ""
+    );
+
+    setError(
+      ""
+    );
+
+    window.setTimeout(() => {
+      document
+        .getElementById(
+          "password-reset-panel"
+        )
+        ?.scrollIntoView({
+          behavior:
+            "smooth",
+        });
+    });
+  }
+
+  async function resetPassword(
+    event
+  ) {
+    event.preventDefault();
+
+    const email =
+      normalizeEmail(
+        resetEmail
+      );
+
+    if (
+      !validEmail(
+        email
+      )
+    ) {
+      setError(
+        "Enter a valid customer account email."
+      );
+
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Reset the password for ${email}? Existing sessions will be invalidated immediately.`
+      )
+    ) {
+      return;
+    }
+
+    setResetting(
+      true
+    );
+
+    setResetResult(
+      null
+    );
+
+    setCopyMessage(
+      ""
+    );
+
+    setMessage(
+      ""
+    );
+
+    setError(
+      ""
+    );
+
+    try {
+      const response =
+        await fetch(
+          "/api/admin/accounts/reset-password",
+          {
+            method:
+              "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+
+              Accept:
+                "application/json",
+
+              Authorization:
+                `Bearer ${adminSecret}`,
+            },
+
+            credentials:
+              "same-origin",
+
+            cache:
+              "no-store",
+
+            body:
+              JSON.stringify({
+                email,
+              }),
+          }
+        );
+
+      const result =
+        await readJson(
+          response
+        );
+
+      setResetResult(
+        result
+      );
+
+      setResetEmail(
+        result.email ||
+          email
+      );
+
+      setMessage(
+        `Temporary password created for ${
+          result.email ||
+          email
+        }.`
+      );
+    } catch (
+      requestError
+    ) {
+      setError(
+        requestError.message ||
+          "The password could not be reset."
+      );
+    } finally {
+      setResetting(
+        false
+      );
+    }
+  }
+
+  async function copyPassword() {
+    try {
+      await navigator.clipboard.writeText(
+        resetResult
+          ?.temporaryPassword ||
+          ""
+      );
+
+      setCopyMessage(
+        "Temporary password copied."
+      );
+    } catch {
+      setCopyMessage(
+        "Copy was blocked. Select and copy the password manually."
       );
     }
   }
@@ -1147,88 +1153,58 @@ function CustomerManager({
     return (
       <>
         <style>
-          {
-            customerManagerCss
-          }
+          {css}
         </style>
 
-        <main className="customer-manager-page">
-          <section className="customer-manager-auth">
+        <main className="cm-page">
+          <section className="cm-login">
             <p className="eyebrow">
               CUSTOMER MANAGER
             </p>
 
             <h1>
-              Administrator
-              Authorization
+              Administrator Authorization
             </h1>
 
             <p>
-              Cloudflare Access
-              protects this page.
-              Enter the same
-              administrator
-              secret used by COA
-              Manager to load
-              protected order
-              records.
+              Enter your administrator secret to open
+              protected customer and order tools.
             </p>
 
             <form
               onSubmit={
-                handleAdminLogin
+                login
               }
             >
-              <label>
-                <span>
-                  Administrator
-                  Secret
-                </span>
+              <input
+                type="password"
+                value={
+                  secretInput
+                }
+                onChange={(
+                  event
+                ) =>
+                  setSecretInput(
+                    event.target
+                      .value
+                  )
+                }
+                placeholder="Administrator secret"
+                autoComplete="current-password"
+              />
 
-                <input
-                  type="password"
-                  value={
-                    secretInput
-                  }
-                  onChange={(
-                    event
-                  ) => {
-                    setSecretInput(
-                      event.target
-                        .value
-                    );
-
-                    setLoadError(
-                      ""
-                    );
-                  }}
-                  autoComplete="current-password"
-                  placeholder="Enter administrator secret"
-                />
-              </label>
-
-              {loadError && (
-                <div
-                  className="customer-manager-error"
-                  role="alert"
-                >
-                  {
-                    loadError
-                  }
+              {error && (
+                <div className="cm-error">
+                  {error}
                 </div>
               )}
 
-              <button
-                type="submit"
-                className="primary-btn"
-              >
-                Open Customer
-                Manager
+              <button className="primary-btn">
+                Open Customer Manager
               </button>
             </form>
 
             <button
-              type="button"
               className="secondary-btn"
               onClick={() =>
                 onNavigate(
@@ -1236,8 +1212,7 @@ function CustomerManager({
                 )
               }
             >
-              Back To Mission
-              Control
+              Back To Mission Control
             </button>
           </section>
         </main>
@@ -1248,16 +1223,13 @@ function CustomerManager({
   return (
     <>
       <style>
-        {
-          customerManagerCss
-        }
+        {css}
       </style>
 
-      <main className="customer-manager-page">
-        <section className="customer-manager-inner">
-          <div className="customer-manager-topbar">
+      <main className="cm-page">
+        <section className="cm-wrap">
+          <div className="cm-top">
             <button
-              type="button"
               className="secondary-btn"
               onClick={() =>
                 onNavigate(
@@ -1265,28 +1237,26 @@ function CustomerManager({
                 )
               }
             >
-              ← Back To Mission
-              Control
+              ← Mission Control
             </button>
 
             <div>
               <span
                 className={
                   backendReady
-                    ? "customer-source-pill customer-source-live"
-                    : "customer-source-pill"
+                    ? "cm-live"
+                    : "cm-pill"
                 }
               >
-                {
-                  dataSourceLabel
-                }
+                {backendReady
+                  ? "Cloudflare KV"
+                  : "Local Fallback"}
               </span>
 
               <button
-                type="button"
-                className="customer-clear-session"
+                className="cm-link"
                 onClick={
-                  handleClearAdminSession
+                  logoutAdmin
                 }
               >
                 Clear Admin Session
@@ -1294,316 +1264,212 @@ function CustomerManager({
             </div>
           </div>
 
-          <header className="customer-manager-hero">
+          <header className="cm-hero">
             <p className="eyebrow">
               CUSTOMER MANAGER
             </p>
 
             <h1>
-              Customer & Order
-              Records
+              Customers, Orders & Recovery
             </h1>
 
             <p>
-              Review protected
-              order requests,
-              customer shipping
-              details, payment
-              preferences,
-              product totals,
-              fulfillment
-              status, and
-              internal order
-              notes.
+              Manage protected orders and issue
+              forced-change temporary passwords.
             </p>
 
-            <div className="customer-manager-hero-actions">
-              <button
-                type="button"
-                className="primary-btn"
-                disabled={
-                  isLoading
-                }
-                onClick={() =>
-                  loadBackendOrders(
-                    adminSecret
-                  )
-                }
-              >
-                {isLoading
-                  ? "Refreshing..."
-                  : "Refresh Cloudflare Orders"}
-              </button>
-
-              <button
-                type="button"
-                className="secondary-btn"
-                onClick={() =>
-                  onNavigate(
-                    "products"
-                  )
-                }
-              >
-                View Storefront
-              </button>
-            </div>
+            <button
+              className="primary-btn"
+              disabled={
+                loading
+              }
+              onClick={() =>
+                loadOrders()
+              }
+            >
+              {loading
+                ? "Refreshing..."
+                : "Refresh Cloudflare Orders"}
+            </button>
           </header>
 
-          {loadError && (
-            <section className="customer-manager-warning">
-              <div>
-                <strong>
-                  Cloudflare
-                  orders could
-                  not be loaded
-                </strong>
-
-                <p>
-                  {loadError}
-                </p>
-
-                <small>
-                  Local browser
-                  orders are shown
-                  temporarily
-                  below.
-                </small>
-              </div>
-
-              <button
-                type="button"
-                className="primary-btn"
-                onClick={() =>
-                  loadBackendOrders(
-                    adminSecret
-                  )
-                }
-              >
-                Try Again
-              </button>
-            </section>
-          )}
-
-          {actionError && (
-            <div
-              className="customer-manager-error customer-manager-action-message"
-              role="alert"
-            >
-              {
-                actionError
-              }
+          {error && (
+            <div className="cm-error">
+              {error}
             </div>
           )}
 
-          {actionMessage && (
-            <div
-              className="customer-manager-success-message"
-              aria-live="polite"
-            >
-              {
-                actionMessage
-              }
+          {message && (
+            <div className="cm-success">
+              {message}
             </div>
           )}
 
-          <section className="customer-manager-stats">
-            <StatCard
-              label="Stored Orders"
+          <section className="cm-stats">
+            <Stat
+              label="Orders"
               value={
-                isLoading
-                  ? "—"
-                  : stats.totalOrders
-              }
-              detail={
-                backendReady
-                  ? "Cloudflare KV records"
-                  : "Local browser records"
+                totals.orders
               }
             />
 
-            <StatCard
-              label="Total Items"
+            <Stat
+              label="Items"
               value={
-                isLoading
-                  ? "—"
-                  : stats.totalItems
+                totals.items
               }
-              detail="Units requested"
             />
 
-            <StatCard
+            <Stat
               label="Requested Value"
-              value={
-                isLoading
-                  ? "—"
-                  : formatMoney(
-                      stats.requestedValue
-                    )
-              }
-              detail="Product subtotal only"
-            />
-
-            <StatCard
-              label="Active Orders"
-              value={
-                isLoading
-                  ? "—"
-                  : stats.activeOrders
-              }
-              detail="Not completed or cancelled"
+              value={formatMoney(
+                totals.value
+              )}
             />
           </section>
 
-          <div className="customer-manager-overview">
-            <section className="customer-manager-panel">
-              <p className="eyebrow">
-                LATEST CUSTOMER
-              </p>
+          <section
+            id="password-reset-panel"
+            className="cm-panel cm-reset"
+          >
+            <p className="eyebrow">
+              ACCOUNT RECOVERY
+            </p>
 
-              <h2>
-                Most Recent
-                Checkout
-              </h2>
+            <h2>
+              Issue Temporary Password
+            </h2>
 
-              <div className="customer-manager-info-grid">
-                <InfoBox
-                  label="Name"
-                  value={
-                    latestCustomerName
-                  }
-                />
+            <p>
+              This replaces the old password, invalidates
+              existing sessions, and forces the customer
+              to choose a permanent password after login.
+            </p>
 
-                <InfoBox
-                  label="Email"
-                  value={
-                    latestCustomerEmail
-                  }
-                />
-
-                <div className="customer-manager-address-box">
-                  <span>
-                    Shipping Address
-                  </span>
-
-                  <strong>
-                    {
-                      latestCustomerAddress
-                    }
-                  </strong>
-                </div>
-              </div>
-
-              {latestOrder && (
-                <div className="customer-manager-latest-order">
-                  <span>
-                    Latest Order
-                  </span>
-
-                  <strong>
-                    #
-                    {getOrderId(
-                      latestOrder
-                    )}
-                  </strong>
-
-                  <small>
-                    {formatDate(
-                      getOrderDateValue(
-                        latestOrder
+            <form
+              onSubmit={
+                resetPassword
+              }
+            >
+              <input
+                type="email"
+                value={
+                  resetEmail
+                }
+                onChange={(
+                  event
+                ) => {
+                  setResetEmail(
+                    event.target
+                      .value
+                      .slice(
+                        0,
+                        254
                       )
-                    )}
-                  </small>
-                </div>
-              )}
-            </section>
+                  );
 
-            <aside className="customer-manager-partner">
-              <p className="eyebrow">
-                PARTNER SNAPSHOT
-              </p>
+                  setResetResult(
+                    null
+                  );
 
-              <h2>
-                Partner Record
-              </h2>
+                  setCopyMessage(
+                    ""
+                  );
+                }}
+                placeholder="customer@example.com"
+                autoComplete="off"
+              />
 
-              {partnerApplication ? (
-                <>
-                  <InfoBox
-                    label="Partner Code"
-                    value={
-                      partnerApplication.code
-                    }
-                  />
+              <button
+                className="primary-btn"
+                disabled={
+                  resetting ||
+                  !validEmail(
+                    resetEmail
+                  )
+                }
+              >
+                {resetting
+                  ? "Creating..."
+                  : "Reset Password"}
+              </button>
+            </form>
 
-                  <InfoBox
-                    label="Status"
-                    value={
-                      partnerApplication.status
-                    }
-                  />
+            {resetResult && (
+              <div className="cm-result">
+                <span>
+                  Customer
+                </span>
 
-                  <InfoBox
-                    label="Submitted"
-                    value={
-                      partnerApplication.date
-                    }
-                  />
+                <strong>
+                  {resetResult.email}
+                </strong>
 
+                <span>
+                  Temporary Password
+                </span>
+
+                <code>
+                  {
+                    resetResult.temporaryPassword
+                  }
+                </code>
+
+                <small>
+                  Issued{" "}
+                  {formatDate(
+                    resetResult.issuedAt
+                  )}
+                  . Copy it before clearing.
+                </small>
+
+                <div>
                   <button
-                    type="button"
-                    className="primary-btn customer-full-button"
-                    onClick={() =>
-                      onNavigate(
-                        "partnerHQ"
-                      )
+                    className="primary-btn"
+                    onClick={
+                      copyPassword
                     }
                   >
-                    Open Partner HQ
+                    Copy Password
                   </button>
-                </>
-              ) : (
-                <>
-                  <p className="customer-manager-muted">
-                    No partner
-                    application is
-                    saved in this
-                    browser.
+
+                  <button
+                    className="secondary-btn"
+                    onClick={() => {
+                      setResetResult(
+                        null
+                      );
+
+                      setCopyMessage(
+                        ""
+                      );
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                {copyMessage && (
+                  <p>
+                    {copyMessage}
                   </p>
-
-                  <button
-                    type="button"
-                    className="primary-btn customer-full-button"
-                    onClick={() =>
-                      onNavigate(
-                        "partnerApplication"
-                      )
-                    }
-                  >
-                    Partner
-                    Application
-                  </button>
-                </>
-              )}
-
-              <div className="customer-manager-partner-note">
-                Partner
-                applications are
-                still stored only
-                in the current
-                browser. Order
-                records are now
-                stored in
-                Cloudflare KV.
+                )}
               </div>
-            </aside>
-          </div>
+            )}
 
-          <section className="customer-manager-orders-panel">
-            <div className="customer-manager-section-heading">
+            <div className="cm-warning">
+              Verify the customer through your support
+              process before issuing a reset. Never place a
+              temporary password in public messages or
+              internal order notes.
+            </div>
+          </section>
+
+          <section className="cm-panel">
+            <div className="cm-heading">
               <div>
                 <p className="eyebrow">
-                  PROTECTED ORDER
-                  SEARCH
+                  PROTECTED ORDERS
                 </p>
 
                 <h2>
@@ -1611,153 +1477,78 @@ function CustomerManager({
                 </h2>
               </div>
 
-              <span>
-                Showing{" "}
-                <strong>
-                  {
-                    filteredOrders.length
-                  }
-                </strong>{" "}
-                of{" "}
-                <strong>
-                  {
-                    displayedOrders.length
-                  }
-                </strong>
-              </span>
+              <strong>
+                {filteredOrders.length} shown
+              </strong>
             </div>
 
-            <div className="customer-manager-filters">
-              <label>
-                <span>
-                  Search Orders
-                </span>
+            <div className="cm-filters">
+              <input
+                type="search"
+                value={
+                  search
+                }
+                onChange={(
+                  event
+                ) =>
+                  setSearch(
+                    event.target
+                      .value
+                  )
+                }
+                placeholder="Search order, customer, email, product, or note"
+              />
 
-                <input
-                  type="search"
-                  placeholder="Order number, name, email, product, address, or notes"
-                  value={
-                    searchTerm
-                  }
-                  onChange={(
-                    event
-                  ) =>
-                    setSearchTerm(
-                      event.target
-                        .value
-                    )
-                  }
-                />
-              </label>
+              <select
+                value={
+                  statusFilter
+                }
+                onChange={(
+                  event
+                ) =>
+                  setStatusFilter(
+                    event.target
+                      .value
+                  )
+                }
+              >
+                <option value="all">
+                  All statuses
+                </option>
 
-              <label>
-                <span>
-                  Order Status
-                </span>
-
-                <select
-                  value={
-                    statusFilter
-                  }
-                  onChange={(
-                    event
-                  ) =>
-                    setStatusFilter(
-                      event.target
-                        .value
-                    )
-                  }
-                >
-                  <option value="all">
-                    All Statuses
-                  </option>
-
-                  {orderStatuses.map(
-                    (
-                      status
-                    ) => (
-                      <option
-                        key={
-                          status
-                        }
-                        value={
-                          status
-                        }
-                      >
-                        {
-                          status
-                        }
-                      </option>
-                    )
-                  )}
-                </select>
-              </label>
+                {ORDER_STATUSES.map(
+                  (
+                    status
+                  ) => (
+                    <option
+                      key={
+                        status
+                      }
+                    >
+                      {status}
+                    </option>
+                  )
+                )}
+              </select>
             </div>
 
-            {isLoading ? (
-              <div className="customer-manager-empty">
-                <h3>
-                  Loading Orders
-                </h3>
-
-                <p>
-                  Retrieving
-                  protected order
-                  records from
-                  Cloudflare KV.
-                </p>
+            {loading ? (
+              <div className="cm-empty">
+                Loading protected orders...
               </div>
             ) : filteredOrders.length ===
               0 ? (
-              <div className="customer-manager-empty">
-                <h3>
-                  No Matching
-                  Orders
-                </h3>
-
-                <p>
-                  Submit a new
-                  order request or
-                  change the search
-                  and status
-                  filters.
-                </p>
-
-                <button
-                  type="button"
-                  className="primary-btn"
-                  onClick={() =>
-                    onNavigate(
-                      "products"
-                    )
-                  }
-                >
-                  Go To Products
-                </button>
+              <div className="cm-empty">
+                No matching orders.
               </div>
             ) : (
-              <div className="customer-manager-order-stack">
+              <div className="cm-orders">
                 {filteredOrders.map(
                   (
                     order
                   ) => {
-                    const orderId =
+                    const id =
                       getOrderId(
-                        order
-                      );
-
-                    const items =
-                      getOrderItems(
-                        order
-                      );
-
-                    const subtotal =
-                      getOrderSubtotal(
-                        order
-                      );
-
-                    const totalQuantity =
-                      getOrderQuantity(
                         order
                       );
 
@@ -1766,50 +1557,35 @@ function CustomerManager({
                         order
                       );
 
-                    const isExpanded =
-                      expandedOrderId ===
-                      orderId;
+                    const items =
+                      getItems(
+                        order
+                      );
 
-                    const isEditing =
-                      editingOrderId ===
-                      orderId;
+                    const expanded =
+                      expandedId ===
+                      id;
 
-                    const isUpdating =
-                      updatingOrderId ===
-                      orderId;
+                    const editing =
+                      editingId ===
+                      id;
+
+                    const busy =
+                      busyId ===
+                      id;
 
                     return (
                       <article
                         key={
-                          orderId
+                          id
                         }
-                        className="customer-manager-order-card"
+                        className="cm-order"
                       >
-                        <div className="customer-manager-order-summary">
-                          <div className="customer-manager-order-identity">
-                            <div className="customer-manager-order-heading">
-                              <p>
-                                Order #
-                                {
-                                  orderId
-                                }
-                              </p>
-
-                              <span
-                                className={`customer-manager-status ${String(
-                                  order.status ||
-                                    ""
-                                )
-                                  .toLowerCase()
-                                  .replace(
-                                    /[^a-z0-9]+/g,
-                                    "-"
-                                  )}`}
-                              >
-                                {order.status ||
-                                  "Order Request Received"}
-                              </span>
-                            </div>
+                        <div className="cm-summary">
+                          <div>
+                            <span>
+                              Order #{id}
+                            </span>
 
                             <h3>
                               {getCustomerName(
@@ -1823,128 +1599,73 @@ function CustomerManager({
                             </p>
 
                             <p>
-                              {getCustomerAddress(
-                                order
+                              {formatDate(
+                                order.createdAt ||
+                                  order.date
                               )}
                             </p>
-
-                            <small>
-                              {formatDate(
-                                getOrderDateValue(
-                                  order
-                                )
-                              )}
-                            </small>
                           </div>
 
-                          <div className="customer-manager-order-items-preview">
+                          <div>
                             <span>
-                              Items Ordered
+                              Status
                             </span>
 
-                            {items
-                              .slice(
-                                0,
-                                3
-                              )
-                              .map(
-                                (
-                                  item,
-                                  index
-                                ) => (
-                                  <p
-                                    key={`${item.codeName}-${item.strength}-${index}`}
-                                  >
-                                    {item.name ||
-                                      item.codeName}{" "}
-                                    {item.strength
-                                      ? `· ${item.strength}`
-                                      : ""}{" "}
-                                    ×{" "}
-                                    {
-                                      item.quantity
-                                    }
-                                  </p>
-                                )
-                              )}
+                            <strong>
+                              {order.status ||
+                                ORDER_STATUSES[0]}
+                            </strong>
 
-                            {items.length >
-                              3 && (
-                              <small>
-                                +
-                                {items.length -
-                                  3}{" "}
-                                additional
-                                product
-                                {items.length -
-                                  3 ===
-                                1
-                                  ? ""
-                                  : "s"}
-                              </small>
-                            )}
+                            <span>
+                              Items
+                            </span>
+
+                            <strong>
+                              {getQuantity(
+                                order
+                              )}
+                            </strong>
                           </div>
 
-                          <div className="customer-manager-order-totals">
+                          <div>
                             <span>
-                              Product
                               Subtotal
                             </span>
 
                             <strong>
                               {formatMoney(
-                                subtotal
+                                getSubtotal(
+                                  order
+                                )
                               )}
-                            </strong>
-
-                            <span>
-                              Total Items
-                            </span>
-
-                            <strong>
-                              {
-                                totalQuantity
-                              }
-                            </strong>
-
-                            <span>
-                              Payment
-                            </span>
-
-                            <strong>
-                              {order.preferredPaymentLabel ||
-                                order.paymentMethod ||
-                                "Not selected"}
                             </strong>
                           </div>
                         </div>
 
-                        <div className="customer-manager-order-actions">
+                        <div className="cm-actions">
                           <button
-                            type="button"
                             className="secondary-btn"
                             onClick={() =>
-                              setExpandedOrderId(
-                                isExpanded
+                              setExpandedId(
+                                expanded
                                   ? ""
-                                  : orderId
+                                  : id
                               )
                             }
                           >
-                            {isExpanded
+                            {expanded
                               ? "Hide Details"
                               : "View Details"}
                           </button>
 
                           <button
-                            type="button"
                             className="secondary-btn"
                             disabled={
                               !backendReady ||
-                              isUpdating
+                              busy
                             }
                             onClick={() =>
-                              beginEditing(
+                              beginEdit(
                                 order
                               )
                             }
@@ -1953,11 +1674,26 @@ function CustomerManager({
                           </button>
 
                           <button
-                            type="button"
-                            className="customer-delete-button"
+                            className="cm-reset-btn"
+                            disabled={
+                              !validEmail(
+                                customer.email
+                              )
+                            }
+                            onClick={() =>
+                              chooseResetEmail(
+                                customer.email
+                              )
+                            }
+                          >
+                            Reset Password
+                          </button>
+
+                          <button
+                            className="cm-delete"
                             disabled={
                               !backendReady ||
-                              isUpdating
+                              busy
                             }
                             onClick={() =>
                               deleteOrder(
@@ -1969,256 +1705,149 @@ function CustomerManager({
                           </button>
                         </div>
 
-                        {isExpanded && (
-                          <div className="customer-manager-order-details">
-                            <section>
+                        {expanded && (
+                          <div className="cm-details">
+                            <div>
                               <h4>
                                 Customer
-                                Information
                               </h4>
 
-                              <DetailRow
-                                label="Name"
-                                value={getCustomerName(
+                              <p>
+                                {getCustomerName(
                                   order
                                 )}
-                              />
+                              </p>
 
-                              <DetailRow
-                                label="Email"
-                                value={
-                                  customer.email ||
-                                  "Unavailable"
-                                }
-                              />
+                              <p>
+                                {customer.email ||
+                                  "Unavailable"}
+                              </p>
 
-                              <DetailRow
-                                label="Address"
-                                value={getCustomerAddress(
-                                  order
-                                )}
-                              />
-                            </section>
+                              <p>
+                                {[
+                                  customer.address,
+                                  customer.city,
+                                  customer.state,
+                                  customer.zip,
+                                ]
+                                  .filter(
+                                    Boolean
+                                  )
+                                  .join(
+                                    " "
+                                  ) ||
+                                  "Address unavailable"}
+                              </p>
+                            </div>
 
-                            <section>
+                            <div>
                               <h4>
                                 Products
                               </h4>
 
-                              <div className="customer-manager-product-list">
-                                {items.map(
-                                  (
-                                    item,
-                                    index
-                                  ) => (
-                                    <div
-                                      key={`${item.codeName}-${item.strength}-${index}`}
-                                    >
-                                      <div>
-                                        <strong>
-                                          {item.name ||
-                                            "Research Product"}
-                                        </strong>
+                              {items.map(
+                                (
+                                  item,
+                                  index
+                                ) => (
+                                  <p
+                                    key={`${item.codeName}-${item.strength}-${index}`}
+                                  >
+                                    {item.name ||
+                                      item.codeName ||
+                                      "Product"}{" "}
+                                    {item.strength ||
+                                      ""}{" "}
+                                    ×{" "}
+                                    {item.quantity}
+                                  </p>
+                                )
+                              )}
+                            </div>
 
-                                        <span>
-                                          {item.codeName ||
-                                            "No code"}
-
-                                          {item.strength
-                                            ? ` · ${item.strength}`
-                                            : ""}
-                                        </span>
-                                      </div>
-
-                                      <div>
-                                        <span>
-                                          {
-                                            item.quantity
-                                          }{" "}
-                                          ×{" "}
-                                          {formatMoney(
-                                            item.price
-                                          )}
-                                        </span>
-
-                                        <strong>
-                                          {formatMoney(
-                                            Number(
-                                              item.price ||
-                                                0
-                                            ) *
-                                              Number(
-                                                item.quantity ||
-                                                  0
-                                              )
-                                          )}
-                                        </strong>
-                                      </div>
-                                    </div>
-                                  )
-                                )}
-                              </div>
-                            </section>
-
-                            <section>
+                            <div>
                               <h4>
-                                Internal
-                                Record
+                                Admin Notes
                               </h4>
 
-                              <DetailRow
-                                label="Status"
-                                value={
-                                  order.status ||
-                                  "Order Request Received"
-                                }
-                              />
-
-                              <DetailRow
-                                label="Payment Preference"
-                                value={
-                                  order.preferredPaymentLabel ||
-                                  order.paymentMethod ||
-                                  "Not selected"
-                                }
-                              />
-
-                              <DetailRow
-                                label="Created"
-                                value={formatDate(
-                                  order.createdAt ||
-                                    order.date
-                                )}
-                              />
-
-                              <DetailRow
-                                label="Updated"
-                                value={formatDate(
-                                  order.updatedAt
-                                )}
-                              />
-
-                              <DetailRow
-                                label="Admin Notes"
-                                value={
-                                  order.adminNotes ||
-                                  "No internal notes"
-                                }
-                              />
-                            </section>
+                              <p>
+                                {order.adminNotes ||
+                                  "No notes"}
+                              </p>
+                            </div>
                           </div>
                         )}
 
-                        {isEditing && (
-                          <div className="customer-manager-editor">
+                        {editing && (
+                          <div className="cm-editor">
+                            <select
+                              value={
+                                draftStatus
+                              }
+                              onChange={(
+                                event
+                              ) =>
+                                setDraftStatus(
+                                  event.target
+                                    .value
+                                )
+                              }
+                            >
+                              {ORDER_STATUSES.map(
+                                (
+                                  status
+                                ) => (
+                                  <option
+                                    key={
+                                      status
+                                    }
+                                  >
+                                    {status}
+                                  </option>
+                                )
+                              )}
+                            </select>
+
+                            <textarea
+                              rows="4"
+                              maxLength="2000"
+                              value={
+                                draftNotes
+                              }
+                              onChange={(
+                                event
+                              ) =>
+                                setDraftNotes(
+                                  event.target
+                                    .value
+                                )
+                              }
+                              placeholder="Private admin notes"
+                            />
+
                             <div>
-                              <p className="eyebrow">
-                                UPDATE ORDER
-                              </p>
-
-                              <h4>
-                                Order #
-                                {
-                                  orderId
-                                }
-                              </h4>
-                            </div>
-
-                            <label>
-                              <span>
-                                Status
-                              </span>
-
-                              <select
-                                value={
-                                  draftStatus
-                                }
-                                disabled={
-                                  isUpdating
-                                }
-                                onChange={(
-                                  event
-                                ) =>
-                                  setDraftStatus(
-                                    event.target
-                                      .value
-                                  )
-                                }
-                              >
-                                {orderStatuses.map(
-                                  (
-                                    status
-                                  ) => (
-                                    <option
-                                      key={
-                                        status
-                                      }
-                                      value={
-                                        status
-                                      }
-                                    >
-                                      {
-                                        status
-                                      }
-                                    </option>
-                                  )
-                                )}
-                              </select>
-                            </label>
-
-                            <label>
-                              <span>
-                                Internal
-                                Notes
-                              </span>
-
-                              <textarea
-                                rows="5"
-                                maxLength="2000"
-                                value={
-                                  draftNotes
-                                }
-                                disabled={
-                                  isUpdating
-                                }
-                                placeholder="Add private order notes..."
-                                onChange={(
-                                  event
-                                ) =>
-                                  setDraftNotes(
-                                    event.target
-                                      .value
-                                  )
-                                }
-                              />
-                            </label>
-
-                            <div className="customer-manager-editor-actions">
                               <button
-                                type="button"
                                 className="primary-btn"
                                 disabled={
-                                  isUpdating
+                                  busy
                                 }
                                 onClick={() =>
-                                  saveOrderUpdate(
+                                  saveOrder(
                                     order
                                   )
                                 }
                               >
-                                {isUpdating
+                                {busy
                                   ? "Saving..."
-                                  : "Save Update"}
+                                  : "Save"}
                               </button>
 
                               <button
-                                type="button"
                                 className="secondary-btn"
-                                disabled={
-                                  isUpdating
-                                }
-                                onClick={
-                                  cancelEditing
+                                onClick={() =>
+                                  setEditingId(
+                                    ""
+                                  )
                                 }
                               >
                                 Cancel
@@ -2233,66 +1862,18 @@ function CustomerManager({
               </div>
             )}
           </section>
-
-          <section className="customer-manager-security-note">
-            <p className="eyebrow">
-              ORDER SECURITY
-            </p>
-
-            <h2>
-              Protected Admin
-              Records
-            </h2>
-
-            <p>
-              Cloudflare Access
-              protects the admin
-              routes, and the
-              Worker still
-              requires the
-              administrator
-              bearer secret.
-              Customer order
-              history should not
-              be exposed publicly
-              by email address
-              alone.
-            </p>
-          </section>
         </section>
       </main>
     </>
   );
 }
 
-function StatCard({
-  label,
-  value,
-  detail,
-}) {
-  return (
-    <div className="customer-manager-stat-card">
-      <span>
-        {label}
-      </span>
-
-      <strong>
-        {value}
-      </strong>
-
-      <small>
-        {detail}
-      </small>
-    </div>
-  );
-}
-
-function InfoBox({
+function Stat({
   label,
   value,
 }) {
   return (
-    <div className="customer-manager-info-box">
+    <div className="cm-stat">
       <span>
         {label}
       </span>
@@ -2304,813 +1885,326 @@ function InfoBox({
   );
 }
 
-function DetailRow({
-  label,
-  value,
-}) {
-  return (
-    <div className="customer-manager-detail-row">
-      <span>
-        {label}
-      </span>
-
-      <strong>
-        {value}
-      </strong>
-    </div>
-  );
-}
-
-const customerManagerCss = `
-  .customer-manager-page,
-  .customer-manager-page *,
-  .customer-manager-page *::before,
-  .customer-manager-page *::after {
+const css = `
+  .cm-page,
+  .cm-page * {
     box-sizing: border-box;
   }
 
-  .customer-manager-page {
-    width: 100%;
-    max-width: 100%;
-    padding: 90px 60px;
-    overflow-x: hidden;
+  .cm-page {
+    padding: 80px 30px;
   }
 
-  .customer-manager-inner {
-    width: 100%;
-    max-width: 1250px;
-    margin: 0 auto;
+  .cm-wrap {
+    max-width: 1200px;
+    margin: auto;
   }
 
-  .customer-manager-topbar {
+  .cm-login,
+  .cm-hero,
+  .cm-panel {
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 26px;
+    background: rgba(255,255,255,0.04);
+    box-shadow: 0 25px 70px rgba(0,0,0,0.4);
+  }
+
+  .cm-login {
+    max-width: 650px;
+    margin: auto;
+    padding: 45px;
+    text-align: center;
+  }
+
+  .cm-login h1,
+  .cm-hero h1 {
+    margin: 10px 0 18px;
+    font-size: clamp(38px, 7vw, 58px);
+  }
+
+  .cm-login p,
+  .cm-hero p,
+  .cm-panel > p {
+    color: #b9c1c8;
+    line-height: 1.7;
+  }
+
+  .cm-login form {
+    display: grid;
+    gap: 14px;
+    margin: 25px 0;
+  }
+
+  .cm-login input,
+  .cm-filters input,
+  .cm-filters select,
+  .cm-reset input,
+  .cm-editor select,
+  .cm-editor textarea {
+    width: 100%;
+    padding: 15px;
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 12px;
+    background: #151b22;
+    color: white;
+    font: inherit;
+  }
+
+  .cm-top,
+  .cm-top > div,
+  .cm-heading,
+  .cm-actions,
+  .cm-result > div,
+  .cm-editor > div {
     display: flex;
+    align-items: center;
     justify-content: space-between;
-    align-items: center;
-    gap: 16px;
-    flex-wrap: wrap;
-    margin-bottom: 30px;
-  }
-
-  .customer-manager-topbar > div {
-    display: flex;
-    align-items: center;
     gap: 12px;
     flex-wrap: wrap;
   }
 
-  .customer-source-pill {
-    display: inline-flex;
-    padding: 9px 13px;
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 999px;
-    background: rgba(255,255,255,0.06);
-    color: #c7c7c7;
-    font-size: 11px;
-    font-weight: 900;
-    text-transform: uppercase;
-    letter-spacing: 0.7px;
+  .cm-top {
+    margin-bottom: 24px;
   }
 
-  .customer-source-live {
-    border-color: rgba(61,165,255,0.35);
-    background: rgba(61,165,255,0.14);
+  .cm-pill,
+  .cm-live {
+    padding: 8px 12px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 900;
+  }
+
+  .cm-pill {
+    background: rgba(255,255,255,0.07);
+  }
+
+  .cm-live {
+    background: rgba(61,165,255,0.15);
     color: #9ed8ff;
   }
 
-  .customer-clear-session {
+  .cm-link {
     border: 0;
-    background: transparent;
-    color: #929ca5;
-    font: inherit;
-    font-size: 12px;
-    font-weight: 800;
+    background: none;
+    color: #9aa5ae;
     cursor: pointer;
   }
 
-  .customer-manager-hero,
-  .customer-manager-auth {
-    padding: 60px 56px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 34px;
-    background:
-      radial-gradient(
-        circle at top,
-        rgba(61,165,255,0.22),
-        transparent 42%
-      ),
-      rgba(255,255,255,0.035);
-    box-shadow: 0 30px 90px rgba(0,0,0,0.5);
+  .cm-hero {
+    margin-bottom: 24px;
+    padding: 50px;
     text-align: center;
   }
 
-  .customer-manager-hero {
-    margin-bottom: 30px;
+  .cm-hero button {
+    margin-top: 20px;
   }
 
-  .customer-manager-hero h1,
-  .customer-manager-auth h1 {
-    margin-bottom: 20px;
-    font-size: clamp(45px, 7vw, 62px);
-    line-height: 1.05;
-    background:
-      linear-gradient(
-        180deg,
-        #ffffff,
-        #9d9d9d
-      );
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-  }
-
-  .customer-manager-hero > p:not(.eyebrow),
-  .customer-manager-auth > p:not(.eyebrow) {
-    max-width: 820px;
-    margin: 0 auto;
-    color: #c8c8c8;
-    font-size: 18px;
-    line-height: 1.8;
-  }
-
-  .customer-manager-hero-actions {
-    display: flex;
-    justify-content: center;
-    gap: 14px;
-    flex-wrap: wrap;
-    margin-top: 28px;
-  }
-
-  .customer-manager-auth {
-    max-width: 720px;
-    margin: 0 auto;
-  }
-
-  .customer-manager-auth form {
-    max-width: 480px;
-    display: grid;
-    gap: 16px;
-    margin: 28px auto 16px;
-  }
-
-  .customer-manager-auth label,
-  .customer-manager-filters label,
-  .customer-manager-editor label {
-    display: grid;
-    gap: 8px;
-    text-align: left;
-  }
-
-  .customer-manager-auth label > span,
-  .customer-manager-filters label > span,
-  .customer-manager-editor label > span {
-    color: #c8c8c8;
-    font-size: 11px;
-    font-weight: 900;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-  }
-
-  .customer-manager-auth input,
-  .customer-manager-filters input,
-  .customer-manager-filters select,
-  .customer-manager-editor select,
-  .customer-manager-editor textarea {
-    width: 100%;
-    padding: 16px;
-    border: 1px solid rgba(255,255,255,0.12);
+  .cm-error,
+  .cm-success,
+  .cm-warning {
+    margin: 16px 0;
+    padding: 14px;
     border-radius: 14px;
-    outline: none;
-    background: rgba(255,255,255,0.055);
-    color: #ffffff;
-    font: inherit;
   }
 
-  .customer-manager-auth input:focus,
-  .customer-manager-filters input:focus,
-  .customer-manager-filters select:focus,
-  .customer-manager-editor select:focus,
-  .customer-manager-editor textarea:focus {
-    border-color: rgba(61,165,255,0.62);
-    box-shadow: 0 0 0 3px rgba(61,165,255,0.12);
-  }
-
-  .customer-manager-filters select option,
-  .customer-manager-editor select option {
-    background: #111820;
-    color: #ffffff;
-  }
-
-  .customer-manager-warning {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 22px;
-    flex-wrap: wrap;
-    margin-bottom: 24px;
-    padding: 22px;
-    border: 1px solid rgba(255,190,80,0.35);
-    border-radius: 20px;
-    background: rgba(255,170,50,0.09);
-    color: #ffe0a8;
-  }
-
-  .customer-manager-warning p {
-    margin-top: 6px;
-    line-height: 1.6;
-  }
-
-  .customer-manager-warning small {
-    display: block;
-    margin-top: 6px;
-    color: #c7b78f;
-  }
-
-  .customer-manager-error,
-  .customer-manager-success-message {
-    padding: 15px;
-    border-radius: 14px;
-    font-size: 14px;
-    line-height: 1.6;
-  }
-
-  .customer-manager-error {
-    border: 1px solid rgba(255,95,95,0.42);
-    background: rgba(255,70,70,0.11);
+  .cm-error {
+    background: rgba(255,70,70,0.12);
     color: #ffd1d1;
   }
 
-  .customer-manager-success-message {
-    border: 1px solid rgba(61,165,255,0.34);
+  .cm-success {
     background: rgba(61,165,255,0.12);
     color: #bde7ff;
   }
 
-  .customer-manager-action-message {
-    margin-bottom: 20px;
+  .cm-warning {
+    background: rgba(255,170,50,0.09);
+    color: #e8d3ab;
   }
 
-  .customer-manager-stats {
+  .cm-stats {
     display: grid;
-    grid-template-columns:
-      repeat(4, minmax(0, 1fr));
-    gap: 18px;
-    margin-bottom: 30px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin-bottom: 24px;
   }
 
-  .customer-manager-stat-card {
-    min-width: 0;
+  .cm-stat {
     display: grid;
     gap: 8px;
-    padding: 22px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 22px;
-    background: rgba(255,255,255,0.035);
-    box-shadow: 0 22px 60px rgba(0,0,0,0.32);
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 18px;
+    background: rgba(255,255,255,0.04);
   }
 
-  .customer-manager-stat-card span,
-  .customer-manager-info-box span,
-  .customer-manager-address-box span,
-  .customer-manager-latest-order span,
-  .customer-manager-order-items-preview > span,
-  .customer-manager-order-totals > span,
-  .customer-manager-detail-row span {
+  .cm-stat span,
+  .cm-summary span,
+  .cm-result span {
     color: #9ed8ff;
     font-size: 11px;
     font-weight: 900;
     text-transform: uppercase;
-    letter-spacing: 0.7px;
   }
 
-  .customer-manager-stat-card strong {
-    color: #ffffff;
-    font-size: 29px;
-    overflow-wrap: anywhere;
+  .cm-stat strong {
+    font-size: 26px;
   }
 
-  .customer-manager-stat-card small {
-    color: #89949e;
-    line-height: 1.5;
-  }
-
-  .customer-manager-overview {
-    display: grid;
-    grid-template-columns:
-      minmax(0, 1fr) minmax(300px, 360px);
-    gap: 30px;
-    align-items: start;
-    margin-bottom: 30px;
-  }
-
-  .customer-manager-panel,
-  .customer-manager-partner,
-  .customer-manager-orders-panel {
-    min-width: 0;
-    padding: 38px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 30px;
-    background:
-      radial-gradient(
-        circle at top left,
-        rgba(61,165,255,0.14),
-        transparent 35%
-      ),
-      rgba(255,255,255,0.035);
-    box-shadow: 0 30px 80px rgba(0,0,0,0.45);
-  }
-
-  .customer-manager-partner {
-    position: sticky;
-    top: 110px;
+  .cm-panel {
+    margin-bottom: 24px;
     padding: 30px;
   }
 
-  .customer-manager-panel h2,
-  .customer-manager-partner h2,
-  .customer-manager-orders-panel h2,
-  .customer-manager-security-note h2 {
-    margin-bottom: 24px;
-    font-size: clamp(29px, 4vw, 38px);
-    line-height: 1.12;
-    background:
-      linear-gradient(
-        180deg,
-        #ffffff,
-        #9d9d9d
-      );
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+  .cm-panel h2 {
+    margin: 6px 0 16px;
+    font-size: 34px;
   }
 
-  .customer-manager-info-grid {
+  .cm-reset form,
+  .cm-filters {
     display: grid;
-    grid-template-columns:
-      repeat(2, minmax(0, 1fr));
-    gap: 14px;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    margin: 20px 0;
   }
 
-  .customer-manager-info-box,
-  .customer-manager-address-box {
-    min-width: 0;
+  .cm-result {
     display: grid;
-    gap: 7px;
-    padding: 16px;
-    border: 1px solid rgba(61,165,255,0.22);
+    gap: 10px;
+    padding: 18px;
+    border: 1px solid rgba(61,165,255,0.3);
     border-radius: 16px;
     background: rgba(61,165,255,0.1);
-    color: #c8eaff;
-    overflow-wrap: anywhere;
   }
 
-  .customer-manager-address-box {
-    grid-column: 1 / -1;
-  }
-
-  .customer-manager-latest-order,
-  .customer-manager-partner-note {
-    display: grid;
-    gap: 7px;
-    margin-top: 20px;
-    padding: 16px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 16px;
-    background: rgba(255,255,255,0.04);
-    color: #c8c8c8;
-  }
-
-  .customer-manager-latest-order strong {
-    color: #ffffff;
-    font-size: 20px;
-  }
-
-  .customer-manager-latest-order small {
-    color: #8f9ba6;
-  }
-
-  .customer-manager-muted {
-    color: #c8c8c8;
-    line-height: 1.7;
-  }
-
-  .customer-manager-partner-note {
-    color: #9ca8b3;
-    font-size: 13px;
-    line-height: 1.6;
-  }
-
-  .customer-full-button {
-    width: 100%;
-    margin-top: 18px;
-  }
-
-  .customer-manager-orders-panel {
-    margin-bottom: 30px;
-  }
-
-  .customer-manager-section-heading {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    gap: 20px;
-    flex-wrap: wrap;
-    margin-bottom: 24px;
-  }
-
-  .customer-manager-section-heading > span {
-    color: #a9b3bc;
-  }
-
-  .customer-manager-filters {
-    display: grid;
-    grid-template-columns:
-      minmax(0, 1fr) minmax(200px, 280px);
-    gap: 16px;
-    margin-bottom: 24px;
-  }
-
-  .customer-manager-empty {
-    padding: 34px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 22px;
-    background: rgba(255,255,255,0.04);
-    color: #c8c8c8;
-    line-height: 1.8;
-    text-align: center;
-  }
-
-  .customer-manager-empty h3 {
-    margin-bottom: 8px;
-    color: #ffffff;
-    font-size: 24px;
-  }
-
-  .customer-manager-empty button {
-    margin-top: 20px;
-  }
-
-  .customer-manager-order-stack {
-    display: grid;
-    gap: 18px;
-  }
-
-  .customer-manager-order-card {
-    min-width: 0;
-    padding: 22px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 24px;
-    background: rgba(255,255,255,0.04);
-  }
-
-  .customer-manager-order-summary {
-    display: grid;
-    grid-template-columns:
-      minmax(0, 1fr) minmax(210px, 280px) minmax(160px, 190px);
-    gap: 20px;
-    align-items: center;
-  }
-
-  .customer-manager-order-identity {
-    min-width: 0;
-  }
-
-  .customer-manager-order-heading {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-bottom: 8px;
-  }
-
-  .customer-manager-order-heading > p {
-    color: #9ed8ff;
-    font-size: 13px;
-    font-weight: 900;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-  }
-
-  .customer-manager-order-identity h3 {
-    margin-bottom: 8px;
-    color: #ffffff;
-    font-size: 25px;
-    overflow-wrap: anywhere;
-  }
-
-  .customer-manager-order-identity > p {
-    color: #aaaaaa;
-    line-height: 1.55;
-    overflow-wrap: anywhere;
-  }
-
-  .customer-manager-order-identity > small {
-    display: block;
-    margin-top: 7px;
-    color: #798691;
-  }
-
-  .customer-manager-status {
-    display: inline-flex;
-    width: fit-content;
-    padding: 6px 9px;
-    border-radius: 999px;
-    background: rgba(255,255,255,0.07);
-    color: #c7c7c7;
-    font-size: 10px;
-    font-weight: 900;
-    text-transform: uppercase;
-  }
-
-  .customer-manager-status.paid,
-  .customer-manager-status.completed,
-  .customer-manager-status.shipped {
-    background: rgba(61,165,255,0.16);
-    color: #9ed8ff;
-  }
-
-  .customer-manager-status.cancelled {
-    background: rgba(255,75,75,0.12);
-    color: #ffc4c4;
-  }
-
-  .customer-manager-order-items-preview,
-  .customer-manager-order-totals {
-    min-width: 0;
-    display: grid;
-    gap: 8px;
-    padding: 16px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 16px;
-    background: rgba(0,0,0,0.17);
-  }
-
-  .customer-manager-order-items-preview p,
-  .customer-manager-order-items-preview small {
-    color: #aaaaaa;
-    font-size: 13px;
-    line-height: 1.5;
-    overflow-wrap: anywhere;
-  }
-
-  .customer-manager-order-totals {
-    background: rgba(61,165,255,0.1);
-    text-align: center;
-  }
-
-  .customer-manager-order-totals strong {
-    color: #ffffff;
-    overflow-wrap: anywhere;
-  }
-
-  .customer-manager-order-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-top: 18px;
-  }
-
-  .customer-delete-button {
-    padding: 12px 17px;
-    border: 1px solid rgba(255,95,95,0.32);
-    border-radius: 999px;
-    background: rgba(255,60,60,0.08);
-    color: #ffc4c4;
-    font: inherit;
-    font-weight: 900;
-    cursor: pointer;
-  }
-
-  .customer-delete-button:disabled,
-  .customer-manager-order-actions button:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .customer-manager-order-details {
-    display: grid;
-    grid-template-columns:
-      repeat(3, minmax(0, 1fr));
-    gap: 16px;
-    margin-top: 20px;
-    padding-top: 20px;
-    border-top: 1px solid rgba(255,255,255,0.08);
-  }
-
-  .customer-manager-order-details > section {
-    min-width: 0;
-    padding: 17px;
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 17px;
-    background: rgba(0,0,0,0.16);
-  }
-
-  .customer-manager-order-details h4,
-  .customer-manager-editor h4 {
-    margin-bottom: 14px;
-    color: #ffffff;
-    font-size: 20px;
-  }
-
-  .customer-manager-detail-row {
-    display: grid;
-    gap: 5px;
-    padding: 10px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-    overflow-wrap: anywhere;
-  }
-
-  .customer-manager-detail-row:last-child {
-    border-bottom: 0;
-  }
-
-  .customer-manager-detail-row strong {
-    color: #d4d4d4;
-    font-size: 13px;
-    line-height: 1.5;
-  }
-
-  .customer-manager-product-list {
-    display: grid;
-    gap: 10px;
-  }
-
-  .customer-manager-product-list > div {
-    display: flex;
-    justify-content: space-between;
-    gap: 14px;
+  .cm-result code {
     padding: 12px;
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 13px;
+    border-radius: 10px;
+    background: #0e1318;
+    font-size: 18px;
+    font-weight: 900;
+    overflow-wrap: anywhere;
+    user-select: all;
+  }
+
+  .cm-orders {
+    display: grid;
+    gap: 15px;
+  }
+
+  .cm-order {
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 18px;
     background: rgba(255,255,255,0.035);
   }
 
-  .customer-manager-product-list > div > div {
-    min-width: 0;
+  .cm-summary {
     display: grid;
-    gap: 4px;
-  }
-
-  .customer-manager-product-list strong {
-    color: #ffffff;
-    overflow-wrap: anywhere;
-  }
-
-  .customer-manager-product-list span {
-    color: #989fa6;
-    font-size: 12px;
-    overflow-wrap: anywhere;
-  }
-
-  .customer-manager-editor {
-    display: grid;
+    grid-template-columns: 1.4fr 1fr 0.7fr;
     gap: 18px;
-    margin-top: 20px;
-    padding: 20px;
-    border: 1px solid rgba(61,165,255,0.26);
-    border-radius: 20px;
-    background: rgba(61,165,255,0.07);
   }
 
-  .customer-manager-editor textarea {
-    resize: vertical;
-    min-height: 120px;
+  .cm-summary > div {
+    display: grid;
+    gap: 5px;
   }
 
-  .customer-manager-editor-actions {
-    display: flex;
+  .cm-summary h3 {
+    font-size: 22px;
+  }
+
+  .cm-summary p,
+  .cm-details p {
+    color: #aab3ba;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .cm-actions {
+    justify-content: flex-start;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .cm-reset-btn,
+  .cm-delete {
+    padding: 12px 15px;
+    border-radius: 11px;
+    font: inherit;
+    font-weight: 900;
+  }
+
+  .cm-reset-btn {
+    border: 1px solid rgba(255,190,80,0.35);
+    background: rgba(255,170,50,0.1);
+    color: #ffe0a8;
+  }
+
+  .cm-delete {
+    border: 1px solid rgba(255,95,95,0.35);
+    background: rgba(255,70,70,0.1);
+    color: #ffc7c7;
+  }
+
+  .cm-details {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin-top: 16px;
+  }
+
+  .cm-details > div,
+  .cm-editor {
+    padding: 15px;
+    border-radius: 14px;
+    background: rgba(0,0,0,0.18);
+  }
+
+  .cm-details h4 {
+    margin-bottom: 8px;
+  }
+
+  .cm-editor {
+    display: grid;
     gap: 12px;
-    flex-wrap: wrap;
+    margin-top: 16px;
   }
 
-  .customer-manager-security-note {
-    padding: 40px;
-    border: 1px solid rgba(61,165,255,0.27);
-    border-radius: 28px;
-    background: rgba(61,165,255,0.1);
+  .cm-empty {
+    padding: 30px;
+    color: #aab3ba;
     text-align: center;
   }
 
-  .customer-manager-security-note p:not(.eyebrow) {
-    max-width: 850px;
-    margin: 0 auto;
-    color: #c8eaff;
-    line-height: 1.8;
-  }
-
-  @media (max-width: 1050px) {
-    .customer-manager-page {
-      padding: 65px 24px;
+  @media (max-width: 800px) {
+    .cm-page {
+      padding: 50px 14px;
     }
 
-    .customer-manager-stats {
-      grid-template-columns:
-        repeat(2, minmax(0, 1fr));
+    .cm-stats,
+    .cm-summary,
+    .cm-details {
+      grid-template-columns: 1fr;
     }
 
-    .customer-manager-overview {
-      grid-template-columns:
-        minmax(0, 1fr);
+    .cm-reset form,
+    .cm-filters {
+      grid-template-columns: 1fr;
     }
 
-    .customer-manager-partner {
-      position: static;
-    }
-
-    .customer-manager-order-summary {
-      grid-template-columns:
-        minmax(0, 1fr) minmax(220px, 280px);
-    }
-
-    .customer-manager-order-totals {
-      grid-column: 1 / -1;
-      grid-template-columns:
-        repeat(6, minmax(0, 1fr));
-      align-items: center;
-    }
-
-    .customer-manager-order-details {
-      grid-template-columns:
-        minmax(0, 1fr);
-    }
-  }
-
-  @media (max-width: 720px) {
-    .customer-manager-page {
-      padding: 44px 12px;
-    }
-
-    .customer-manager-hero,
-    .customer-manager-auth,
-    .customer-manager-panel,
-    .customer-manager-partner,
-    .customer-manager-orders-panel,
-    .customer-manager-security-note {
+    .cm-hero,
+    .cm-panel,
+    .cm-login {
       padding: 20px;
-      border-radius: 22px;
     }
 
-    .customer-manager-topbar,
-    .customer-manager-topbar > div,
-    .customer-manager-topbar button,
-    .customer-manager-hero-actions,
-    .customer-manager-hero-actions button {
-      width: 100%;
-    }
-
-    .customer-manager-info-grid,
-    .customer-manager-filters,
-    .customer-manager-order-summary {
-      grid-template-columns:
-        minmax(0, 1fr);
-    }
-
-    .customer-manager-address-box {
-      grid-column: auto;
-    }
-
-    .customer-manager-order-totals {
-      grid-column: auto;
-      grid-template-columns:
-        repeat(2, minmax(0, 1fr));
-      text-align: left;
-    }
-
-    .customer-manager-order-actions,
-    .customer-manager-order-actions button {
-      width: 100%;
-    }
-
-    .customer-manager-product-list > div {
-      flex-direction: column;
-    }
-  }
-
-  @media (max-width: 480px) {
-    .customer-manager-page {
-      padding: 34px 8px;
-    }
-
-    .customer-manager-hero,
-    .customer-manager-auth,
-    .customer-manager-panel,
-    .customer-manager-partner,
-    .customer-manager-orders-panel,
-    .customer-manager-security-note,
-    .customer-manager-order-card {
-      padding: 15px;
-    }
-
-    .customer-manager-stats {
-      grid-template-columns:
-        minmax(0, 1fr);
-    }
-
-    .customer-manager-order-totals {
-      grid-template-columns:
-        minmax(0, 1fr);
-    }
-
-    .customer-manager-editor-actions,
-    .customer-manager-editor-actions button {
+    .cm-actions button,
+    .cm-reset form button {
       width: 100%;
     }
   }

@@ -6,7 +6,7 @@ import {
 const storageKey =
   "304-site-settings";
 
-const customerAccountKey =
+const customerAccountSessionKey =
   "304-customer-account";
 
 const defaultSettings = {
@@ -21,9 +21,7 @@ function loadSettings() {
         storageKey
       );
 
-    if (
-      !savedSettings
-    ) {
+    if (!savedSettings) {
       return defaultSettings;
     }
 
@@ -38,23 +36,22 @@ function loadSettings() {
   }
 }
 
-function saveCustomerAccount(
+function saveAccountSummary(
   account
 ) {
   try {
     window.sessionStorage.setItem(
-      customerAccountKey,
+      customerAccountSessionKey,
       JSON.stringify(
         account
       )
     );
   } catch {
-    // The secure login cookie
-    // remains the source of truth.
+    // The secure cookie remains the authentication source.
   }
 }
 
-async function readJsonResponse(
+async function readApiResponse(
   response
 ) {
   const text =
@@ -79,11 +76,21 @@ async function readJsonResponse(
   ) {
     throw new Error(
       result.error ||
-        "The login request could not be completed."
+        "The account could not be accessed."
     );
   }
 
   return result;
+}
+
+function normalizeEmail(
+  value
+) {
+  return String(
+    value || ""
+  )
+    .trim()
+    .toLowerCase();
 }
 
 function Login({
@@ -93,39 +100,46 @@ function Login({
   const [
     settings,
     setSettings,
-  ] = useState(
-    loadSettings
-  );
+  ] =
+    useState(
+      loadSettings
+    );
 
   const [
-    email,
-    setEmail,
-  ] = useState("");
+    formData,
+    setFormData,
+  ] =
+    useState({
+      email:
+        "",
 
-  const [
-    password,
-    setPassword,
-  ] = useState("");
+      password:
+        "",
+    });
 
   const [
     showPassword,
     setShowPassword,
-  ] = useState(false);
+  ] =
+    useState(
+      false
+    );
 
   const [
     isSubmitting,
     setIsSubmitting,
-  ] = useState(false);
+  ] =
+    useState(
+      false
+    );
 
   const [
-    isCheckingSession,
-    setIsCheckingSession,
-  ] = useState(true);
-
-  const [
-    errorMessage,
-    setErrorMessage,
-  ] = useState("");
+    loginError,
+    setLoginError,
+  ] =
+    useState(
+      ""
+    );
 
   useEffect(() => {
     function updateSettings(
@@ -187,120 +201,77 @@ function Login({
     };
   }, []);
 
-  useEffect(() => {
-    let isMounted =
-      true;
+  function handleChange(
+    event
+  ) {
+    const {
+      name,
+      value,
+    } =
+      event.target;
 
-    async function checkSession() {
-      try {
-        const response =
-          await fetch(
-            "/api/auth/session",
-            {
-              method:
-                "GET",
+    setLoginError(
+      ""
+    );
 
-              headers: {
-                Accept:
-                  "application/json",
-              },
+    setFormData(
+      (
+        currentData
+      ) => ({
+        ...currentData,
 
-              credentials:
-                "same-origin",
-
-              cache:
-                "no-store",
-            }
-          );
-
-        const result =
-          await readJsonResponse(
-            response
-          );
-
-        if (
-          !isMounted
-        ) {
-          return;
-        }
-
-        if (
-          result.authenticated &&
-          result.account
-        ) {
-          saveCustomerAccount(
-            result.account
-          );
-
-          onLogin(
-            result.account
-          );
-
-          onNavigate(
-            "dashboard"
-          );
-        }
-      } catch {
-        // A missing or expired session
-        // is normal on the login page.
-      } finally {
-        if (
-          isMounted
-        ) {
-          setIsCheckingSession(
-            false
-          );
-        }
-      }
-    }
-
-    checkSession();
-
-    return () => {
-      isMounted =
-        false;
-    };
-  }, [
-    onLogin,
-    onNavigate,
-  ]);
+        [name]:
+          name ===
+          "email"
+            ? value.slice(
+                0,
+                254
+              )
+            : value.slice(
+                0,
+                128
+              ),
+      })
+    );
+  }
 
   async function handleLogin(
     event
   ) {
     event.preventDefault();
 
-    const cleanedEmail =
-      email
-        .trim()
-        .toLowerCase();
-
     if (
-      !cleanedEmail
+      isSubmitting
     ) {
-      setErrorMessage(
-        "Enter your email address."
-      );
-
       return;
     }
 
+    const email =
+      normalizeEmail(
+        formData.email
+      );
+
+    const password =
+      String(
+        formData.password ||
+        ""
+      );
+
     if (
+      !email ||
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-        cleanedEmail
+        email
       )
     ) {
-      setErrorMessage(
+      setLoginError(
         "Enter a valid email address."
       );
 
       return;
     }
 
-    if (
-      !password
-    ) {
-      setErrorMessage(
+    if (!password) {
+      setLoginError(
         "Enter your password."
       );
 
@@ -311,7 +282,7 @@ function Login({
       true
     );
 
-    setErrorMessage(
+    setLoginError(
       ""
     );
 
@@ -334,18 +305,19 @@ function Login({
             credentials:
               "same-origin",
 
+            cache:
+              "no-store",
+
             body:
               JSON.stringify({
-                email:
-                  cleanedEmail,
-
+                email,
                 password,
               }),
           }
         );
 
       const result =
-        await readJsonResponse(
+        await readApiResponse(
           response
         );
 
@@ -354,31 +326,45 @@ function Login({
         !result.account
       ) {
         throw new Error(
-          "The login session could not be created."
+          "The account could not be authenticated."
         );
       }
 
-      saveCustomerAccount(
-        result.account
-      );
+      const account = {
+        ...result.account,
 
-      setPassword(
-        ""
+        mustChangePassword:
+          Boolean(
+            result
+              .requiresPasswordChange ||
+              result.account
+                .mustChangePassword
+          ),
+      };
+
+      saveAccountSummary(
+        account
       );
 
       onLogin(
-        result.account
+        account
       );
 
       onNavigate(
-        "dashboard"
+        account.mustChangePassword
+          ? "changePassword"
+          : "dashboard",
+        {
+          replace:
+            true,
+        }
       );
     } catch (
       error
     ) {
-      setErrorMessage(
-        error.message ||
-          "The login request could not be completed."
+      setLoginError(
+        error?.message ||
+          "The account could not be accessed."
       );
     } finally {
       setIsSubmitting(
@@ -387,12 +373,21 @@ function Login({
     }
   }
 
+  const canSubmit =
+    Boolean(
+      normalizeEmail(
+        formData.email
+      )
+    ) &&
+    Boolean(
+      formData.password
+    ) &&
+    !isSubmitting;
+
   return (
     <>
       <style>
-        {
-          loginCss
-        }
+        {loginCss}
       </style>
 
       <main className="login-page">
@@ -407,21 +402,14 @@ function Login({
             </h1>
 
             <p>
-              Access available
-              pricing, cart and
-              checkout tools,
-              secure order
-              history, the
-              Research Hub, and
-              eligible Partner
-              Program features.
+              Access available pricing, cart features,
+              checkout, order history, the Research Hub,
+              and eligible Partner Program tools.
             </p>
 
             <div className="login-research-notice">
-              For Research Use
-              Only. Not intended
-              for human
-              consumption.
+              For Research Use Only. Not intended for
+              human consumption.
             </div>
           </header>
 
@@ -431,22 +419,15 @@ function Login({
               onSubmit={
                 handleLogin
               }
+              noValidate
             >
               <p className="eyebrow">
-                CUSTOMER LOGIN
+                SECURE LOGIN
               </p>
 
               <h2>
                 Research Account
               </h2>
-
-              {isCheckingSession && (
-                <div className="login-session-check">
-                  Checking for an
-                  existing secure
-                  session...
-                </div>
-              )}
 
               <label className="login-field">
                 <span>
@@ -454,30 +435,20 @@ function Login({
                 </span>
 
                 <input
+                  name="email"
                   type="email"
                   value={
-                    email
+                    formData.email
                   }
                   placeholder="Email Address"
                   autoComplete="email"
                   inputMode="email"
-                  maxLength="254"
                   disabled={
-                    isSubmitting ||
-                    isCheckingSession
+                    isSubmitting
                   }
-                  onChange={(
-                    event
-                  ) => {
-                    setEmail(
-                      event.target
-                        .value
-                    );
-
-                    setErrorMessage(
-                      ""
-                    );
-                  }}
+                  onChange={
+                    handleChange
+                  }
                 />
               </label>
 
@@ -486,101 +457,90 @@ function Login({
                   Password
                 </span>
 
-                <div className="login-password-field">
-                  <input
-                    type={
-                      showPassword
-                        ? "text"
-                        : "password"
-                    }
-                    value={
-                      password
-                    }
-                    placeholder="Password"
-                    autoComplete="current-password"
-                    maxLength="128"
-                    disabled={
-                      isSubmitting ||
-                      isCheckingSession
-                    }
-                    onChange={(
-                      event
-                    ) => {
-                      setPassword(
-                        event.target
-                          .value
-                      );
-
-                      setErrorMessage(
-                        ""
-                      );
-                    }}
-                  />
-
-                  <button
-                    type="button"
-                    disabled={
-                      isSubmitting
-                    }
-                    onClick={() =>
-                      setShowPassword(
-                        (
-                          current
-                        ) =>
-                          !current
-                      )
-                    }
-                  >
-                    {showPassword
-                      ? "Hide"
-                      : "Show"}
-                  </button>
-                </div>
+                <input
+                  name="password"
+                  type={
+                    showPassword
+                      ? "text"
+                      : "password"
+                  }
+                  value={
+                    formData.password
+                  }
+                  placeholder="Password"
+                  autoComplete="current-password"
+                  maxLength="128"
+                  disabled={
+                    isSubmitting
+                  }
+                  onChange={
+                    handleChange
+                  }
+                />
               </label>
 
-              {errorMessage && (
+              <label className="login-show-password">
+                <input
+                  type="checkbox"
+                  checked={
+                    showPassword
+                  }
+                  disabled={
+                    isSubmitting
+                  }
+                  onChange={(
+                    event
+                  ) =>
+                    setShowPassword(
+                      event.target
+                        .checked
+                    )
+                  }
+                />
+
+                <span>
+                  Show password
+                </span>
+              </label>
+
+              <div className="login-secure-notice">
+                <strong>
+                  Secure Account Login
+                </strong>
+
+                <p>
+                  Authentication uses a protected,
+                  HTTP-only session cookie. Your password
+                  is not stored in this browser.
+                </p>
+              </div>
+
+              {loginError && (
                 <div
                   className="login-error"
                   role="alert"
+                  aria-live="assertive"
                 >
-                  {
-                    errorMessage
-                  }
+                  {loginError}
                 </div>
               )}
-
-              <div className="login-security-note">
-                Your password is
-                verified securely
-                by the account
-                service. Login
-                sessions use a
-                protected,
-                HTTP-only cookie
-                that is not
-                accessible to
-                browser scripts.
-              </div>
 
               <button
                 type="submit"
                 className="primary-btn login-full-button"
                 disabled={
-                  isSubmitting ||
-                  isCheckingSession
+                  !canSubmit
                 }
               >
                 {isSubmitting
                   ? "Logging In..."
-                  : isCheckingSession
-                  ? "Checking Session..."
                   : "Login"}
               </button>
 
               {settings.accountCreationEnabled ? (
                 <button
                   type="button"
-                  className="secondary-btn login-full-button"
+                  className="secondary-btn login-full-button login-secondary-button"
                   disabled={
                     isSubmitting
                   }
@@ -594,31 +554,38 @@ function Login({
                 </button>
               ) : (
                 <div className="login-registration-disabled">
-                  New account
-                  registration is
-                  currently
-                  disabled.
-                  Existing
-                  research
-                  customers may
-                  continue to log
-                  in.
+                  New account registration is currently
+                  disabled. Existing research customers may
+                  continue to log in.
                 </div>
               )}
 
-              <button
-                type="button"
-                className="login-help-link"
-                onClick={() =>
-                  onNavigate(
-                    "contact"
-                  )
-                }
-              >
-                Trouble accessing
-                your account?
-                Contact support.
-              </button>
+              <div className="login-recovery">
+                <strong>
+                  Forgotten Password?
+                </strong>
+
+                <p>
+                  Automated email recovery is not enabled.
+                  Contact support so an administrator can
+                  issue a temporary password.
+                </p>
+
+                <button
+                  type="button"
+                  className="login-text-button"
+                  disabled={
+                    isSubmitting
+                  }
+                  onClick={() =>
+                    onNavigate(
+                      "contact"
+                    )
+                  }
+                >
+                  Contact Support
+                </button>
+              </div>
             </form>
 
             <aside className="login-side-panel">
@@ -627,45 +594,39 @@ function Login({
               </p>
 
               <h2>
-                What Login
-                Unlocks
+                What Login Unlocks
               </h2>
 
               <div className="login-benefit-stack">
                 <BenefitBox
                   title="Product Pricing"
-                  description="View available account-only product pricing."
+                  description="View available account-only pricing after login."
                 />
 
                 <BenefitBox
                   title="Cart And Checkout"
-                  description="Add available research products to your cart and submit order requests."
+                  description="Add available research products to the cart and submit order requests."
                 />
 
                 <BenefitBox
-                  title="Secure Research Hub"
-                  description="Review account-linked order history across approved devices."
+                  title="Research Hub"
+                  description="Review secure account-linked order history and status updates."
                 />
 
                 <BenefitBox
-                  title="Partner Program"
-                  description="Access eligible research partner features after meeting program requirements."
+                  title="Account Security"
+                  description="Change your password and invalidate older customer sessions."
                 />
               </div>
 
               <div className="login-agreement-box">
                 <strong>
-                  Research-Use
-                  Reminder
+                  Research-Use Reminder
                 </strong>
 
                 <p>
-                  Products are for
-                  research use
-                  only and are not
-                  intended for
-                  human
-                  consumption.
+                  Products are for research use only and are
+                  not intended for human consumption.
                 </p>
 
                 <button
@@ -677,9 +638,21 @@ function Login({
                     )
                   }
                 >
-                  View Research
-                  Agreement
+                  View Research Agreement
                 </button>
+              </div>
+
+              <div className="login-temporary-password-note">
+                <strong>
+                  Using A Temporary Password?
+                </strong>
+
+                <p>
+                  After login, you will be sent directly to
+                  Change Password. Account orders and
+                  checkout stay locked until a permanent
+                  password is created.
+                </p>
               </div>
             </aside>
           </div>
@@ -716,7 +689,6 @@ const loginCss = `
 
   .login-page {
     width: 100%;
-    max-width: 100%;
     padding: 90px 60px;
     overflow-x: hidden;
   }
@@ -739,7 +711,8 @@ const loginCss = `
         transparent 42%
       ),
       rgba(255,255,255,0.035);
-    box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+    box-shadow:
+      0 30px 80px rgba(0,0,0,0.45);
     text-align: center;
   }
 
@@ -801,7 +774,8 @@ const loginCss = `
         transparent 35%
       ),
       rgba(255,255,255,0.035);
-    box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+    box-shadow:
+      0 30px 80px rgba(0,0,0,0.45);
   }
 
   .login-side-panel {
@@ -848,78 +822,89 @@ const loginCss = `
     background: rgba(255,255,255,0.055);
     color: #ffffff;
     font: inherit;
-    font-size: 15px;
   }
 
   .login-field input:focus {
-    border-color: rgba(61,165,255,0.62);
-    box-shadow: 0 0 0 3px rgba(61,165,255,0.12);
+    border-color: rgba(61,165,255,0.65);
+    box-shadow:
+      0 0 0 3px rgba(61,165,255,0.12);
   }
 
   .login-field input:disabled {
-    opacity: 0.65;
+    opacity: 0.55;
     cursor: not-allowed;
   }
 
-  .login-password-field {
-    position: relative;
-  }
-
-  .login-password-field input {
-    padding-right: 78px;
-  }
-
-  .login-password-field button {
-    position: absolute;
-    top: 50%;
-    right: 13px;
-    padding: 7px 9px;
-    border: 0;
-    border-radius: 8px;
-    background: rgba(61,165,255,0.11);
-    color: #9ed8ff;
-    font: inherit;
-    font-size: 11px;
-    font-weight: 900;
+  .login-show-password {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 4px 0 18px;
+    color: #bfc7cd;
     cursor: pointer;
-    transform: translateY(-50%);
   }
 
-  .login-password-field button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+  .login-show-password input {
+    width: 18px;
+    height: 18px;
+    accent-color: #3da5ff;
   }
 
-  .login-session-check,
-  .login-security-note,
+  .login-secure-notice,
+  .login-recovery,
+  .login-agreement-box,
+  .login-temporary-password-note {
+    padding: 16px;
+    border-radius: 16px;
+    line-height: 1.65;
+  }
+
+  .login-secure-notice {
+    border: 1px solid rgba(61,165,255,0.28);
+    background: rgba(61,165,255,0.12);
+    color: #9ed8ff;
+  }
+
+  .login-secure-notice strong,
+  .login-agreement-box strong,
+  .login-temporary-password-note strong,
+  .login-recovery strong {
+    color: #ffffff;
+  }
+
+  .login-secure-notice p,
+  .login-agreement-box p,
+  .login-temporary-password-note p,
+  .login-recovery p {
+    margin-top: 6px;
+  }
+
+  .login-secure-notice p {
+    color: #add9f2;
+  }
+
   .login-error {
-    margin-bottom: 16px;
+    margin-top: 16px;
     padding: 15px;
-    border-radius: 15px;
-    font-size: 13px;
+    border: 1px solid rgba(255,95,95,0.42);
+    border-radius: 14px;
+    background: rgba(255,70,70,0.11);
+    color: #ffd1d1;
+    font-size: 14px;
     line-height: 1.6;
-  }
-
-  .login-session-check,
-  .login-security-note {
-    border: 1px solid rgba(61,165,255,0.26);
-    background: rgba(61,165,255,0.1);
-    color: #a9dfff;
-  }
-
-  .login-error {
-    border: 1px solid rgba(255,95,95,0.4);
-    background: rgba(255,70,70,0.1);
-    color: #ffd0d0;
   }
 
   .login-full-button {
     width: 100%;
+    margin-top: 20px;
+  }
+
+  .login-secondary-button {
     margin-top: 14px;
   }
 
-  .login-form-panel button:disabled {
-    opacity: 0.58;
+  .login-full-button:disabled {
+    opacity: 0.5;
     cursor: not-allowed;
   }
 
@@ -935,16 +920,22 @@ const loginCss = `
     text-align: center;
   }
 
-  .login-help-link {
-    width: 100%;
+  .login-recovery {
     margin-top: 18px;
+    border: 1px solid rgba(255,255,255,0.09);
+    background: rgba(0,0,0,0.18);
+    color: #aeb8c1;
+    font-size: 13px;
+  }
+
+  .login-text-button {
+    margin-top: 10px;
+    padding: 0;
     border: 0;
     background: transparent;
     color: #9ed8ff;
     font: inherit;
-    font-size: 13px;
-    font-weight: 800;
-    text-align: center;
+    font-weight: 900;
     cursor: pointer;
   }
 
@@ -969,23 +960,22 @@ const loginCss = `
   }
 
   .login-benefit-box span {
-    color: #a9b1b8;
+    color: #a5afb7;
     font-size: 13px;
   }
 
   .login-agreement-box {
     margin-top: 22px;
-    padding: 16px;
     border: 1px solid rgba(61,165,255,0.28);
-    border-radius: 16px;
     background: rgba(61,165,255,0.12);
     color: #c8eaff;
-    line-height: 1.7;
   }
 
-  .login-agreement-box p {
-    margin-top: 8px;
-    color: #b8dcef;
+  .login-temporary-password-note {
+    margin-top: 16px;
+    border: 1px solid rgba(255,190,80,0.28);
+    background: rgba(255,170,50,0.08);
+    color: #e8d4ac;
     font-size: 13px;
   }
 
@@ -1012,12 +1002,8 @@ const loginCss = `
     .login-hero,
     .login-form-panel,
     .login-side-panel {
-      padding: 20px;
+      padding: 21px 18px;
       border-radius: 22px;
-    }
-
-    .login-hero > p:not(.eyebrow) {
-      font-size: 16px;
     }
 
     .login-research-notice {
@@ -1025,7 +1011,7 @@ const loginCss = `
     }
   }
 
-  @media (max-width: 420px) {
+  @media (max-width: 430px) {
     .login-page {
       padding: 34px 8px;
     }
