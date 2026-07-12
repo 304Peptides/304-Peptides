@@ -52,6 +52,11 @@ async function handleOrderRequest(
     validateEnvironment_(env);
     validateContentType_(request);
 
+    await enforceOrderRateLimit_(
+      request,
+      env
+    );
+
     const requestBody =
       await readRequestBody_(request);
 
@@ -162,7 +167,8 @@ function validateEnvironment_(env) {
   if (
     !env.ORDER_WEB_APP_URL ||
     !env.ORDER_API_SECRET ||
-    !env.TURNSTILE_SECRET_KEY
+    !env.TURNSTILE_SECRET_KEY ||
+    !env.ORDER_RATE_LIMITER
   ) {
     throw new OrderRequestError(
       "The order service has not been configured.",
@@ -189,6 +195,71 @@ function validateContentType_(request) {
       415
     );
   }
+}
+
+async function enforceOrderRateLimit_(
+  request,
+  env
+) {
+  const clientIdentifier =
+    getClientIdentifier_(request);
+
+  let result;
+
+  try {
+    result =
+      await env.ORDER_RATE_LIMITER.limit({
+        key:
+          `order:${clientIdentifier}`,
+      });
+  } catch (error) {
+    console.error(
+      "Order rate limiter failed:",
+      error
+    );
+
+    throw new OrderRequestError(
+      "Order submissions are temporarily unavailable. Please try again shortly.",
+      503
+    );
+  }
+
+  if (!result.success) {
+    throw new OrderRequestError(
+      "Too many order attempts were received. Please wait one minute and try again.",
+      429
+    );
+  }
+}
+
+function getClientIdentifier_(
+  request
+) {
+  const cloudflareIp =
+    request.headers.get(
+      "CF-Connecting-IP"
+    );
+
+  if (cloudflareIp) {
+    return cleanText_(
+      cloudflareIp,
+      100
+    );
+  }
+
+  const forwardedFor =
+    request.headers.get(
+      "X-Forwarded-For"
+    );
+
+  if (forwardedFor) {
+    return cleanText_(
+      forwardedFor.split(",")[0],
+      100
+    );
+  }
+
+  return "unknown-client";
 }
 
 async function readRequestBody_(
