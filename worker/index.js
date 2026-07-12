@@ -5,6 +5,16 @@ import {
 const MAX_REQUEST_LENGTH = 100000;
 const MAX_LINE_ITEMS = 50;
 const MAX_TOTAL_QUANTITY = 100;
+const MAX_TURNSTILE_TOKEN_LENGTH = 2048;
+
+const TURNSTILE_VERIFY_URL =
+  "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+
+const TURNSTILE_ACTION =
+  "checkout_order";
+
+const TURNSTILE_HOSTNAME =
+  "304peptides.com";
 
 export default {
   async fetch(request, env) {
@@ -44,6 +54,19 @@ async function handleOrderRequest(
 
     const requestBody =
       await readRequestBody_(request);
+
+    const turnstileToken =
+      requestBody.turnstileToken ||
+      requestBody[
+        "cf-turnstile-response"
+      ] ||
+      "";
+
+    await validateTurnstile_(
+      request,
+      env,
+      turnstileToken
+    );
 
     const submittedOrder =
       requestBody.order ||
@@ -138,7 +161,8 @@ async function handleOrderRequest(
 function validateEnvironment_(env) {
   if (
     !env.ORDER_WEB_APP_URL ||
-    !env.ORDER_API_SECRET
+    !env.ORDER_API_SECRET ||
+    !env.TURNSTILE_SECRET_KEY
   ) {
     throw new OrderRequestError(
       "The order service has not been configured.",
@@ -212,6 +236,143 @@ async function readRequestBody_(
   } catch {
     throw new OrderRequestError(
       "The request contains invalid JSON.",
+      400
+    );
+  }
+}
+
+async function validateTurnstile_(
+  request,
+  env,
+  submittedToken
+) {
+  const token = cleanText_(
+    submittedToken,
+    MAX_TURNSTILE_TOKEN_LENGTH
+  );
+
+  if (!token) {
+    throw new OrderRequestError(
+      "Complete the security verification before submitting your order.",
+      400
+    );
+  }
+
+  const clientIp =
+    request.headers.get(
+      "CF-Connecting-IP"
+    ) || "";
+
+  let response;
+
+  try {
+    response = await fetch(
+      TURNSTILE_VERIFY_URL,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+
+        body: JSON.stringify({
+          secret:
+            env.TURNSTILE_SECRET_KEY,
+
+          response: token,
+
+          idempotency_key:
+            crypto.randomUUID(),
+
+          ...(clientIp
+            ? {
+                remoteip:
+                  clientIp,
+              }
+            : {}),
+        }),
+      }
+    );
+  } catch (error) {
+    console.error(
+      "Turnstile request failed:",
+      error
+    );
+
+    throw new OrderRequestError(
+      "Security verification is temporarily unavailable. Please try again.",
+      502
+    );
+  }
+
+  if (!response.ok) {
+    console.error(
+      "Turnstile returned HTTP status:",
+      response.status
+    );
+
+    throw new OrderRequestError(
+      "Security verification is temporarily unavailable. Please try again.",
+      502
+    );
+  }
+
+  let result;
+
+  try {
+    result =
+      await response.json();
+  } catch (error) {
+    console.error(
+      "Turnstile returned invalid JSON:",
+      error
+    );
+
+    throw new OrderRequestError(
+      "Security verification is temporarily unavailable. Please try again.",
+      502
+    );
+  }
+
+  if (!result.success) {
+    console.warn(
+      "Turnstile verification failed:",
+      result["error-codes"] || []
+    );
+
+    throw new OrderRequestError(
+      "Security verification failed or expired. Complete it again and resubmit your order.",
+      400
+    );
+  }
+
+  if (
+    result.action !==
+    TURNSTILE_ACTION
+  ) {
+    console.warn(
+      "Turnstile action mismatch:",
+      result.action
+    );
+
+    throw new OrderRequestError(
+      "Security verification could not be confirmed. Please try again.",
+      400
+    );
+  }
+
+  if (
+    result.hostname !==
+    TURNSTILE_HOSTNAME
+  ) {
+    console.warn(
+      "Turnstile hostname mismatch:",
+      result.hostname
+    );
+
+    throw new OrderRequestError(
+      "Security verification could not be confirmed. Please try again.",
       400
     );
   }

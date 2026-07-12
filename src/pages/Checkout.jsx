@@ -1,9 +1,21 @@
-import { useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import zelleLogo from "../assets/images/payments/zelle.png";
 import venmoLogo from "../assets/images/payments/venmo.png";
 import cashAppLogo from "../assets/images/payments/cashapp.png";
 
 const storageKey = "304-site-settings";
+const turnstileSiteKey =
+  "0x4AAAAAAD0F6auvBsjzeYVA";
+const turnstileScriptId =
+  "cloudflare-turnstile-script";
+
+let turnstileScriptPromise = null;
 
 const defaultSettings = {
   storeStatus: "coming-soon",
@@ -44,6 +56,269 @@ function loadSettings() {
   }
 }
 
+function loadTurnstileScript() {
+  if (window.turnstile) {
+    return Promise.resolve(window.turnstile);
+  }
+
+  if (turnstileScriptPromise) {
+    return turnstileScriptPromise;
+  }
+
+  turnstileScriptPromise = new Promise(
+    (resolve, reject) => {
+      const finishLoading = () => {
+        let attempts = 0;
+
+        const checkReady = () => {
+          if (window.turnstile) {
+            resolve(window.turnstile);
+            return;
+          }
+
+          attempts += 1;
+
+          if (attempts >= 100) {
+            turnstileScriptPromise = null;
+
+            reject(
+              new Error(
+                "Cloudflare Turnstile did not become ready."
+              )
+            );
+
+            return;
+          }
+
+          window.setTimeout(checkReady, 50);
+        };
+
+        checkReady();
+      };
+
+      const existingScript =
+        document.getElementById(
+          turnstileScriptId
+        );
+
+      if (existingScript) {
+        existingScript.addEventListener(
+          "load",
+          finishLoading,
+          {
+            once: true,
+          }
+        );
+
+        existingScript.addEventListener(
+          "error",
+          () => {
+            turnstileScriptPromise = null;
+
+            reject(
+              new Error(
+                "Cloudflare Turnstile could not be loaded."
+              )
+            );
+          },
+          {
+            once: true,
+          }
+        );
+
+        finishLoading();
+        return;
+      }
+
+      const script =
+        document.createElement("script");
+
+      script.id = turnstileScriptId;
+
+      script.src =
+        "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+
+      script.async = true;
+      script.defer = true;
+      script.onload = finishLoading;
+
+      script.onerror = () => {
+        turnstileScriptPromise = null;
+
+        reject(
+          new Error(
+            "Cloudflare Turnstile could not be loaded."
+          )
+        );
+      };
+
+      document.head.appendChild(script);
+    }
+  );
+
+  return turnstileScriptPromise;
+}
+
+function TurnstileWidget({
+  siteKey,
+  resetKey,
+  disabled = false,
+  onTokenChange,
+}) {
+  const containerRef = useRef(null);
+  const widgetIdRef = useRef(null);
+
+  const [status, setStatus] =
+    useState("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setStatus("loading");
+    onTokenChange("");
+
+    loadTurnstileScript()
+      .then((turnstile) => {
+        if (
+          cancelled ||
+          !containerRef.current
+        ) {
+          return;
+        }
+
+        containerRef.current.innerHTML = "";
+
+        widgetIdRef.current =
+          turnstile.render(
+            containerRef.current,
+            {
+              sitekey: siteKey,
+              theme: "dark",
+              size: "flexible",
+              appearance: "always",
+              action: "checkout_order",
+
+              callback: (token) => {
+                if (cancelled) {
+                  return;
+                }
+
+                setStatus("verified");
+                onTokenChange(token);
+              },
+
+              "expired-callback": () => {
+                if (cancelled) {
+                  return;
+                }
+
+                setStatus("expired");
+                onTokenChange("");
+              },
+
+              "timeout-callback": () => {
+                if (cancelled) {
+                  return;
+                }
+
+                setStatus("expired");
+                onTokenChange("");
+              },
+
+              "error-callback": () => {
+                if (cancelled) {
+                  return;
+                }
+
+                setStatus("error");
+                onTokenChange("");
+              },
+            }
+          );
+
+        setStatus("ready");
+      })
+      .catch((error) => {
+        console.error(
+          "Turnstile loading error:",
+          error
+        );
+
+        if (!cancelled) {
+          setStatus("error");
+          onTokenChange("");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+
+      if (
+        widgetIdRef.current !== null &&
+        window.turnstile
+      ) {
+        try {
+          window.turnstile.remove(
+            widgetIdRef.current
+          );
+        } catch {
+          // The widget may already be removed.
+        }
+      }
+
+      widgetIdRef.current = null;
+    };
+  }, [
+    siteKey,
+    resetKey,
+    onTokenChange,
+  ]);
+
+  const statusMessage =
+    status === "verified"
+      ? "Security verification complete."
+      : status === "expired"
+      ? "Verification expired. Complete it again."
+      : status === "error"
+      ? "Security verification could not load. Refresh the page and try again."
+      : "Security verification is loading.";
+
+  return (
+    <div
+      style={{
+        ...turnstileWidgetWrapperStyle,
+
+        ...(disabled
+          ? disabledTurnstileStyle
+          : {}),
+      }}
+    >
+      <div
+        ref={containerRef}
+        style={turnstileContainerStyle}
+      />
+
+      <p
+        style={{
+          ...turnstileStatusStyle,
+
+          ...(status === "verified"
+            ? turnstileVerifiedStyle
+            : {}),
+
+          ...(status === "error" ||
+          status === "expired"
+            ? turnstileWarningStyle
+            : {}),
+        }}
+        aria-live="polite"
+      >
+        {statusMessage}
+      </p>
+    </div>
+  );
+}
+
 function Checkout({
   cartItems = [],
   onNavigate,
@@ -70,8 +345,10 @@ function Checkout({
     setResearchAgreement,
   ] = useState(false);
 
-  const [ageAgreement, setAgeAgreement] =
-    useState(false);
+  const [
+    ageAgreement,
+    setAgeAgreement,
+  ] = useState(false);
 
   const [isSubmitting, setIsSubmitting] =
     useState(false);
@@ -79,13 +356,31 @@ function Checkout({
   const [submitError, setSubmitError] =
     useState("");
 
+  const [
+    turnstileToken,
+    setTurnstileToken,
+  ] = useState("");
+
+  const [
+    turnstileResetKey,
+    setTurnstileResetKey,
+  ] = useState(0);
+
+  const handleTurnstileTokenChange =
+    useCallback((token) => {
+      setSubmitError("");
+      setTurnstileToken(token);
+    }, []);
+
   useEffect(() => {
     function updateSettings(event) {
       if (event.detail) {
-        setSettings((currentSettings) => ({
-          ...currentSettings,
-          ...event.detail,
-        }));
+        setSettings(
+          (currentSettings) => ({
+            ...currentSettings,
+            ...event.detail,
+          })
+        );
 
         return;
       }
@@ -126,7 +421,8 @@ function Checkout({
     () =>
       cartItems.reduce(
         (total, item) =>
-          total + Number(item.quantity || 0),
+          total +
+          Number(item.quantity || 0),
         0
       ),
     [cartItems]
@@ -135,15 +431,19 @@ function Checkout({
   const subtotal = useMemo(
     () =>
       cartItems.reduce((total, item) => {
-        const price = Number.isFinite(item.price)
-          ? item.price
-          : 0;
+        const price =
+          Number.isFinite(item.price)
+            ? item.price
+            : 0;
 
         const quantity = Number(
           item.quantity || 0
         );
 
-        return total + price * quantity;
+        return (
+          total +
+          price * quantity
+        );
       }, 0),
     [cartItems]
   );
@@ -151,7 +451,8 @@ function Checkout({
   const invalidPriceItems = useMemo(
     () =>
       cartItems.filter(
-        (item) => !Number.isFinite(item.price)
+        (item) =>
+          !Number.isFinite(item.price)
       ),
     [cartItems]
   );
@@ -181,7 +482,8 @@ function Checkout({
 
   const selectedPaymentOption =
     paymentOptions.find(
-      (option) => option.id === paymentMethod
+      (option) =>
+        option.id === paymentMethod
     );
 
   const canPlaceOrder =
@@ -192,12 +494,14 @@ function Checkout({
     Boolean(paymentMethod) &&
     researchAgreement &&
     ageAgreement &&
+    Boolean(turnstileToken) &&
     !isSubmitting;
 
   const storeStatusLabel =
     settings.storeStatus === "open"
       ? "Store Open"
-      : settings.storeStatus === "maintenance"
+      : settings.storeStatus ===
+        "maintenance"
       ? "Maintenance Mode"
       : "Coming Soon";
 
@@ -218,7 +522,10 @@ function Checkout({
   }
 
   async function handlePlaceOrder() {
-    if (!canPlaceOrder || isSubmitting) {
+    if (
+      !canPlaceOrder ||
+      isSubmitting
+    ) {
       return;
     }
 
@@ -226,13 +533,26 @@ function Checkout({
     setIsSubmitting(true);
 
     const orderPayload = {
-      firstName: formData.firstName.trim(),
-      lastName: formData.lastName.trim(),
-      email: formData.email.trim(),
-      address: formData.address.trim(),
-      city: formData.city.trim(),
-      state: formData.state.trim(),
-      zip: formData.zip.trim(),
+      firstName:
+        formData.firstName.trim(),
+
+      lastName:
+        formData.lastName.trim(),
+
+      email:
+        formData.email.trim(),
+
+      address:
+        formData.address.trim(),
+
+      city:
+        formData.city.trim(),
+
+      state:
+        formData.state.trim(),
+
+      zip:
+        formData.zip.trim(),
 
       preferredPaymentMethod:
         paymentMethod,
@@ -241,13 +561,22 @@ function Checkout({
         selectedPaymentOption?.label || "",
 
       items: cartItems.map((item) => ({
-        name: item.name || "",
-        codeName: item.codeName || "",
-        strength: item.strength || "",
+        name:
+          item.name || "",
+
+        codeName:
+          item.codeName || "",
+
+        strength:
+          item.strength || "",
+
         quantity: Number(
           item.quantity || 1
         ),
-        price: Number(item.price || 0),
+
+        price: Number(
+          item.price || 0
+        ),
       })),
     };
 
@@ -262,9 +591,10 @@ function Checkout({
               "application/json",
           },
 
-          body: JSON.stringify(
-            orderPayload
-          ),
+          body: JSON.stringify({
+            order: orderPayload,
+            turnstileToken,
+          }),
         }
       );
 
@@ -274,7 +604,8 @@ function Checkout({
       let result;
 
       try {
-        result = JSON.parse(responseText);
+        result =
+          JSON.parse(responseText);
       } catch {
         throw new Error(
           "The order service returned an invalid response. Please try again."
@@ -296,8 +627,11 @@ function Checkout({
       onPlaceOrder({
         ...formData,
 
-        id: result.orderId,
-        orderId: result.orderId,
+        id:
+          result.orderId,
+
+        orderId:
+          result.orderId,
 
         status:
           "Order Request Received",
@@ -313,6 +647,13 @@ function Checkout({
       console.error(
         "Checkout submission error:",
         error
+      );
+
+      setTurnstileToken("");
+
+      setTurnstileResetKey(
+        (currentKey) =>
+          currentKey + 1
       );
 
       setSubmitError(
@@ -469,9 +810,9 @@ function Checkout({
           <p style={subtitleStyle}>
             Enter your shipping details,
             choose your preferred payment
-            method, and complete the required
-            confirmations before submitting
-            your order request.
+            method, and complete the
+            required confirmations before
+            submitting your order request.
           </p>
         </div>
 
@@ -668,14 +1009,12 @@ function Checkout({
                 }
               >
                 An invoice with payment
-                instructions will be sent to
-                your email.
+                instructions will be sent
+                to your email.
               </div>
             </div>
 
-            <div
-              style={agreementPanelStyle}
-            >
+            <div style={agreementPanelStyle}>
               <p className="eyebrow">
                 REQUIRED AGREEMENTS
               </p>
@@ -699,12 +1038,9 @@ function Checkout({
                     agreementTextStyle
                   }
                 >
-                  Customers should review
-                  the research-use terms
-                  before submitting an order
-                  request. This prototype is
-                  not a substitute for final
-                  legal or compliance review.
+                  Review the research-use
+                  terms before submitting
+                  an order request.
                 </p>
 
                 <button
@@ -750,10 +1086,11 @@ function Checkout({
                 />
 
                 <span>
-                  I understand these products
-                  are sold for research use
-                  only and are not intended
-                  for human consumption.
+                  I understand these
+                  products are sold for
+                  research use only and are
+                  not intended for human
+                  consumption.
                 </span>
               </label>
 
@@ -781,11 +1118,12 @@ function Checkout({
                 />
 
                 <span>
-                  I confirm I am at least 21
-                  years old and agree to
+                  I confirm I am at least
+                  21 years old and agree to
                   follow all applicable
                   rules, laws, and
-                  research-use restrictions.
+                  research-use
+                  restrictions.
                 </span>
               </label>
             </div>
@@ -803,7 +1141,9 @@ function Checkout({
             <div style={summaryItemsStyle}>
               {cartItems.map((item) => {
                 const lineTotal =
-                  Number(item.price || 0) *
+                  Number(
+                    item.price || 0
+                  ) *
                   Number(
                     item.quantity || 0
                   );
@@ -811,7 +1151,9 @@ function Checkout({
                 return (
                   <div
                     key={`${item.codeName}-${item.strength}`}
-                    style={summaryItemStyle}
+                    style={
+                      summaryItemStyle
+                    }
                   >
                     <div
                       style={
@@ -864,7 +1206,9 @@ function Checkout({
 
             <SummaryRow
               label="Subtotal"
-              value={formatPrice(subtotal)}
+              value={
+                formatPrice(subtotal)
+              }
             />
 
             <SummaryRow
@@ -897,6 +1241,35 @@ function Checkout({
               invoice with instructions for
               the selected payment method
               will be sent by email.
+            </div>
+
+            <div style={turnstilePanelStyle}>
+              <strong
+                style={turnstileTitleStyle}
+              >
+                Security Verification
+              </strong>
+
+              <p
+                style={turnstileTextStyle}
+              >
+                Complete the verification
+                below before submitting
+                your order request.
+              </p>
+
+              <TurnstileWidget
+                siteKey={
+                  turnstileSiteKey
+                }
+                resetKey={
+                  turnstileResetKey
+                }
+                disabled={isSubmitting}
+                onTokenChange={
+                  handleTurnstileTokenChange
+                }
+              />
             </div>
 
             {submitError && (
@@ -951,13 +1324,15 @@ function Checkout({
                 width: "100%",
                 marginTop: "14px",
 
-                opacity: isSubmitting
-                  ? 0.45
-                  : 1,
+                opacity:
+                  isSubmitting
+                    ? 0.45
+                    : 1,
 
-                cursor: isSubmitting
-                  ? "not-allowed"
-                  : "pointer",
+                cursor:
+                  isSubmitting
+                    ? "not-allowed"
+                    : "pointer",
               }}
               disabled={isSubmitting}
               onClick={() =>
@@ -977,15 +1352,19 @@ function Checkout({
                   Complete every field,
                   enter a valid email,
                   select a payment method,
-                  and accept both required
-                  agreements to submit your
-                  order request.
+                  accept both required
+                  agreements, and complete
+                  the security verification
+                  to submit your order
+                  request.
                 </p>
               )}
 
             {isSubmitting && (
               <p
-                style={submittingTextStyle}
+                style={
+                  submittingTextStyle
+                }
                 aria-live="polite"
               >
                 Please wait. Your order
@@ -1075,7 +1454,8 @@ function InputField({
 
         ...(fullWidth
           ? {
-              gridColumn: "1 / -1",
+              gridColumn:
+                "1 / -1",
             }
           : {}),
 
@@ -1115,7 +1495,6 @@ function SummaryRow({
   return (
     <div style={summaryRowStyle}>
       <span>{label}</span>
-
       <strong>{value}</strong>
     </div>
   );
@@ -1164,7 +1543,9 @@ const titleStyle = {
   background:
     "linear-gradient(180deg, #ffffff, #9d9d9d)",
 
-  WebkitBackgroundClip: "text",
+  WebkitBackgroundClip:
+    "text",
+
   WebkitTextFillColor:
     "transparent",
 };
@@ -1301,7 +1682,9 @@ const sectionTitleStyle = {
   background:
     "linear-gradient(180deg, #ffffff, #9d9d9d)",
 
-  WebkitBackgroundClip: "text",
+  WebkitBackgroundClip:
+    "text",
+
   WebkitTextFillColor:
     "transparent",
 };
@@ -1413,7 +1796,8 @@ const selectedPaymentOptionStyle = {
   background:
     "rgba(61,165,255,0.14)",
 
-  transform: "translateY(-2px)",
+  transform:
+    "translateY(-2px)",
 
   boxShadow:
     "0 14px 30px rgba(0,0,0,0.25)",
@@ -1564,7 +1948,9 @@ const summaryTitleStyle = {
   background:
     "linear-gradient(180deg, #ffffff, #9d9d9d)",
 
-  WebkitBackgroundClip: "text",
+  WebkitBackgroundClip:
+    "text",
+
   WebkitTextFillColor:
     "transparent",
 };
@@ -1577,7 +1963,8 @@ const summaryItemsStyle = {
 
 const summaryItemStyle = {
   display: "flex",
-  justifyContent: "space-between",
+  justifyContent:
+    "space-between",
   alignItems: "flex-start",
   gap: "16px",
 
@@ -1605,7 +1992,8 @@ const smallMutedTextStyle = {
 
 const summaryRowStyle = {
   display: "flex",
-  justifyContent: "space-between",
+  justifyContent:
+    "space-between",
   gap: "18px",
 
   background:
@@ -1635,6 +2023,66 @@ const noticeBoxStyle = {
   fontSize: "14px",
   fontWeight: "800",
   lineHeight: "1.6",
+};
+
+const turnstilePanelStyle = {
+  marginTop: "18px",
+  padding: "18px",
+  borderRadius: "16px",
+
+  border:
+    "1px solid rgba(255,255,255,0.1)",
+
+  background:
+    "rgba(255,255,255,0.035)",
+};
+
+const turnstileTitleStyle = {
+  display: "block",
+  color: "#ffffff",
+  fontSize: "14px",
+  fontWeight: "900",
+  textTransform: "uppercase",
+  letterSpacing: "0.7px",
+};
+
+const turnstileTextStyle = {
+  marginTop: "8px",
+  color: "#b8b8b8",
+  fontSize: "13px",
+  lineHeight: "1.6",
+};
+
+const turnstileWidgetWrapperStyle = {
+  display: "grid",
+  gap: "10px",
+  marginTop: "14px",
+};
+
+const turnstileContainerStyle = {
+  width: "100%",
+  minHeight: "65px",
+};
+
+const turnstileStatusStyle = {
+  margin: 0,
+  color: "#aaaaaa",
+  fontSize: "12px",
+  lineHeight: "1.5",
+};
+
+const turnstileVerifiedStyle = {
+  color: "#9ed8ff",
+  fontWeight: "800",
+};
+
+const turnstileWarningStyle = {
+  color: "#ffd1d1",
+};
+
+const disabledTurnstileStyle = {
+  opacity: 0.65,
+  pointerEvents: "none",
 };
 
 const submitErrorStyle = {
