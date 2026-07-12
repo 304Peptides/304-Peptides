@@ -1,7 +1,16 @@
-import { useEffect, useState } from "react";
-import { products, categories } from "../data/products";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
-const storageKey = "304-site-settings";
+import {
+  products,
+  categories,
+} from "../data/products";
+
+const storageKey =
+  "304-site-settings";
 
 const defaultSettings = {
   storeStatus: "coming-soon",
@@ -9,26 +18,9 @@ const defaultSettings = {
   guestPricingEnabled: false,
 };
 
-function loadSettings() {
-  try {
-    const savedSettings = window.localStorage.getItem(storageKey);
-
-    if (!savedSettings) {
-      return defaultSettings;
-    }
-
-    return {
-      ...defaultSettings,
-      ...JSON.parse(savedSettings),
-    };
-  } catch {
-    return defaultSettings;
-  }
-}
-
 const categoryDescriptions = {
   "All Products":
-    "Browse the complete 304 Peptides research-use catalog with grouped strengths, product codes, imagery, and documentation placeholders.",
+    "Browse the complete 304 Peptides research-use catalog with grouped strengths, product codes, imagery, pricing, and published documentation status.",
 
   "Best Sellers":
     "Browse highlighted products from across the current research catalog.",
@@ -54,39 +46,155 @@ const categoryDescriptions = {
   "Longevity Research":
     "Research-use products organized within the longevity research category.",
 
+  "Additional Research Products":
+    "Additional research-use catalog products organized with clear product identity and documentation status.",
+
   "Research Supplies":
     "Research supplies and supporting laboratory-use products.",
 };
+
+function loadSettings() {
+  try {
+    const savedSettings =
+      window.localStorage.getItem(
+        storageKey
+      );
+
+    if (!savedSettings) {
+      return defaultSettings;
+    }
+
+    return {
+      ...defaultSettings,
+      ...JSON.parse(
+        savedSettings
+      ),
+    };
+  } catch {
+    return defaultSettings;
+  }
+}
+
+function mapDocumentsByCode(
+  records
+) {
+  return records.reduce(
+    (
+      documentMap,
+      record
+    ) => {
+      if (record?.codeName) {
+        documentMap[
+          record.codeName
+        ] = record;
+      }
+
+      return documentMap;
+    },
+    {}
+  );
+}
+
+function formatDocumentDate(
+  value
+) {
+  if (!value) {
+    return "Not available";
+  }
+
+  const date =
+    new Date(
+      `${value}T00:00:00`
+    );
+
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return value;
+  }
+
+  return date.toLocaleDateString(
+    undefined,
+    {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    }
+  );
+}
 
 function Products({
   onProductSelect,
   isLoggedIn,
   onAddToCart,
 }) {
-  const [settings, setSettings] = useState(loadSettings);
-  const [activeCategory, setActiveCategory] =
-    useState("All Products");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedStrengths, setSelectedStrengths] =
-    useState({});
+  const [settings, setSettings] =
+    useState(loadSettings);
+
+  const [
+    activeCategory,
+    setActiveCategory,
+  ] = useState(
+    "All Products"
+  );
+
+  const [
+    searchTerm,
+    setSearchTerm,
+  ] = useState("");
+
+  const [
+    selectedStrengths,
+    setSelectedStrengths,
+  ] = useState({});
+
+  const [
+    documentRecords,
+    setDocumentRecords,
+  ] = useState({});
+
+  const [
+    documentsLoading,
+    setDocumentsLoading,
+  ] = useState(true);
+
+  const [
+    documentsError,
+    setDocumentsError,
+  ] = useState("");
 
   useEffect(() => {
-    function updateSettings(event) {
+    function updateSettings(
+      event
+    ) {
       if (event.detail) {
-        setSettings((currentSettings) => ({
-          ...currentSettings,
-          ...event.detail,
-        }));
+        setSettings(
+          (currentSettings) => ({
+            ...currentSettings,
+            ...event.detail,
+          })
+        );
 
         return;
       }
 
-      setSettings(loadSettings());
+      setSettings(
+        loadSettings()
+      );
     }
 
-    function handleStorageChange(event) {
-      if (event.key === storageKey) {
-        setSettings(loadSettings());
+    function handleStorageChange(
+      event
+    ) {
+      if (
+        event.key ===
+        storageKey
+      ) {
+        setSettings(
+          loadSettings()
+        );
       }
     }
 
@@ -113,25 +221,132 @@ function Products({
     };
   }, []);
 
-  function getSelectedVariant(product) {
-    if (!product.variants?.length) {
+  useEffect(() => {
+    const controller =
+      new AbortController();
+
+    async function loadPublishedDocuments() {
+      setDocumentsLoading(true);
+      setDocumentsError("");
+
+      try {
+        const response =
+          await fetch(
+            "/api/documents",
+            {
+              method: "GET",
+
+              headers: {
+                Accept:
+                  "application/json",
+              },
+
+              cache: "no-store",
+
+              signal:
+                controller.signal,
+            }
+          );
+
+        let result;
+
+        try {
+          result =
+            await response.json();
+        } catch {
+          throw new Error(
+            "The documentation service returned an invalid response."
+          );
+        }
+
+        if (
+          !response.ok ||
+          !result.success
+        ) {
+          throw new Error(
+            result.error ||
+              "Published documentation could not be loaded."
+          );
+        }
+
+        const records =
+          Array.isArray(
+            result.records
+          )
+            ? result.records
+            : [];
+
+        setDocumentRecords(
+          mapDocumentsByCode(
+            records
+          )
+        );
+      } catch (error) {
+        if (
+          error.name ===
+          "AbortError"
+        ) {
+          return;
+        }
+
+        setDocumentRecords({});
+
+        setDocumentsError(
+          error.message ||
+            "Published documentation could not be loaded."
+        );
+      } finally {
+        if (
+          !controller.signal
+            .aborted
+        ) {
+          setDocumentsLoading(
+            false
+          );
+        }
+      }
+    }
+
+    loadPublishedDocuments();
+
+    return () => {
+      controller.abort();
+    };
+  }, []);
+
+  function getSelectedVariant(
+    product
+  ) {
+    if (
+      !product.variants?.length
+    ) {
       return null;
     }
 
     const selectedStrength =
-      selectedStrengths[product.codeName] ||
-      product.variants[0].strength;
+      selectedStrengths[
+        product.codeName
+      ] ||
+      product.variants[0]
+        .strength;
 
     return (
       product.variants.find(
         (variant) =>
-          variant.strength === selectedStrength
-      ) || product.variants[0]
+          variant.strength ===
+          selectedStrength
+      ) ||
+      product.variants[0]
     );
   }
 
-  function getResolvedProduct(product) {
-    const selectedVariant = getSelectedVariant(product);
+  function getResolvedProduct(
+    product
+  ) {
+    const selectedVariant =
+      getSelectedVariant(
+        product
+      );
 
     if (!selectedVariant) {
       return product;
@@ -140,937 +355,1621 @@ function Products({
     return {
       ...product,
       ...selectedVariant,
-      name: product.name,
-      baseName: product.name,
-      variants: product.variants,
+
+      name:
+        product.name,
+
+      baseName:
+        product.name,
+
+      variants:
+        product.variants,
     };
   }
 
-  function selectStrength(product, strength) {
-    setSelectedStrengths((currentSelections) => ({
-      ...currentSelections,
-      [product.codeName]: strength,
-    }));
+  function selectStrength(
+    product,
+    strength
+  ) {
+    setSelectedStrengths(
+      (currentSelections) => ({
+        ...currentSelections,
+
+        [product.codeName]:
+          strength,
+      })
+    );
   }
 
-  const filteredProducts = products.filter((product) => {
-    const matchesCategory =
-      activeCategory === "All Products" ||
-      product.category === activeCategory ||
-      (activeCategory === "Best Sellers" &&
-        product.isBestSeller);
+  function openProductDetails(
+    resolvedProduct
+  ) {
+    onProductSelect({
+      ...resolvedProduct,
 
-    const variantSearchText = product.variants
-      ? product.variants
-          .map(
-            (variant) =>
-              `${variant.strength} ${variant.codeName} ${
-                variant.composition || ""
-              }`
-          )
-          .join(" ")
-      : "";
+      documentationRecord:
+        documentRecords[
+          resolvedProduct.codeName
+        ] ||
+        null,
+    });
+  }
 
-    const searchText =
-      `${product.name} ${product.codeName} ${product.strength} ${product.category} ${variantSearchText}`.toLowerCase();
+  const filteredProducts =
+    useMemo(() => {
+      const normalizedSearch =
+        searchTerm
+          .trim()
+          .toLowerCase();
 
-    const matchesSearch = searchText.includes(
-      searchTerm.trim().toLowerCase()
-    );
+      return products.filter(
+        (product) => {
+          const matchesCategory =
+            activeCategory ===
+              "All Products" ||
+            product.category ===
+              activeCategory ||
+            (activeCategory ===
+              "Best Sellers" &&
+              product.isBestSeller);
 
-    return matchesCategory && matchesSearch;
-  });
+          const variants =
+            product.variants?.length
+              ? product.variants
+              : [product];
+
+          const variantSearchText =
+            variants
+              .map((variant) => {
+                const record =
+                  documentRecords[
+                    variant.codeName
+                  ];
+
+                return [
+                  variant.strength,
+                  variant.codeName,
+                  variant.composition,
+                  record?.batchNumber,
+                  record?.labName,
+                  record?.testDate,
+                ]
+                  .filter(Boolean)
+                  .join(" ");
+              })
+              .join(" ");
+
+          const searchText = [
+            product.name,
+            product.codeName,
+            product.strength,
+            product.category,
+            variantSearchText,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+
+          const matchesSearch =
+            normalizedSearch === "" ||
+            searchText.includes(
+              normalizedSearch
+            );
+
+          return (
+            matchesCategory &&
+            matchesSearch
+          );
+        }
+      );
+    }, [
+      activeCategory,
+      documentRecords,
+      searchTerm,
+    ]);
 
   const storeStatusLabel =
-    settings.storeStatus === "open"
+    settings.storeStatus ===
+    "open"
       ? "Store Open"
-      : settings.storeStatus === "maintenance"
+      : settings.storeStatus ===
+        "maintenance"
       ? "Maintenance Mode"
       : "Coming Soon";
 
   const purchasingEnabled =
-    settings.storeStatus === "open";
+    settings.storeStatus ===
+    "open";
 
-  if (!settings.catalogEnabled) {
+  const publishedDocumentCount =
+    Object.keys(
+      documentRecords
+    ).length;
+
+  if (
+    !settings.catalogEnabled
+  ) {
     return (
-      <main style={{ padding: "90px 60px" }}>
-        <section style={catalogUnavailableStyle}>
-          <p className="eyebrow">PRODUCT CATALOG</p>
+      <>
+        <style>
+          {productsCss}
+        </style>
 
-          <h1 style={titleStyle}>
-            Catalog Temporarily Unavailable
-          </h1>
+        <main className="products-page">
+          <section className="products-unavailable">
+            <p className="eyebrow">
+              PRODUCT CATALOG
+            </p>
 
-          <p style={subtitleStyle}>
-            The research product catalog is currently unavailable.
-            Please check back later or contact support for general
-            website assistance.
-          </p>
+            <h1 className="products-title">
+              Catalog Temporarily
+              Unavailable
+            </h1>
 
-          <div style={heroNoticeStyle}>
-            For Research Use Only. Not intended for human
-            consumption.
-          </div>
-        </section>
-      </main>
+            <p className="products-subtitle">
+              The research product
+              catalog is currently
+              unavailable. Please check
+              back later or contact
+              support for general
+              website assistance.
+            </p>
+
+            <div className="products-research-pill">
+              For Research Use Only.
+              Not intended for human
+              consumption.
+            </div>
+          </section>
+        </main>
+      </>
     );
   }
 
   return (
-    <main style={{ padding: "90px 60px" }}>
-      <section
-        style={{ maxWidth: "1250px", margin: "0 auto" }}
-      >
-        <div style={heroPanelStyle}>
-          <p className="eyebrow">PRODUCT CATALOG</p>
+    <>
+      <style>
+        {productsCss}
+      </style>
 
-          <h1 style={titleStyle}>Research Products</h1>
-
-          <p style={subtitleStyle}>
-            Browse products by category, select available
-            strengths, and review product codes and
-            documentation status.
-          </p>
-
-          <div style={statusRowStyle}>
-            <div style={heroNoticeStyle}>
-              For Research Use Only. Not intended for human
-              consumption.
-            </div>
-
-            <div
-              style={
-                purchasingEnabled
-                  ? openStatusStyle
-                  : closedStatusStyle
-              }
-            >
-              {storeStatusLabel}
-            </div>
-          </div>
-
-          {!purchasingEnabled && (
-            <div style={storeNoticeStyle}>
-              Product browsing remains available, but purchasing
-              is currently disabled while the store status is{" "}
-              <strong>{storeStatusLabel}</strong>.
-            </div>
-          )}
-        </div>
-
-        <div style={filterPanelStyle}>
-          <div>
-            <p className="eyebrow">FILTER PRODUCTS</p>
-
-            <h2 style={sectionTitleStyle}>
-              Find Products
-            </h2>
-
-            <p style={categoryDescriptionStyle}>
-              {categoryDescriptions[activeCategory] ||
-                categoryDescriptions["All Products"]}
+      <main className="products-page">
+        <section className="products-inner">
+          <div className="products-hero">
+            <p className="eyebrow">
+              PRODUCT CATALOG
             </p>
-          </div>
 
-          <input
-            type="search"
-            placeholder="Search by product, code, strength, or category..."
-            value={searchTerm}
-            onChange={(event) =>
-              setSearchTerm(event.target.value)
-            }
-            style={searchInputStyle}
-          />
+            <h1 className="products-title">
+              Research Products
+            </h1>
 
-          <div style={categoryRowStyle}>
-            {categories.map((category) => (
-              <button
-                key={category}
+            <p className="products-subtitle">
+              Browse products by
+              category, choose a
+              strength, review pricing,
+              and check whether
+              batch-specific
+              documentation has been
+              published.
+            </p>
+
+            <div className="products-status-row">
+              <div className="products-research-pill">
+                For Research Use Only.
+                Not intended for human
+                consumption.
+              </div>
+
+              <div
                 className={
-                  activeCategory === category
-                    ? "primary-btn"
-                    : "secondary-btn"
-                }
-                onClick={() =>
-                  setActiveCategory(category)
+                  purchasingEnabled
+                    ? "products-store-pill products-store-pill-open"
+                    : "products-store-pill"
                 }
               >
-                {category}
-              </button>
-            ))}
+                {storeStatusLabel}
+              </div>
+
+              <div className="products-document-pill">
+                {documentsLoading
+                  ? "Checking Documentation"
+                  : documentsError
+                  ? "Documentation Unavailable"
+                  : `${publishedDocumentCount} Published Record${
+                      publishedDocumentCount ===
+                      1
+                        ? ""
+                        : "s"
+                    }`}
+              </div>
+            </div>
+
+            {!purchasingEnabled && (
+              <div className="products-store-notice">
+                Product browsing
+                remains available, but
+                purchasing is currently
+                disabled while the
+                store status is{" "}
+                <strong>
+                  {storeStatusLabel}
+                </strong>
+                .
+              </div>
+            )}
+
+            {documentsError && (
+              <div className="products-document-error">
+                Product browsing is
+                available, but live
+                documentation status
+                could not be loaded.
+              </div>
+            )}
           </div>
 
-          <div style={resultsBarStyle}>
-            <span>
-              Showing{" "}
-              <strong>{filteredProducts.length}</strong>{" "}
-              product
-              {filteredProducts.length === 1 ? "" : "s"}
-            </span>
+          <div className="products-filters">
+            <div>
+              <p className="eyebrow">
+                FILTER PRODUCTS
+              </p>
 
-            <span>
-              Active Filter:{" "}
-              <strong>{activeCategory}</strong>
-            </span>
-          </div>
-        </div>
+              <h2 className="products-section-title">
+                Find Products
+              </h2>
 
-        {filteredProducts.length === 0 ? (
-          <div style={emptyPanelStyle}>
-            <p className="eyebrow">NO RESULTS</p>
+              <p className="products-category-description">
+                {categoryDescriptions[
+                  activeCategory
+                ] ||
+                  categoryDescriptions[
+                    "All Products"
+                  ]}
+              </p>
+            </div>
 
-            <h2 style={sectionTitleStyle}>
-              No Products Found
-            </h2>
+            <input
+              type="search"
+              className="products-search"
+              placeholder="Search by product, code, strength, category, batch, or laboratory..."
+              value={searchTerm}
+              onChange={(event) =>
+                setSearchTerm(
+                  event.target.value
+                )
+              }
+            />
 
-            <p style={textStyle}>
-              Try changing the search term or selecting another
-              category.
-            </p>
-
-            <button
-              className="primary-btn"
-              style={{ marginTop: "22px" }}
-              onClick={() => {
-                setSearchTerm("");
-                setActiveCategory("All Products");
-              }}
-            >
-              Reset Filters
-            </button>
-          </div>
-        ) : (
-          <div style={productGridStyle}>
-            {filteredProducts.map((product) => {
-              const selectedVariant =
-                getSelectedVariant(product);
-
-              const resolvedProduct =
-                getResolvedProduct(product);
-
-              const hasPrice = Number.isFinite(
-                resolvedProduct.price
-              );
-
-              const canViewPrice =
-                isLoggedIn ||
-                settings.guestPricingEnabled;
-
-              const canPurchase =
-                hasPrice &&
-                purchasingEnabled &&
-                isLoggedIn;
-
-              return (
-                <article
-                  key={product.codeName}
-                  style={productCardStyle}
-                >
-                  <div style={topBadgeRowStyle}>
-                    <span style={categoryBadgeStyle}>
-                      {product.category}
-                    </span>
-
-                    {product.isBestSeller && (
-                      <span style={bestSellerBadgeStyle}>
-                        Best Seller
-                      </span>
-                    )}
-                  </div>
-
+            <div className="products-category-row">
+              {categories.map(
+                (category) => (
                   <button
+                    key={category}
                     type="button"
-                    onClick={() =>
-                      onProductSelect(resolvedProduct)
+                    className={
+                      activeCategory ===
+                      category
+                        ? "primary-btn"
+                        : "secondary-btn"
                     }
-                    style={imageButtonStyle}
-                    aria-label={`View ${product.name}`}
+                    onClick={() =>
+                      setActiveCategory(
+                        category
+                      )
+                    }
                   >
-                    {resolvedProduct.image ? (
-                      <div style={realImageWrapStyle}>
-                        <img
-                          src={resolvedProduct.image}
-                          alt={`${product.name} ${resolvedProduct.strength} research product`}
-                          style={realImageStyle}
-                        />
-
-                        <div style={imageGlowStyle}></div>
-                      </div>
-                    ) : (
-                      <div style={bottleWrapStyle}>
-                        <div style={bottleCapStyle}></div>
-
-                        <div style={bottleStyle}>
-                          <div style={labelStyle}>
-                            <strong style={labelBrandStyle}>
-                              304
-                            </strong>
-
-                            <span style={labelCodeStyle}>
-                              {resolvedProduct.codeName}
-                            </span>
-
-                            <small
-                              style={labelStrengthStyle}
-                            >
-                              {resolvedProduct.strength}
-                            </small>
-
-                            <small style={labelNoticeStyle}>
-                              Research Use Only
-                            </small>
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    {category}
                   </button>
+                )
+              )}
+            </div>
 
-                  <h2 style={productTitleStyle}>
-                    {product.name}
-                  </h2>
+            <div className="products-results">
+              <span>
+                Showing{" "}
+                <strong>
+                  {
+                    filteredProducts.length
+                  }
+                </strong>{" "}
+                product
+                {filteredProducts.length ===
+                1
+                  ? ""
+                  : "s"}
+              </span>
 
-                  <p style={codeStyle}>
-                    {resolvedProduct.codeName} ·{" "}
-                    {resolvedProduct.strength}
-                  </p>
+              <span>
+                Active Filter:{" "}
+                <strong>
+                  {activeCategory}
+                </strong>
+              </span>
+            </div>
+          </div>
 
-                  {product.variants?.length > 0 && (
-                    <div style={variantPanelStyle}>
-                      <span style={variantLabelStyle}>
-                        Choose Strength
-                      </span>
+          {filteredProducts.length ===
+          0 ? (
+            <div className="products-empty">
+              <p className="eyebrow">
+                NO RESULTS
+              </p>
 
-                      <div style={variantButtonRowStyle}>
-                        {product.variants.map((variant) => {
-                          const isSelected =
-                            selectedVariant?.strength ===
-                            variant.strength;
+              <h2 className="products-section-title">
+                No Products Found
+              </h2>
 
-                          return (
-                            <button
-                              key={variant.codeName}
-                              type="button"
-                              style={
-                                isSelected
-                                  ? selectedVariantButtonStyle
-                                  : variantButtonStyle
-                              }
-                              onClick={() =>
-                                selectStrength(
-                                  product,
-                                  variant.strength
-                                )
-                              }
-                            >
-                              {variant.strength}
-                            </button>
-                          );
-                        })}
+              <p>
+                Try changing the search
+                term or selecting
+                another category.
+              </p>
+
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={() => {
+                  setSearchTerm("");
+
+                  setActiveCategory(
+                    "All Products"
+                  );
+                }}
+              >
+                Reset Filters
+              </button>
+            </div>
+          ) : (
+            <div className="products-grid">
+              {filteredProducts.map(
+                (product) => {
+                  const selectedVariant =
+                    getSelectedVariant(
+                      product
+                    );
+
+                  const resolvedProduct =
+                    getResolvedProduct(
+                      product
+                    );
+
+                  const documentation =
+                    documentRecords[
+                      resolvedProduct
+                        .codeName
+                    ] ||
+                    null;
+
+                  const hasPublishedDocumentation =
+                    Boolean(
+                      documentation
+                    );
+
+                  const hasPrice =
+                    Number.isFinite(
+                      resolvedProduct.price
+                    );
+
+                  const canViewPrice =
+                    isLoggedIn ||
+                    settings.guestPricingEnabled;
+
+                  const canPurchase =
+                    hasPrice &&
+                    purchasingEnabled &&
+                    isLoggedIn;
+
+                  const coaLabel =
+                    documentsLoading
+                      ? "Checking..."
+                      : documentsError
+                      ? "Unavailable"
+                      : hasPublishedDocumentation
+                      ? "Published"
+                      : "Not Published";
+
+                  const batchLabel =
+                    hasPublishedDocumentation
+                      ? documentation.batchNumber
+                      : documentsLoading
+                      ? "Checking..."
+                      : documentsError
+                      ? "Unavailable"
+                      : "Not Published";
+
+                  const verificationLabel =
+                    hasPublishedDocumentation
+                      ? "Ready"
+                      : documentsLoading
+                      ? "Checking..."
+                      : documentsError
+                      ? "Unavailable"
+                      : "Not Published";
+
+                  return (
+                    <article
+                      key={
+                        product.codeName
+                      }
+                      className="products-card"
+                    >
+                      <div className="products-badge-row">
+                        <span className="products-category-badge">
+                          {
+                            product.category
+                          }
+                        </span>
+
+                        <div className="products-badge-group">
+                          {product.isBestSeller && (
+                            <span className="products-best-seller-badge">
+                              Best Seller
+                            </span>
+                          )}
+
+                          {hasPublishedDocumentation && (
+                            <span className="products-coa-badge">
+                              COA Published
+                            </span>
+                          )}
+                        </div>
                       </div>
 
-                      {resolvedProduct.composition && (
-                        <div style={compositionStyle}>
-                          <span>Composition</span>
-
-                          <strong>
-                            {
-                              resolvedProduct.composition
-                            }
-                          </strong>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <p style={productTextStyle}>
-                    {product.description}
-                  </p>
-
-                  <div style={statusGridStyle}>
-                    <div style={statusBoxStyle}>
-                      <span>Purity</span>
-                      <strong>{product.purity}</strong>
-                    </div>
-
-                    <div style={statusBoxStyle}>
-                      <span>COA</span>
-                      <strong>
-                        {resolvedProduct.coaStatus}
-                      </strong>
-                    </div>
-
-                    <div style={statusBoxStyle}>
-                      <span>Batch</span>
-                      <strong>
-                        {resolvedProduct.batchStatus}
-                      </strong>
-                    </div>
-
-                    <div style={statusBoxStyle}>
-                      <span>QR</span>
-                      <strong>
-                        {resolvedProduct.qrStatus}
-                      </strong>
-                    </div>
-                  </div>
-
-                  <div style={priceBoxStyle}>
-                    {!hasPrice ? (
-                      <>
-                        <span>Pricing Status</span>
-                        <strong>
-                          Price Coming Soon
-                        </strong>
-                      </>
-                    ) : canViewPrice ? (
-                      <>
-                        <span>Price</span>
-                        <strong>
-                          $
-                          {resolvedProduct.price.toFixed(
-                            2
-                          )}
-                        </strong>
-                      </>
-                    ) : (
-                      <>
-                        <span>Pricing Locked</span>
-                        <strong>
-                          Login To View
-                        </strong>
-                      </>
-                    )}
-                  </div>
-
-                  <div style={buttonStackStyle}>
-                    <button
-                      className="secondary-btn"
-                      onClick={() =>
-                        onProductSelect(resolvedProduct)
-                      }
-                    >
-                      View Details
-                    </button>
-
-                    {!hasPrice ? (
                       <button
                         type="button"
-                        style={disabledButtonStyle}
-                        disabled
-                      >
-                        Price Coming Soon
-                      </button>
-                    ) : !purchasingEnabled ? (
-                      <button
-                        type="button"
-                        style={disabledButtonStyle}
-                        disabled
-                      >
-                        Purchasing Unavailable
-                      </button>
-                    ) : canPurchase ? (
-                      <button
-                        className="primary-btn"
+                        className="products-image-button"
                         onClick={() =>
-                          onAddToCart(resolvedProduct)
-                        }
-                      >
-                        Add{" "}
-                        {resolvedProduct.strength} To
-                        Cart
-                      </button>
-                    ) : (
-                      <button
-                        className="primary-btn"
-                        onClick={() =>
-                          onProductSelect(
+                          openProductDetails(
                             resolvedProduct
                           )
                         }
+                        aria-label={`View ${product.name} ${resolvedProduct.strength}`}
                       >
-                        View Product
-                      </button>
-                    )}
-                  </div>
+                        {resolvedProduct.image ? (
+                          <div className="products-real-image-wrap">
+                            <img
+                              src={
+                                resolvedProduct.image
+                              }
+                              alt={`${product.name} ${resolvedProduct.strength} research product`}
+                            />
 
-                  <div style={researchNoticeStyle}>
-                    Research Use Only
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
-    </main>
+                            <div className="products-image-glow" />
+                          </div>
+                        ) : (
+                          <div className="products-bottle-wrap">
+                            <div className="products-bottle-cap" />
+
+                            <div className="products-bottle">
+                              <div className="products-label">
+                                <strong>
+                                  304
+                                </strong>
+
+                                <span>
+                                  {
+                                    resolvedProduct.codeName
+                                  }
+                                </span>
+
+                                <small>
+                                  {
+                                    resolvedProduct.strength
+                                  }
+                                </small>
+
+                                <small className="products-label-notice">
+                                  Research Use
+                                  Only
+                                </small>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </button>
+
+                      <h2 className="products-product-title">
+                        {product.name}
+                      </h2>
+
+                      <p className="products-code">
+                        {
+                          resolvedProduct.codeName
+                        }{" "}
+                        ·{" "}
+                        {
+                          resolvedProduct.strength
+                        }
+                      </p>
+
+                      {product.variants?.length >
+                        0 && (
+                        <div className="products-variant-panel">
+                          <span className="products-variant-label">
+                            Choose Strength
+                          </span>
+
+                          <div className="products-variant-buttons">
+                            {product.variants.map(
+                              (variant) => {
+                                const isSelected =
+                                  selectedVariant?.strength ===
+                                  variant.strength;
+
+                                const variantHasDocument =
+                                  Boolean(
+                                    documentRecords[
+                                      variant
+                                        .codeName
+                                    ]
+                                  );
+
+                                return (
+                                  <button
+                                    key={
+                                      variant.codeName
+                                    }
+                                    type="button"
+                                    className={
+                                      isSelected
+                                        ? "products-variant-button products-variant-button-selected"
+                                        : "products-variant-button"
+                                    }
+                                    onClick={() =>
+                                      selectStrength(
+                                        product,
+                                        variant.strength
+                                      )
+                                    }
+                                  >
+                                    <span>
+                                      {
+                                        variant.strength
+                                      }
+                                    </span>
+
+                                    {variantHasDocument && (
+                                      <small>
+                                        COA
+                                      </small>
+                                    )}
+                                  </button>
+                                );
+                              }
+                            )}
+                          </div>
+
+                          {resolvedProduct.composition && (
+                            <div className="products-composition">
+                              <span>
+                                Composition
+                              </span>
+
+                              <strong>
+                                {
+                                  resolvedProduct.composition
+                                }
+                              </strong>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <p className="products-description">
+                        {
+                          product.description
+                        }
+                      </p>
+
+                      <div className="products-status-grid">
+                        <StatusBox
+                          label="Purity"
+                          value={
+                            product.purity
+                          }
+                          ready
+                        />
+
+                        <StatusBox
+                          label="COA"
+                          value={coaLabel}
+                          ready={
+                            hasPublishedDocumentation
+                          }
+                        />
+
+                        <StatusBox
+                          label="Batch"
+                          value={batchLabel}
+                          ready={
+                            hasPublishedDocumentation
+                          }
+                        />
+
+                        <StatusBox
+                          label="Verification"
+                          value={
+                            verificationLabel
+                          }
+                          ready={
+                            hasPublishedDocumentation
+                          }
+                        />
+                      </div>
+
+                      {hasPublishedDocumentation && (
+                        <div className="products-document-panel">
+                          <div className="products-document-heading">
+                            <div>
+                              <span>
+                                Published
+                                Documentation
+                              </span>
+
+                              <strong>
+                                {
+                                  documentation.labName
+                                }
+                              </strong>
+                            </div>
+
+                            <span className="products-published-marker">
+                              Verified Record
+                            </span>
+                          </div>
+
+                          <div className="products-document-details">
+                            <div>
+                              <span>
+                                Batch
+                              </span>
+
+                              <strong>
+                                {
+                                  documentation.batchNumber
+                                }
+                              </strong>
+                            </div>
+
+                            <div>
+                              <span>
+                                Test Date
+                              </span>
+
+                              <strong>
+                                {formatDocumentDate(
+                                  documentation.testDate
+                                )}
+                              </strong>
+                            </div>
+                          </div>
+
+                          <div className="products-document-links">
+                            <a
+                              className="primary-btn products-link-button"
+                              href={
+                                documentation.coaUrl
+                              }
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Open COA
+                            </a>
+
+                            <a
+                              className="secondary-btn products-link-button"
+                              href={
+                                documentation.verificationUrl
+                              }
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Verify
+                            </a>
+
+                            <a
+                              className="secondary-btn products-link-button products-full-link"
+                              href={`/api/documents/${encodeURIComponent(
+                                resolvedProduct.codeName
+                              )}`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              View Public
+                              Record
+                            </a>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="products-price-box">
+                        {!hasPrice ? (
+                          <>
+                            <span>
+                              Pricing Status
+                            </span>
+
+                            <strong>
+                              Price Coming Soon
+                            </strong>
+                          </>
+                        ) : canViewPrice ? (
+                          <>
+                            <span>
+                              Price
+                            </span>
+
+                            <strong>
+                              $
+                              {resolvedProduct.price.toFixed(
+                                2
+                              )}
+                            </strong>
+                          </>
+                        ) : (
+                          <>
+                            <span>
+                              Pricing Locked
+                            </span>
+
+                            <strong>
+                              Login To View
+                            </strong>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="products-button-stack">
+                        <button
+                          type="button"
+                          className="secondary-btn"
+                          onClick={() =>
+                            openProductDetails(
+                              resolvedProduct
+                            )
+                          }
+                        >
+                          View Details
+                        </button>
+
+                        {!hasPrice ? (
+                          <button
+                            type="button"
+                            className="products-disabled-button"
+                            disabled
+                          >
+                            Price Coming Soon
+                          </button>
+                        ) : !purchasingEnabled ? (
+                          <button
+                            type="button"
+                            className="products-disabled-button"
+                            disabled
+                          >
+                            Purchasing
+                            Unavailable
+                          </button>
+                        ) : canPurchase ? (
+                          <button
+                            type="button"
+                            className="primary-btn"
+                            onClick={() =>
+                              onAddToCart(
+                                resolvedProduct
+                              )
+                            }
+                          >
+                            Add{" "}
+                            {
+                              resolvedProduct.strength
+                            }{" "}
+                            To Cart
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="primary-btn"
+                            onClick={() =>
+                              openProductDetails(
+                                resolvedProduct
+                              )
+                            }
+                          >
+                            View Product
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="products-research-notice">
+                        Research Use Only
+                      </div>
+                    </article>
+                  );
+                }
+              )}
+            </div>
+          )}
+        </section>
+      </main>
+    </>
   );
 }
 
-const heroPanelStyle = {
-  textAlign: "center",
-  background:
-    "radial-gradient(circle at top, rgba(61,165,255,0.22), transparent 42%), rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "34px",
-  padding: "64px 56px",
-  boxShadow: "0 30px 90px rgba(0,0,0,0.5)",
-  marginBottom: "30px",
-};
+function StatusBox({
+  label,
+  value,
+  ready = false,
+}) {
+  return (
+    <div
+      className={
+        ready
+          ? "products-status-box products-status-box-ready"
+          : "products-status-box"
+      }
+    >
+      <span>{label}</span>
 
-const catalogUnavailableStyle = {
-  maxWidth: "950px",
-  margin: "0 auto",
-  textAlign: "center",
-  background:
-    "radial-gradient(circle at top, rgba(61,165,255,0.18), transparent 45%), rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "34px",
-  padding: "70px 56px",
-  boxShadow: "0 30px 90px rgba(0,0,0,0.5)",
-};
+      <strong>{value}</strong>
+    </div>
+  );
+}
 
-const titleStyle = {
-  fontSize: "72px",
-  lineHeight: "1.02",
-  marginBottom: "24px",
-  background:
-    "linear-gradient(180deg, #ffffff, #8f8f8f)",
-  WebkitBackgroundClip: "text",
-  WebkitTextFillColor: "transparent",
-};
+const productsCss = `
+  .products-page,
+  .products-page *,
+  .products-page *::before,
+  .products-page *::after {
+    box-sizing: border-box;
+  }
 
-const subtitleStyle = {
-  maxWidth: "850px",
-  margin: "0 auto",
-  color: "#c8c8c8",
-  fontSize: "20px",
-  lineHeight: "1.85",
-};
+  .products-page {
+    width: 100%;
+    max-width: 100%;
+    padding: 90px 60px;
+    overflow-x: hidden;
+  }
 
-const statusRowStyle = {
-  display: "flex",
-  justifyContent: "center",
-  alignItems: "center",
-  gap: "12px",
-  flexWrap: "wrap",
-  marginTop: "30px",
-};
+  .products-inner {
+    width: 100%;
+    max-width: 1250px;
+    margin: 0 auto;
+  }
 
-const heroNoticeStyle = {
-  display: "inline-flex",
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
-  color: "#9ed8ff",
-  borderRadius: "999px",
-  padding: "14px 22px",
-  fontWeight: "900",
-  lineHeight: "1.5",
-  textTransform: "uppercase",
-  letterSpacing: "1px",
-};
+  .products-hero,
+  .products-unavailable {
+    padding: 64px 56px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 34px;
+    background:
+      radial-gradient(
+        circle at top,
+        rgba(61,165,255,0.22),
+        transparent 42%
+      ),
+      rgba(255,255,255,0.035);
+    box-shadow:
+      0 30px 90px rgba(0,0,0,0.5);
+    text-align: center;
+  }
 
-const openStatusStyle = {
-  display: "inline-flex",
-  background: "rgba(61,165,255,0.18)",
-  border: "1px solid rgba(61,165,255,0.42)",
-  color: "#ffffff",
-  borderRadius: "999px",
-  padding: "14px 22px",
-  fontWeight: "900",
-  textTransform: "uppercase",
-  letterSpacing: "1px",
-};
+  .products-hero {
+    margin-bottom: 30px;
+  }
 
-const closedStatusStyle = {
-  display: "inline-flex",
-  background: "rgba(255,255,255,0.07)",
-  border: "1px solid rgba(255,255,255,0.12)",
-  color: "#c8c8c8",
-  borderRadius: "999px",
-  padding: "14px 22px",
-  fontWeight: "900",
-  textTransform: "uppercase",
-  letterSpacing: "1px",
-};
+  .products-unavailable {
+    max-width: 950px;
+    margin: 0 auto;
+  }
 
-const storeNoticeStyle = {
-  maxWidth: "760px",
-  margin: "22px auto 0",
-  padding: "15px 18px",
-  borderRadius: "15px",
-  border: "1px solid rgba(255,255,255,0.09)",
-  background: "rgba(0,0,0,0.25)",
-  color: "#aeb7bf",
-  lineHeight: "1.65",
-};
+  .products-title {
+    margin-bottom: 24px;
+    font-size: clamp(46px, 7vw, 72px);
+    line-height: 1.02;
+    background:
+      linear-gradient(
+        180deg,
+        #ffffff,
+        #8f8f8f
+      );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
 
-const filterPanelStyle = {
-  background:
-    "radial-gradient(circle at top left, rgba(61,165,255,0.14), transparent 35%), rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "30px",
-  padding: "34px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
-  marginBottom: "30px",
-};
+  .products-subtitle {
+    max-width: 850px;
+    margin: 0 auto;
+    color: #c8c8c8;
+    font-size: 20px;
+    line-height: 1.85;
+  }
 
-const sectionTitleStyle = {
-  fontSize: "38px",
-  lineHeight: "1.12",
-  marginBottom: "14px",
-  background:
-    "linear-gradient(180deg, #ffffff, #9d9d9d)",
-  WebkitBackgroundClip: "text",
-  WebkitTextFillColor: "transparent",
-};
+  .products-status-row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 30px;
+  }
 
-const categoryDescriptionStyle = {
-  color: "#c8c8c8",
-  lineHeight: "1.8",
-  marginBottom: "24px",
-  maxWidth: "850px",
-};
+  .products-research-pill,
+  .products-store-pill,
+  .products-document-pill {
+    display: inline-flex;
+    padding: 14px 22px;
+    border-radius: 999px;
+    font-weight: 900;
+    line-height: 1.5;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
 
-const searchInputStyle = {
-  width: "100%",
-  padding: "17px",
-  borderRadius: "16px",
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(255,255,255,0.055)",
-  color: "#ffffff",
-  fontSize: "16px",
-  outline: "none",
-  marginBottom: "22px",
-};
+  .products-research-pill,
+  .products-document-pill {
+    border: 1px solid rgba(61,165,255,0.28);
+    background: rgba(61,165,255,0.12);
+    color: #9ed8ff;
+  }
 
-const categoryRowStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "12px",
-};
+  .products-store-pill {
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.07);
+    color: #c8c8c8;
+  }
 
-const resultsBarStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: "16px",
-  flexWrap: "wrap",
-  marginTop: "24px",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "16px",
-  padding: "16px",
-  color: "#c8c8c8",
-};
+  .products-store-pill-open {
+    border-color: rgba(61,165,255,0.42);
+    background: rgba(61,165,255,0.18);
+    color: #ffffff;
+  }
 
-const productGridStyle = {
-  display: "grid",
-  gridTemplateColumns:
-    "repeat(auto-fit, minmax(310px, 1fr))",
-  gap: "24px",
-};
+  .products-store-notice,
+  .products-document-error {
+    max-width: 760px;
+    margin: 22px auto 0;
+    padding: 15px 18px;
+    border-radius: 15px;
+    line-height: 1.65;
+  }
 
-const productCardStyle = {
-  background:
-    "radial-gradient(circle at top left, rgba(61,165,255,0.12), transparent 35%), rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "28px",
-  padding: "26px",
-  boxShadow: "0 28px 75px rgba(0,0,0,0.42)",
-  overflow: "hidden",
-};
+  .products-store-notice {
+    border: 1px solid rgba(255,255,255,0.09);
+    background: rgba(0,0,0,0.25);
+    color: #aeb7bf;
+  }
 
-const topBadgeRowStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: "12px",
-  flexWrap: "wrap",
-  marginBottom: "18px",
-  position: "relative",
-  zIndex: 2,
-};
+  .products-document-error {
+    border: 1px solid rgba(255,130,130,0.25);
+    background: rgba(255,70,70,0.08);
+    color: #ffd1d1;
+  }
 
-const categoryBadgeStyle = {
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
-  color: "#9ed8ff",
-  borderRadius: "999px",
-  padding: "8px 12px",
-  fontSize: "12px",
-  fontWeight: "900",
-  textTransform: "uppercase",
-  letterSpacing: "1px",
-};
+  .products-filters {
+    padding: 34px;
+    margin-bottom: 30px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 30px;
+    background:
+      radial-gradient(
+        circle at top left,
+        rgba(61,165,255,0.14),
+        transparent 35%
+      ),
+      rgba(255,255,255,0.035);
+    box-shadow:
+      0 30px 80px rgba(0,0,0,0.45);
+  }
 
-const bestSellerBadgeStyle = {
-  background: "rgba(255,255,255,0.08)",
-  border: "1px solid rgba(255,255,255,0.12)",
-  color: "#ffffff",
-  borderRadius: "999px",
-  padding: "8px 12px",
-  fontSize: "12px",
-  fontWeight: "900",
-};
+  .products-section-title {
+    margin-bottom: 14px;
+    font-size: clamp(31px, 5vw, 38px);
+    line-height: 1.12;
+    background:
+      linear-gradient(
+        180deg,
+        #ffffff,
+        #9d9d9d
+      );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
 
-const imageButtonStyle = {
-  display: "block",
-  width: "100%",
-  padding: "0",
-  margin: "0 0 22px",
-  border: "none",
-  background: "transparent",
-  cursor: "pointer",
-};
+  .products-category-description {
+    max-width: 850px;
+    margin-bottom: 24px;
+    color: #c8c8c8;
+    line-height: 1.8;
+  }
 
-const realImageWrapStyle = {
-  width: "100%",
-  height: "320px",
-  borderRadius: "22px",
-  overflow: "hidden",
-  position: "relative",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  background:
-    "radial-gradient(circle at center, rgba(61,165,255,0.18), rgba(0,0,0,0.72) 70%)",
-  border: "1px solid rgba(61,165,255,0.16)",
-};
+  .products-search {
+    width: 100%;
+    padding: 17px;
+    margin-bottom: 22px;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px;
+    outline: none;
+    background: rgba(255,255,255,0.055);
+    color: #ffffff;
+    font: inherit;
+  }
 
-const realImageStyle = {
-  width: "100%",
-  height: "100%",
-  objectFit: "cover",
-  objectPosition: "center",
-  display: "block",
-  position: "relative",
-  zIndex: 1,
-};
+  .products-category-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
 
-const imageGlowStyle = {
-  position: "absolute",
-  left: "20%",
-  right: "20%",
-  bottom: "8px",
-  height: "30px",
-  borderRadius: "50%",
-  background: "rgba(61,165,255,0.25)",
-  filter: "blur(18px)",
-};
+  .products-results {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-top: 24px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 16px;
+    background: rgba(255,255,255,0.045);
+    color: #c8c8c8;
+  }
 
-const bottleWrapStyle = {
-  height: "320px",
-  display: "grid",
-  alignContent: "center",
-  justifyContent: "center",
-  borderRadius: "22px",
-  background:
-    "radial-gradient(circle at center, rgba(61,165,255,0.18), rgba(0,0,0,0.72) 70%)",
-  border: "1px solid rgba(61,165,255,0.16)",
-};
+  .products-grid {
+    display: grid;
+    grid-template-columns:
+      repeat(auto-fit, minmax(310px, 1fr));
+    gap: 24px;
+  }
 
-const bottleCapStyle = {
-  width: "68px",
-  height: "28px",
-  margin: "0 auto",
-  borderRadius: "11px 11px 4px 4px",
-  background:
-    "linear-gradient(180deg, #e3e3e3, #737373)",
-  boxShadow: "0 0 18px rgba(61,165,255,0.15)",
-};
+  .products-card {
+    min-width: 0;
+    padding: 26px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 28px;
+    background:
+      radial-gradient(
+        circle at top left,
+        rgba(61,165,255,0.12),
+        transparent 35%
+      ),
+      rgba(255,255,255,0.035);
+    box-shadow:
+      0 28px 75px rgba(0,0,0,0.42);
+  }
 
-const bottleStyle = {
-  width: "150px",
-  height: "205px",
-  borderRadius: "32px 32px 38px 38px",
-  background:
-    "linear-gradient(135deg, rgba(255,255,255,0.9), rgba(255,255,255,0.28))",
-  border: "1px solid rgba(255,255,255,0.7)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  boxShadow: "0 24px 60px rgba(0,0,0,0.45)",
-};
+  .products-badge-row {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
 
-const labelStyle = {
-  width: "116px",
-  minHeight: "125px",
-  borderRadius: "15px",
-  background: "linear-gradient(180deg, #050505, #171717)",
-  border: "1px solid rgba(61,165,255,0.35)",
-  color: "#ffffff",
-  display: "grid",
-  alignContent: "center",
-  justifyItems: "center",
-  gap: "7px",
-  padding: "11px",
-  textAlign: "center",
-};
+  .products-badge-group {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
 
-const labelBrandStyle = {
-  fontSize: "27px",
-  lineHeight: "1",
-};
+  .products-category-badge,
+  .products-best-seller-badge,
+  .products-coa-badge {
+    display: inline-flex;
+    width: fit-content;
+    padding: 8px 12px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+  }
 
-const labelCodeStyle = {
-  color: "#9ed8ff",
-  fontSize: "12px",
-  fontWeight: "900",
-};
+  .products-category-badge {
+    border: 1px solid rgba(61,165,255,0.28);
+    background: rgba(61,165,255,0.12);
+    color: #9ed8ff;
+  }
 
-const labelStrengthStyle = {
-  color: "#ffffff",
-  fontSize: "14px",
-  fontWeight: "900",
-};
+  .products-best-seller-badge {
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.08);
+    color: #ffffff;
+  }
 
-const labelNoticeStyle = {
-  color: "#9ed8ff",
-  fontSize: "8px",
-  textTransform: "uppercase",
-};
+  .products-coa-badge {
+    border: 1px solid rgba(61,165,255,0.45);
+    background: rgba(61,165,255,0.18);
+    color: #c8ecff;
+  }
 
-const productTitleStyle = {
-  color: "#ffffff",
-  fontSize: "29px",
-  lineHeight: "1.15",
-  marginBottom: "8px",
-};
+  .products-image-button {
+    display: block;
+    width: 100%;
+    padding: 0;
+    margin: 0 0 22px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+  }
 
-const codeStyle = {
-  color: "#9ed8ff",
-  fontWeight: "900",
-  marginBottom: "16px",
-};
+  .products-real-image-wrap,
+  .products-bottle-wrap {
+    width: 100%;
+    height: 320px;
+    overflow: hidden;
+    border: 1px solid rgba(61,165,255,0.16);
+    border-radius: 22px;
+    background:
+      radial-gradient(
+        circle at center,
+        rgba(61,165,255,0.18),
+        rgba(0,0,0,0.72) 70%
+      );
+  }
 
-const variantPanelStyle = {
-  marginBottom: "18px",
-  padding: "15px",
-  borderRadius: "16px",
-  background: "rgba(0,0,0,0.24)",
-  border: "1px solid rgba(255,255,255,0.08)",
-};
+  .products-real-image-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
 
-const variantLabelStyle = {
-  display: "block",
-  color: "#c8c8c8",
-  fontSize: "13px",
-  fontWeight: "900",
-  textTransform: "uppercase",
-  letterSpacing: "1px",
-  marginBottom: "10px",
-};
+  .products-real-image-wrap img {
+    position: relative;
+    z-index: 1;
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+  }
 
-const variantButtonRowStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "8px",
-};
+  .products-image-glow {
+    position: absolute;
+    left: 20%;
+    right: 20%;
+    bottom: 8px;
+    height: 30px;
+    border-radius: 50%;
+    background: rgba(61,165,255,0.25);
+    filter: blur(18px);
+  }
 
-const variantButtonStyle = {
-  padding: "10px 13px",
-  borderRadius: "12px",
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(255,255,255,0.045)",
-  color: "#d4d4d4",
-  fontWeight: "900",
-  cursor: "pointer",
-};
+  .products-bottle-wrap {
+    display: grid;
+    align-content: center;
+    justify-content: center;
+  }
 
-const selectedVariantButtonStyle = {
-  padding: "10px 13px",
-  borderRadius: "12px",
-  border: "1px solid rgba(61,165,255,0.62)",
-  background: "rgba(61,165,255,0.22)",
-  color: "#ffffff",
-  fontWeight: "900",
-  cursor: "pointer",
-  boxShadow: "0 0 18px rgba(61,165,255,0.16)",
-};
+  .products-bottle-cap {
+    width: 68px;
+    height: 28px;
+    margin: 0 auto;
+    border-radius: 11px 11px 4px 4px;
+    background:
+      linear-gradient(
+        180deg,
+        #e3e3e3,
+        #737373
+      );
+    box-shadow:
+      0 0 18px rgba(61,165,255,0.15);
+  }
 
-const compositionStyle = {
-  display: "grid",
-  gap: "5px",
-  marginTop: "12px",
-  paddingTop: "12px",
-  borderTop: "1px solid rgba(255,255,255,0.08)",
-  color: "#c8c8c8",
-  fontSize: "13px",
-};
+  .products-bottle {
+    width: 150px;
+    height: 205px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255,255,255,0.7);
+    border-radius: 32px 32px 38px 38px;
+    background:
+      linear-gradient(
+        135deg,
+        rgba(255,255,255,0.9),
+        rgba(255,255,255,0.28)
+      );
+    box-shadow:
+      0 24px 60px rgba(0,0,0,0.45);
+  }
 
-const productTextStyle = {
-  color: "#c8c8c8",
-  lineHeight: "1.8",
-  fontSize: "15px",
-  minHeight: "86px",
-};
+  .products-label {
+    width: 116px;
+    min-height: 125px;
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    gap: 7px;
+    padding: 11px;
+    border: 1px solid rgba(61,165,255,0.35);
+    border-radius: 15px;
+    background:
+      linear-gradient(
+        180deg,
+        #050505,
+        #171717
+      );
+    color: #ffffff;
+    text-align: center;
+  }
 
-const statusGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: "10px",
-  marginTop: "20px",
-};
+  .products-label strong {
+    font-size: 27px;
+    line-height: 1;
+  }
 
-const statusBoxStyle = {
-  display: "grid",
-  gap: "4px",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "14px",
-  padding: "12px",
-  color: "#c8c8c8",
-  fontSize: "13px",
-};
+  .products-label span {
+    color: #9ed8ff;
+    font-size: 12px;
+    font-weight: 900;
+  }
 
-const priceBoxStyle = {
-  display: "grid",
-  gap: "4px",
-  marginTop: "18px",
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
-  color: "#9ed8ff",
-  borderRadius: "16px",
-  padding: "16px",
-};
+  .products-label small {
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 900;
+  }
 
-const buttonStackStyle = {
-  display: "grid",
-  gap: "10px",
-  marginTop: "18px",
-};
+  .products-label .products-label-notice {
+    color: #9ed8ff;
+    font-size: 8px;
+    text-transform: uppercase;
+  }
 
-const disabledButtonStyle = {
-  width: "100%",
-  border: "1px solid rgba(255,255,255,0.1)",
-  borderRadius: "14px",
-  padding: "14px 18px",
-  background: "rgba(255,255,255,0.045)",
-  color: "#858f99",
-  fontWeight: "900",
-  cursor: "not-allowed",
-};
+  .products-product-title {
+    margin-bottom: 8px;
+    color: #ffffff;
+    font-size: 29px;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+  }
 
-const researchNoticeStyle = {
-  marginTop: "18px",
-  textAlign: "center",
-  color: "#9ed8ff",
-  fontSize: "12px",
-  fontWeight: "900",
-  textTransform: "uppercase",
-  letterSpacing: "1px",
-};
+  .products-code {
+    margin-bottom: 16px;
+    color: #9ed8ff;
+    font-weight: 900;
+    overflow-wrap: anywhere;
+  }
 
-const emptyPanelStyle = {
-  textAlign: "center",
-  background: "rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "28px",
-  padding: "50px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.35)",
-};
+  .products-variant-panel {
+    margin-bottom: 18px;
+    padding: 15px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    background: rgba(0,0,0,0.24);
+  }
 
-const textStyle = {
-  color: "#c8c8c8",
-  lineHeight: "1.8",
-};
+  .products-variant-label {
+    display: block;
+    margin-bottom: 10px;
+    color: #c8c8c8;
+    font-size: 13px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .products-variant-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .products-variant-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 10px 13px;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 12px;
+    background: rgba(255,255,255,0.045);
+    color: #d4d4d4;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .products-variant-button-selected {
+    border-color: rgba(61,165,255,0.62);
+    background: rgba(61,165,255,0.22);
+    color: #ffffff;
+    box-shadow:
+      0 0 18px rgba(61,165,255,0.16);
+  }
+
+  .products-variant-button small {
+    padding: 3px 5px;
+    border-radius: 999px;
+    background: rgba(61,165,255,0.18);
+    color: #9ed8ff;
+    font-size: 8px;
+    text-transform: uppercase;
+  }
+
+  .products-composition {
+    display: grid;
+    gap: 5px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    color: #c8c8c8;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+  }
+
+  .products-description {
+    min-height: 86px;
+    color: #c8c8c8;
+    font-size: 15px;
+    line-height: 1.8;
+  }
+
+  .products-status-grid {
+    display: grid;
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 20px;
+  }
+
+  .products-status-box {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+    padding: 12px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 14px;
+    background: rgba(255,255,255,0.045);
+    color: #c8c8c8;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+  }
+
+  .products-status-box-ready {
+    border-color: rgba(61,165,255,0.22);
+    background: rgba(61,165,255,0.08);
+    color: #c6ebff;
+  }
+
+  .products-document-panel {
+    margin-top: 18px;
+    padding: 16px;
+    border: 1px solid rgba(61,165,255,0.28);
+    border-radius: 18px;
+    background:
+      linear-gradient(
+        145deg,
+        rgba(61,165,255,0.11),
+        rgba(0,0,0,0.2)
+      );
+  }
+
+  .products-document-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .products-document-heading > div {
+    min-width: 0;
+    display: grid;
+    gap: 5px;
+  }
+
+  .products-document-heading > div > span,
+  .products-document-details span {
+    color: #9ca8b3;
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .products-document-heading strong {
+    color: #ffffff;
+    overflow-wrap: anywhere;
+  }
+
+  .products-published-marker {
+    display: inline-flex;
+    padding: 6px 9px;
+    border: 1px solid rgba(61,165,255,0.3);
+    border-radius: 999px;
+    background: rgba(61,165,255,0.14);
+    color: #9ed8ff;
+    font-size: 9px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .products-document-details {
+    display: grid;
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+    gap: 9px;
+    margin-top: 14px;
+  }
+
+  .products-document-details > div {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+    padding: 11px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    background: rgba(0,0,0,0.2);
+    overflow-wrap: anywhere;
+  }
+
+  .products-document-details strong {
+    color: #ffffff;
+    font-size: 12px;
+  }
+
+  .products-document-links {
+    display: grid;
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+    gap: 9px;
+    margin-top: 14px;
+  }
+
+  .products-link-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    text-align: center;
+    text-decoration: none;
+  }
+
+  .products-full-link {
+    grid-column: 1 / -1;
+  }
+
+  .products-price-box {
+    display: grid;
+    gap: 4px;
+    margin-top: 18px;
+    padding: 16px;
+    border: 1px solid rgba(61,165,255,0.28);
+    border-radius: 16px;
+    background: rgba(61,165,255,0.12);
+    color: #9ed8ff;
+  }
+
+  .products-button-stack {
+    display: grid;
+    gap: 10px;
+    margin-top: 18px;
+  }
+
+  .products-disabled-button {
+    width: 100%;
+    padding: 14px 18px;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    background: rgba(255,255,255,0.045);
+    color: #858f99;
+    font-weight: 900;
+    cursor: not-allowed;
+  }
+
+  .products-research-notice {
+    margin-top: 18px;
+    color: #9ed8ff;
+    font-size: 12px;
+    font-weight: 900;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .products-empty {
+    display: grid;
+    justify-items: center;
+    gap: 18px;
+    padding: 50px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 28px;
+    background: rgba(255,255,255,0.035);
+    box-shadow:
+      0 30px 80px rgba(0,0,0,0.35);
+    color: #c8c8c8;
+    text-align: center;
+  }
+
+  @media (max-width: 900px) {
+    .products-page {
+      padding: 65px 24px;
+    }
+  }
+
+  @media (max-width: 650px) {
+    .products-page {
+      padding: 44px 12px;
+    }
+
+    .products-hero,
+    .products-unavailable {
+      padding: 34px 20px;
+      border-radius: 25px;
+    }
+
+    .products-filters,
+    .products-card {
+      padding: 19px;
+      border-radius: 22px;
+    }
+
+    .products-category-row button {
+      flex: 1 1 145px;
+    }
+
+    .products-status-row > div {
+      width: 100%;
+      justify-content: center;
+    }
+
+    .products-badge-row {
+      display: grid;
+      grid-template-columns:
+        minmax(0, 1fr);
+    }
+
+    .products-badge-group {
+      justify-content: flex-start;
+    }
+  }
+
+  @media (max-width: 430px) {
+    .products-page {
+      padding: 34px 8px;
+    }
+
+    .products-hero,
+    .products-unavailable,
+    .products-filters,
+    .products-card {
+      padding: 15px;
+    }
+
+    .products-grid {
+      grid-template-columns:
+        minmax(0, 1fr);
+    }
+
+    .products-real-image-wrap,
+    .products-bottle-wrap {
+      height: 280px;
+    }
+
+    .products-status-grid,
+    .products-document-details,
+    .products-document-links {
+      grid-template-columns:
+        minmax(0, 1fr);
+    }
+
+    .products-full-link {
+      grid-column: auto;
+    }
+
+    .products-description {
+      min-height: 0;
+    }
+
+    .products-link-button,
+    .products-button-stack button {
+      width: 100%;
+    }
+  }
+`;
 
 export default Products;
