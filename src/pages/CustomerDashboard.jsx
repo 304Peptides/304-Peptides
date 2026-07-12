@@ -1,537 +1,2032 @@
-function CustomerDashboard({ onNavigate, orders, partnerApplication }) {
-  const hasOrders = orders.length > 0;
-  const latestOrder = orders[0];
-  const latestCustomer = latestOrder?.customer || {};
+import {
+  useMemo,
+  useState,
+} from "react";
 
-  const customerName =
-    latestCustomer.firstName || latestCustomer.lastName
-      ? `${latestCustomer.firstName || ""} ${latestCustomer.lastName || ""}`.trim()
-      : "No checkout details saved yet";
+import {
+  products,
+} from "../data/products";
 
-  const customerEmail =
-    latestCustomer.email || "No checkout email saved yet";
+function normalizeValue(
+  value
+) {
+  return String(
+    value || ""
+  )
+    .trim()
+    .toLowerCase();
+}
 
-  const customerAddress =
-    latestCustomer.address || latestCustomer.city || latestCustomer.state || latestCustomer.zip
-      ? `${latestCustomer.address || ""}, ${latestCustomer.city || ""}, ${latestCustomer.state || ""} ${latestCustomer.zip || ""}`.replace(/^,\s*/, "").trim()
-      : "No shipping address saved yet";
+function buildCatalogVariants() {
+  return products.flatMap(
+    (
+      product
+    ) => {
+      const variants =
+        product.variants?.length
+          ? product.variants
+          : [product];
 
-  const totalOrders = orders.length;
+      return variants.map(
+        (
+          variant
+        ) => ({
+          ...product,
+          ...variant,
 
-  const totalItems = orders.reduce(
-    (total, order) => total + (order.totalQuantity || 0),
-    0
-  );
+          name:
+            variant.name ||
+            product.name ||
+            "",
 
-  const totalSpent = orders.reduce((orderTotal, order) => {
-    const items = order.items || [];
+          category:
+            variant.category ||
+            product.category ||
+            "",
 
-    const subtotal = items.reduce(
-      (itemTotal, item) => itemTotal + (item.price || 0) * item.quantity,
-      0
-    );
+          codeName:
+            variant.codeName ||
+            product.codeName ||
+            "",
 
-    return orderTotal + subtotal;
-  }, 0);
+          strength:
+            variant.strength ||
+            product.strength ||
+            "",
 
-  return (
-    <main style={{ padding: "90px 60px" }}>
-      <section style={{ maxWidth: "1200px", margin: "0 auto" }}>
-
-        <div style={heroPanelStyle}>
-          <p className="eyebrow">RESEARCH HUB</p>
-
-          <h1 style={titleStyle}>
-            Account Dashboard
-          </h1>
-
-          <p style={subtitleStyle}>
-            View prototype order history, saved checkout details, research-use
-            reminders, and Partner Program access.
-          </p>
-
-          <div style={buttonRowStyle}>
-            <button
-              className="primary-btn"
-              onClick={() => onNavigate("products")}
-            >
-              Browse Products
-            </button>
-
-            <button
-              className="secondary-btn"
-              onClick={() => onNavigate("cart")}
-            >
-              View Cart
-            </button>
-
-            <button
-              className="secondary-btn"
-              onClick={() => onNavigate("researchAgreement")}
-            >
-              Research Agreement
-            </button>
-          </div>
-        </div>
-
-        <div style={statsGridStyle}>
-          <div style={statCardStyle}>
-            <span>Total Orders</span>
-            <strong>{totalOrders}</strong>
-          </div>
-
-          <div style={statCardStyle}>
-            <span>Total Items</span>
-            <strong>{totalItems}</strong>
-          </div>
-
-          <div style={statCardStyle}>
-            <span>Prototype Spend</span>
-            <strong>${totalSpent}</strong>
-          </div>
-
-          <div style={statCardStyle}>
-            <span>Partner Status</span>
-            <strong>{partnerApplication ? "Applied" : "Not Applied"}</strong>
-          </div>
-        </div>
-
-        <div style={dashboardGridStyle}>
-
-          <div style={mainPanelStyle}>
-            <p className="eyebrow">CHECKOUT DETAILS</p>
-
-            <h2 style={sectionTitleStyle}>
-              Saved Customer Info
-            </h2>
-
-            <div style={customerGridStyle}>
-              <div style={infoBoxStyle}>
-                <span>Name</span>
-                <strong>{customerName}</strong>
-              </div>
-
-              <div style={infoBoxStyle}>
-                <span>Email</span>
-                <strong>{customerEmail}</strong>
-              </div>
-
-              <div style={{ ...infoBoxStyle, gridColumn: "1 / -1" }}>
-                <span>Shipping Address</span>
-                <strong>{customerAddress}</strong>
-              </div>
-            </div>
-
-            <div style={noticeBoxStyle}>
-              These details come from the most recent checkout form. Real customer
-              profiles will need secure backend account storage.
-            </div>
-          </div>
-
-          <aside style={sidePanelStyle}>
-            <p className="eyebrow">PARTNER PROGRAM</p>
-
-            <h2 style={sideTitleStyle}>
-              Research Partner Access
-            </h2>
-
-            {partnerApplication ? (
-              <>
-                <div style={partnerCodeBoxStyle}>
-                  <span>Your Code</span>
-                  <strong>{partnerApplication.code}</strong>
-                </div>
-
-                <div style={statusBoxStyle}>
-                  <span>Status</span>
-                  <strong>{partnerApplication.status}</strong>
-                </div>
-
-                <button
-                  className="primary-btn"
-                  style={{ width: "100%", marginTop: "20px" }}
-                  onClick={() => onNavigate("partnerHQ")}
-                >
-                  Open Partner HQ
-                </button>
-
-                <button
-                  className="secondary-btn"
-                  style={{ width: "100%", marginTop: "14px" }}
-                  onClick={() => onNavigate("marketingCenter")}
-                >
-                  Marketing Center
-                </button>
-              </>
-            ) : hasOrders ? (
-              <>
-                <p style={sideTextStyle}>
-                  You have completed a test order, so the Partner Application is
-                  unlocked.
-                </p>
-
-                <button
-                  className="primary-btn"
-                  style={{ width: "100%", marginTop: "20px" }}
-                  onClick={() => onNavigate("partnerApplication")}
-                >
-                  Apply For Partner Code
-                </button>
-              </>
-            ) : (
-              <>
-                <p style={sideTextStyle}>
-                  Complete your first test order to unlock the Partner Application.
-                </p>
-
-                <button
-                  className="primary-btn"
-                  style={{ width: "100%", marginTop: "20px" }}
-                  onClick={() => onNavigate("products")}
-                >
-                  Start First Order
-                </button>
-              </>
-            )}
-          </aside>
-
-        </div>
-
-        <div style={ordersPanelStyle}>
-          <div style={sectionHeaderStyle}>
-            <div>
-              <p className="eyebrow">ORDER HISTORY</p>
-
-              <h2 style={sectionTitleStyle}>
-                Test Orders
-              </h2>
-            </div>
-
-            <button
-              className="secondary-btn"
-              onClick={() => onNavigate("products")}
-            >
-              Shop Again
-            </button>
-          </div>
-
-          {!hasOrders ? (
-            <div style={emptyOrdersStyle}>
-              <h3>No Orders Yet</h3>
-
-              <p>
-                Place a test order to see order history, customer information,
-                and Partner Program unlocks.
-              </p>
-
-              <button
-                className="primary-btn"
-                style={{ marginTop: "22px" }}
-                onClick={() => onNavigate("products")}
-              >
-                Browse Products
-              </button>
-            </div>
-          ) : (
-            <div style={orderStackStyle}>
-              {orders.map((order) => {
-                const items = order.items || [];
-
-                const orderSubtotal = items.reduce(
-                  (total, item) => total + (item.price || 0) * item.quantity,
-                  0
-                );
-
-                const customer = order.customer || {};
-
-                const name =
-                  customer.firstName || customer.lastName
-                    ? `${customer.firstName || ""} ${customer.lastName || ""}`.trim()
-                    : "Older test order";
-
-                const email = customer.email || "No email saved";
-
-                return (
-                  <div key={order.id} style={orderCardStyle}>
-                    <div>
-                      <p style={orderIdStyle}>
-                        Order #{order.id}
-                      </p>
-
-                      <h3 style={orderTitleStyle}>
-                        {order.status}
-                      </h3>
-
-                      <p style={mutedTextStyle}>
-                        {order.date} · {name} · {email}
-                      </p>
-
-                      <p style={mutedTextStyle}>
-                        {items.length} product type{items.length === 1 ? "" : "s"} ·{" "}
-                        {order.totalQuantity} total item{order.totalQuantity === 1 ? "" : "s"}
-                      </p>
-                    </div>
-
-                    <div style={orderTotalBoxStyle}>
-                      <span>Subtotal</span>
-                      <strong>${orderSubtotal}</strong>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        <div style={researchNoticeStyle}>
-          For Research Use Only. Products are not intended for human consumption.
-        </div>
-
-      </section>
-    </main>
+          image:
+            variant.image ||
+            product.image ||
+            "",
+        })
+      );
+    }
   );
 }
 
-const heroPanelStyle = {
-  textAlign: "center",
-  background:
-    "radial-gradient(circle at top, rgba(61, 165, 255, 0.22), transparent 42%), rgba(255, 255, 255, 0.035)",
-  border: "1px solid rgba(255, 255, 255, 0.09)",
-  borderRadius: "34px",
-  padding: "64px 56px",
-  boxShadow: "0 30px 90px rgba(0,0,0,0.5)",
-  marginBottom: "30px",
-};
+const catalogVariants =
+  buildCatalogVariants();
 
-const titleStyle = {
-  fontSize: "62px",
-  lineHeight: "1.05",
-  marginBottom: "20px",
-  background: "linear-gradient(180deg, #ffffff, #9d9d9d)",
-  WebkitBackgroundClip: "text",
-  WebkitTextFillColor: "transparent",
-};
+function findCatalogVariant(
+  item
+) {
+  const codeName =
+    normalizeValue(
+      item?.codeName
+    );
 
-const subtitleStyle = {
-  maxWidth: "780px",
-  margin: "0 auto",
-  color: "#c8c8c8",
-  fontSize: "19px",
-  lineHeight: "1.8",
-};
+  const strength =
+    normalizeValue(
+      item?.strength
+    );
 
-const buttonRowStyle = {
-  display: "flex",
-  justifyContent: "center",
-  gap: "16px",
-  flexWrap: "wrap",
-  marginTop: "30px",
-};
+  const name =
+    normalizeValue(
+      item?.name
+    );
 
-const statsGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(4, 1fr)",
-  gap: "18px",
-  marginBottom: "30px",
-};
+  const exactCodeMatch =
+    catalogVariants.find(
+      (
+        variant
+      ) =>
+        normalizeValue(
+          variant.codeName
+        ) ===
+          codeName &&
+        normalizeValue(
+          variant.strength
+        ) ===
+          strength
+    );
 
-const statCardStyle = {
-  display: "grid",
-  gap: "8px",
-  background: "rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "22px",
-  padding: "22px",
-  color: "#c8c8c8",
-  boxShadow: "0 22px 60px rgba(0,0,0,0.32)",
-};
+  if (
+    exactCodeMatch
+  ) {
+    return exactCodeMatch;
+  }
 
-const dashboardGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "1fr 360px",
-  gap: "30px",
-  alignItems: "start",
-  marginBottom: "30px",
-};
+  const exactNameMatch =
+    catalogVariants.find(
+      (
+        variant
+      ) =>
+        normalizeValue(
+          variant.name
+        ) ===
+          name &&
+        normalizeValue(
+          variant.strength
+        ) ===
+          strength
+    );
 
-const mainPanelStyle = {
-  background:
-    "radial-gradient(circle at top left, rgba(61, 165, 255, 0.14), transparent 35%), rgba(255, 255, 255, 0.035)",
-  border: "1px solid rgba(255, 255, 255, 0.09)",
-  borderRadius: "30px",
-  padding: "38px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
-};
+  if (
+    exactNameMatch
+  ) {
+    return exactNameMatch;
+  }
 
-const sidePanelStyle = {
-  position: "sticky",
-  top: "110px",
-  background:
-    "radial-gradient(circle at top left, rgba(61, 165, 255, 0.16), transparent 35%), rgba(255, 255, 255, 0.035)",
-  border: "1px solid rgba(255, 255, 255, 0.09)",
-  borderRadius: "28px",
-  padding: "32px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
-};
+  return catalogVariants.find(
+    (
+      variant
+    ) =>
+      normalizeValue(
+        variant.codeName
+      ) ===
+        codeName ||
+      normalizeValue(
+        variant.name
+      ) ===
+        name
+  );
+}
 
-const sectionTitleStyle = {
-  fontSize: "38px",
-  lineHeight: "1.12",
-  marginBottom: "24px",
-  background: "linear-gradient(180deg, #ffffff, #9d9d9d)",
-  WebkitBackgroundClip: "text",
-  WebkitTextFillColor: "transparent",
-};
+function getOrderItems(
+  order
+) {
+  const items =
+    Array.isArray(
+      order?.items
+    )
+      ? order.items
+      : [];
 
-const sideTitleStyle = {
-  fontSize: "32px",
-  lineHeight: "1.12",
-  marginBottom: "20px",
-  background: "linear-gradient(180deg, #ffffff, #9d9d9d)",
-  WebkitBackgroundClip: "text",
-  WebkitTextFillColor: "transparent",
-};
+  return items.map(
+    (
+      item
+    ) => {
+      const catalogItem =
+        findCatalogVariant(
+          item
+        );
 
-const customerGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: "14px",
-};
+      return {
+        ...catalogItem,
+        ...item,
 
-const infoBoxStyle = {
-  display: "grid",
-  gap: "6px",
-  background: "rgba(61,165,255,0.10)",
-  border: "1px solid rgba(61,165,255,0.22)",
-  borderRadius: "16px",
-  padding: "16px",
-  color: "#c8eaff",
-};
+        name:
+          item.name ||
+          catalogItem?.name ||
+          "Research Product",
 
-const noticeBoxStyle = {
-  marginTop: "22px",
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
-  color: "#9ed8ff",
-  borderRadius: "16px",
-  padding: "16px",
-  fontSize: "14px",
-  fontWeight: "800",
-  lineHeight: "1.6",
-};
+        codeName:
+          item.codeName ||
+          catalogItem?.codeName ||
+          "",
 
-const partnerCodeBoxStyle = {
-  display: "grid",
-  gap: "8px",
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
-  color: "#9ed8ff",
-  borderRadius: "18px",
-  padding: "18px",
-  marginBottom: "14px",
-};
+        strength:
+          item.strength ||
+          catalogItem?.strength ||
+          "",
 
-const statusBoxStyle = {
-  display: "grid",
-  gap: "8px",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  color: "#c8c8c8",
-  borderRadius: "18px",
-  padding: "18px",
-};
+        category:
+          item.category ||
+          catalogItem?.category ||
+          "Research Product",
 
-const sideTextStyle = {
-  color: "#c8c8c8",
-  lineHeight: "1.8",
-};
+        image:
+          item.image ||
+          catalogItem?.image ||
+          "",
+      };
+    }
+  );
+}
 
-const ordersPanelStyle = {
-  background:
-    "radial-gradient(circle at top left, rgba(61, 165, 255, 0.14), transparent 35%), rgba(255, 255, 255, 0.035)",
-  border: "1px solid rgba(255, 255, 255, 0.09)",
-  borderRadius: "30px",
-  padding: "38px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
-};
+function getOrderId(
+  order
+) {
+  return String(
+    order?.orderId ||
+      order?.id ||
+      "Pending"
+  );
+}
 
-const sectionHeaderStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: "20px",
-  alignItems: "center",
-  marginBottom: "26px",
-};
+function getOrderQuantity(
+  order
+) {
+  const savedQuantity =
+    Number(
+      order?.totalQuantity
+    );
 
-const emptyOrdersStyle = {
-  textAlign: "center",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "22px",
-  padding: "34px",
-  color: "#c8c8c8",
-  lineHeight: "1.8",
-};
+  if (
+    Number.isFinite(
+      savedQuantity
+    )
+  ) {
+    return savedQuantity;
+  }
 
-const orderStackStyle = {
-  display: "grid",
-  gap: "16px",
-};
+  return getOrderItems(
+    order
+  ).reduce(
+    (
+      total,
+      item
+    ) =>
+      total +
+      Number(
+        item.quantity ||
+          0
+      ),
+    0
+  );
+}
 
-const orderCardStyle = {
-  display: "grid",
-  gridTemplateColumns: "1fr 170px",
-  gap: "18px",
-  alignItems: "center",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "22px",
-  padding: "22px",
-};
+function getOrderSubtotal(
+  order
+) {
+  const savedSubtotal =
+    Number(
+      order?.subtotal
+    );
 
-const orderIdStyle = {
-  color: "#9ed8ff",
-  fontSize: "13px",
-  fontWeight: "900",
-  textTransform: "uppercase",
-  letterSpacing: "1px",
-  marginBottom: "8px",
-};
+  if (
+    Number.isFinite(
+      savedSubtotal
+    )
+  ) {
+    return savedSubtotal;
+  }
 
-const orderTitleStyle = {
-  color: "#ffffff",
-  fontSize: "24px",
-  marginBottom: "8px",
-};
+  return getOrderItems(
+    order
+  ).reduce(
+    (
+      total,
+      item
+    ) =>
+      total +
+      Number(
+        item.price ||
+          0
+      ) *
+        Number(
+          item.quantity ||
+            0
+        ),
+    0
+  );
+}
 
-const mutedTextStyle = {
-  color: "#aaa",
-  lineHeight: "1.6",
-};
+function getCustomer(
+  order
+) {
+  return (
+    order?.customer ||
+    {}
+  );
+}
 
-const orderTotalBoxStyle = {
-  display: "grid",
-  gap: "6px",
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
-  color: "#9ed8ff",
-  borderRadius: "16px",
-  padding: "16px",
-  textAlign: "center",
-};
+function getCustomerName(
+  order
+) {
+  const customer =
+    getCustomer(
+      order
+    );
 
-const researchNoticeStyle = {
-  marginTop: "30px",
-  textAlign: "center",
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
-  color: "#9ed8ff",
-  borderRadius: "20px",
-  padding: "20px",
-  fontWeight: "900",
-  lineHeight: "1.6",
-  textTransform: "uppercase",
-  letterSpacing: "1px",
-};
+  const fullName =
+    `${customer.firstName || ""} ${
+      customer.lastName || ""
+    }`.trim();
+
+  return (
+    fullName ||
+    "Customer details unavailable"
+  );
+}
+
+function getCustomerAddress(
+  order
+) {
+  const customer =
+    getCustomer(
+      order
+    );
+
+  const cityState =
+    [
+      customer.city,
+      customer.state,
+    ]
+      .filter(Boolean)
+      .join(", ");
+
+  const address =
+    [
+      customer.address,
+      cityState,
+      customer.zip,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+  return (
+    address ||
+    "Shipping address unavailable"
+  );
+}
+
+function getOrderDateValue(
+  order
+) {
+  return (
+    order?.createdAt ||
+    order?.updatedAt ||
+    order?.date ||
+    ""
+  );
+}
+
+function formatDate(
+  value
+) {
+  if (
+    !value
+  ) {
+    return "Date unavailable";
+  }
+
+  const date =
+    new Date(
+      value
+    );
+
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return String(
+      value
+    );
+  }
+
+  return date.toLocaleString(
+    "en-US",
+    {
+      month:
+        "short",
+
+      day:
+        "numeric",
+
+      year:
+        "numeric",
+
+      hour:
+        "numeric",
+
+      minute:
+        "2-digit",
+    }
+  );
+}
+
+function formatMoney(
+  value
+) {
+  const amount =
+    Number(
+      value
+    );
+
+  return Number.isFinite(
+    amount
+  )
+    ? amount.toLocaleString(
+        "en-US",
+        {
+          style:
+            "currency",
+
+          currency:
+            "USD",
+        }
+      )
+    : "$0.00";
+}
+
+function normalizeOrders(
+  orders
+) {
+  if (
+    !Array.isArray(
+      orders
+    )
+  ) {
+    return [];
+  }
+
+  return [...orders]
+    .filter(
+      (
+        order
+      ) =>
+        order &&
+        typeof order ===
+          "object"
+    )
+    .sort(
+      (
+        left,
+        right
+      ) => {
+        const leftTime =
+          new Date(
+            getOrderDateValue(
+              left
+            )
+          ).getTime();
+
+        const rightTime =
+          new Date(
+            getOrderDateValue(
+              right
+            )
+          ).getTime();
+
+        return (
+          (Number.isFinite(
+            rightTime
+          )
+            ? rightTime
+            : 0) -
+          (Number.isFinite(
+            leftTime
+          )
+            ? leftTime
+            : 0)
+        );
+      }
+    );
+}
+
+function CustomerDashboard({
+  onNavigate = () => {},
+  orders = [],
+  partnerApplication,
+}) {
+  const [
+    expandedOrderId,
+    setExpandedOrderId,
+  ] = useState("");
+
+  const savedOrders =
+    useMemo(
+      () =>
+        normalizeOrders(
+          orders
+        ),
+      [
+        orders,
+      ]
+    );
+
+  const hasOrders =
+    savedOrders.length >
+    0;
+
+  const latestOrder =
+    savedOrders[0] ||
+    null;
+
+  const latestCustomer =
+    latestOrder
+      ? getCustomer(
+          latestOrder
+        )
+      : {};
+
+  const customerName =
+    latestOrder
+      ? getCustomerName(
+          latestOrder
+        )
+      : "No checkout details saved yet";
+
+  const customerEmail =
+    latestCustomer.email ||
+    "No checkout email saved yet";
+
+  const customerAddress =
+    latestOrder
+      ? getCustomerAddress(
+          latestOrder
+        )
+      : "No shipping address saved yet";
+
+  const statistics =
+    useMemo(() => {
+      const totalOrders =
+        savedOrders.length;
+
+      const totalItems =
+        savedOrders.reduce(
+          (
+            total,
+            order
+          ) =>
+            total +
+            getOrderQuantity(
+              order
+            ),
+          0
+        );
+
+      const requestedValue =
+        savedOrders.reduce(
+          (
+            total,
+            order
+          ) =>
+            total +
+            getOrderSubtotal(
+              order
+            ),
+          0
+        );
+
+      const activeOrders =
+        savedOrders.filter(
+          (
+            order
+          ) =>
+            ![
+              "Completed",
+              "Cancelled",
+            ].includes(
+              order.status
+            )
+        ).length;
+
+      return {
+        totalOrders,
+        totalItems,
+        requestedValue,
+        activeOrders,
+      };
+    }, [
+      savedOrders,
+    ]);
+
+  return (
+    <>
+      <style>
+        {
+          customerDashboardCss
+        }
+      </style>
+
+      <main className="customer-dashboard-page">
+        <section className="customer-dashboard-inner">
+          <header className="customer-dashboard-hero">
+            <div className="customer-dashboard-device-pill">
+              Saved On This Device
+            </div>
+
+            <p className="eyebrow">
+              RESEARCH HUB
+            </p>
+
+            <h1>
+              Order Dashboard
+            </h1>
+
+            <p>
+              Review order
+              requests saved in
+              this browser,
+              checkout details,
+              product totals,
+              research-use
+              reminders, and
+              Partner Program
+              access.
+            </p>
+
+            <div className="customer-dashboard-actions">
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={() =>
+                  onNavigate(
+                    "products"
+                  )
+                }
+              >
+                Browse Products
+              </button>
+
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() =>
+                  onNavigate(
+                    "cart"
+                  )
+                }
+              >
+                View Cart
+              </button>
+
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() =>
+                  onNavigate(
+                    "researchAgreement"
+                  )
+                }
+              >
+                Research Agreement
+              </button>
+            </div>
+          </header>
+
+          <section className="customer-dashboard-security">
+            <div>
+              <strong>
+                This dashboard
+                currently shows
+                orders saved on
+                this device.
+              </strong>
+
+              <p>
+                Clearing browser
+                data or using a
+                different device
+                may hide this
+                local history.
+                Cross-device
+                customer order
+                access will
+                require secure
+                customer
+                authentication.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() =>
+                onNavigate(
+                  "contact"
+                )
+              }
+            >
+              Contact Support
+            </button>
+          </section>
+
+          <section className="customer-dashboard-stats">
+            <StatCard
+              label="Orders On Device"
+              value={
+                statistics.totalOrders
+              }
+              detail="Saved in this browser"
+            />
+
+            <StatCard
+              label="Total Items"
+              value={
+                statistics.totalItems
+              }
+              detail="Units requested"
+            />
+
+            <StatCard
+              label="Requested Value"
+              value={formatMoney(
+                statistics.requestedValue
+              )}
+              detail="Product subtotal only"
+            />
+
+            <StatCard
+              label="Active Orders"
+              value={
+                statistics.activeOrders
+              }
+              detail="Not completed or cancelled"
+            />
+          </section>
+
+          <div className="customer-dashboard-overview">
+            <section className="customer-dashboard-panel">
+              <p className="eyebrow">
+                LATEST CHECKOUT
+              </p>
+
+              <h2>
+                Saved Customer
+                Information
+              </h2>
+
+              <div className="customer-dashboard-info-grid">
+                <InfoBox
+                  label="Name"
+                  value={
+                    customerName
+                  }
+                />
+
+                <InfoBox
+                  label="Email"
+                  value={
+                    customerEmail
+                  }
+                />
+
+                <div className="customer-dashboard-address-box">
+                  <span>
+                    Shipping Address
+                  </span>
+
+                  <strong>
+                    {
+                      customerAddress
+                    }
+                  </strong>
+                </div>
+              </div>
+
+              {latestOrder && (
+                <div className="customer-dashboard-latest-order">
+                  <div>
+                    <span>
+                      Latest Order
+                    </span>
+
+                    <strong>
+                      #
+                      {getOrderId(
+                        latestOrder
+                      )}
+                    </strong>
+                  </div>
+
+                  <div>
+                    <span>
+                      Current Status
+                    </span>
+
+                    <strong>
+                      {latestOrder.status ||
+                        "Order Request Received"}
+                    </strong>
+                  </div>
+
+                  <small>
+                    {formatDate(
+                      getOrderDateValue(
+                        latestOrder
+                      )
+                    )}
+                  </small>
+                </div>
+              )}
+            </section>
+
+            <aside className="customer-dashboard-partner">
+              <p className="eyebrow">
+                PARTNER PROGRAM
+              </p>
+
+              <h2>
+                Research Partner
+                Access
+              </h2>
+
+              {partnerApplication ? (
+                <>
+                  <InfoBox
+                    label="Your Code"
+                    value={
+                      partnerApplication.code
+                    }
+                  />
+
+                  <InfoBox
+                    label="Status"
+                    value={
+                      partnerApplication.status
+                    }
+                  />
+
+                  <InfoBox
+                    label="Submitted"
+                    value={
+                      partnerApplication.date ||
+                      "Date unavailable"
+                    }
+                  />
+
+                  <button
+                    type="button"
+                    className="primary-btn customer-dashboard-full-button"
+                    onClick={() =>
+                      onNavigate(
+                        "partnerHQ"
+                      )
+                    }
+                  >
+                    Open Partner HQ
+                  </button>
+
+                  <button
+                    type="button"
+                    className="secondary-btn customer-dashboard-full-button"
+                    onClick={() =>
+                      onNavigate(
+                        "marketingCenter"
+                      )
+                    }
+                  >
+                    Marketing Center
+                  </button>
+                </>
+              ) : hasOrders ? (
+                <>
+                  <p className="customer-dashboard-muted">
+                    Your first
+                    order request
+                    is saved, so
+                    the Partner
+                    Application is
+                    available.
+                  </p>
+
+                  <button
+                    type="button"
+                    className="primary-btn customer-dashboard-full-button"
+                    onClick={() =>
+                      onNavigate(
+                        "partnerApplication"
+                      )
+                    }
+                  >
+                    Apply For
+                    Partner Code
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="customer-dashboard-muted">
+                    Submit your
+                    first order
+                    request to
+                    unlock the
+                    Partner
+                    Application.
+                  </p>
+
+                  <button
+                    type="button"
+                    className="primary-btn customer-dashboard-full-button"
+                    onClick={() =>
+                      onNavigate(
+                        "products"
+                      )
+                    }
+                  >
+                    Start First
+                    Order
+                  </button>
+                </>
+              )}
+
+              <div className="customer-dashboard-partner-note">
+                Partner
+                application data
+                is also currently
+                saved only in
+                this browser.
+              </div>
+            </aside>
+          </div>
+
+          <section className="customer-dashboard-orders">
+            <div className="customer-dashboard-section-heading">
+              <div>
+                <p className="eyebrow">
+                  ORDER HISTORY
+                </p>
+
+                <h2>
+                  Orders Saved On
+                  This Device
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() =>
+                  onNavigate(
+                    "products"
+                  )
+                }
+              >
+                Shop Again
+              </button>
+            </div>
+
+            {!hasOrders ? (
+              <div className="customer-dashboard-empty">
+                <h3>
+                  No Orders Saved
+                  Yet
+                </h3>
+
+                <p>
+                  Submit an order
+                  request to see
+                  its products,
+                  status,
+                  customer
+                  details, and
+                  totals here.
+                </p>
+
+                <button
+                  type="button"
+                  className="primary-btn"
+                  onClick={() =>
+                    onNavigate(
+                      "products"
+                    )
+                  }
+                >
+                  Browse Products
+                </button>
+              </div>
+            ) : (
+              <div className="customer-dashboard-order-stack">
+                {savedOrders.map(
+                  (
+                    order
+                  ) => {
+                    const orderId =
+                      getOrderId(
+                        order
+                      );
+
+                    const items =
+                      getOrderItems(
+                        order
+                      );
+
+                    const subtotal =
+                      getOrderSubtotal(
+                        order
+                      );
+
+                    const quantity =
+                      getOrderQuantity(
+                        order
+                      );
+
+                    const customer =
+                      getCustomer(
+                        order
+                      );
+
+                    const isExpanded =
+                      expandedOrderId ===
+                      orderId;
+
+                    return (
+                      <article
+                        key={
+                          orderId
+                        }
+                        className="customer-dashboard-order-card"
+                      >
+                        <div className="customer-dashboard-order-summary">
+                          <div className="customer-dashboard-order-main">
+                            <div className="customer-dashboard-order-heading">
+                              <p>
+                                Order #
+                                {
+                                  orderId
+                                }
+                              </p>
+
+                              <span className="customer-dashboard-status">
+                                {order.status ||
+                                  "Order Request Received"}
+                              </span>
+                            </div>
+
+                            <h3>
+                              {formatMoney(
+                                subtotal
+                              )}
+                            </h3>
+
+                            <p>
+                              {formatDate(
+                                getOrderDateValue(
+                                  order
+                                )
+                              )}
+                            </p>
+
+                            <p>
+                              {
+                                items.length
+                              }{" "}
+                              product
+                              {items.length ===
+                              1
+                                ? ""
+                                : "s"}{" "}
+                              ·{" "}
+                              {
+                                quantity
+                              }{" "}
+                              total item
+                              {quantity ===
+                              1
+                                ? ""
+                                : "s"}
+                            </p>
+
+                            <p>
+                              Payment
+                              preference:{" "}
+                              <strong>
+                                {order.preferredPaymentLabel ||
+                                  order.paymentMethod ||
+                                  "Not selected"}
+                              </strong>
+                            </p>
+                          </div>
+
+                          <div className="customer-dashboard-order-preview">
+                            {items
+                              .slice(
+                                0,
+                                3
+                              )
+                              .map(
+                                (
+                                  item,
+                                  index
+                                ) => (
+                                  <ProductPreview
+                                    key={`${item.codeName}-${item.strength}-${index}`}
+                                    item={
+                                      item
+                                    }
+                                  />
+                                )
+                              )}
+
+                            {items.length >
+                              3 && (
+                              <span>
+                                +
+                                {items.length -
+                                  3}{" "}
+                                more
+                              </span>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            className="secondary-btn"
+                            onClick={() =>
+                              setExpandedOrderId(
+                                isExpanded
+                                  ? ""
+                                  : orderId
+                              )
+                            }
+                          >
+                            {isExpanded
+                              ? "Hide Details"
+                              : "View Details"}
+                          </button>
+                        </div>
+
+                        {isExpanded && (
+                          <div className="customer-dashboard-order-details">
+                            <section>
+                              <h4>
+                                Products
+                              </h4>
+
+                              <div className="customer-dashboard-product-stack">
+                                {items.map(
+                                  (
+                                    item,
+                                    index
+                                  ) => (
+                                    <ProductRow
+                                      key={`${item.codeName}-${item.strength}-${index}`}
+                                      item={
+                                        item
+                                      }
+                                    />
+                                  )
+                                )}
+                              </div>
+                            </section>
+
+                            <section>
+                              <h4>
+                                Checkout
+                                Information
+                              </h4>
+
+                              <DetailRow
+                                label="Name"
+                                value={getCustomerName(
+                                  order
+                                )}
+                              />
+
+                              <DetailRow
+                                label="Email"
+                                value={
+                                  customer.email ||
+                                  "Unavailable"
+                                }
+                              />
+
+                              <DetailRow
+                                label="Shipping Address"
+                                value={getCustomerAddress(
+                                  order
+                                )}
+                              />
+                            </section>
+
+                            <section>
+                              <h4>
+                                Order Summary
+                              </h4>
+
+                              <DetailRow
+                                label="Status"
+                                value={
+                                  order.status ||
+                                  "Order Request Received"
+                                }
+                              />
+
+                              <DetailRow
+                                label="Product Subtotal"
+                                value={formatMoney(
+                                  subtotal
+                                )}
+                              />
+
+                              <DetailRow
+                                label="Total Items"
+                                value={
+                                  quantity
+                                }
+                              />
+
+                              <DetailRow
+                                label="Shipping & Taxes"
+                                value="Confirmed By Invoice"
+                              />
+                            </section>
+                          </div>
+                        )}
+                      </article>
+                    );
+                  }
+                )}
+              </div>
+            )}
+          </section>
+
+          <div className="customer-dashboard-research-notice">
+            For Research Use
+            Only. Products are
+            not intended for
+            human consumption.
+          </div>
+        </section>
+      </main>
+    </>
+  );
+}
+
+function ProductPreview({
+  item,
+}) {
+  const [
+    imageFailed,
+    setImageFailed,
+  ] = useState(false);
+
+  return (
+    <div className="customer-dashboard-preview-item">
+      {item.image &&
+      !imageFailed ? (
+        <img
+          src={
+            item.image
+          }
+          alt={`${item.name} ${item.strength || ""}`}
+          loading="lazy"
+          onError={() =>
+            setImageFailed(
+              true
+            )
+          }
+        />
+      ) : (
+        <div className="customer-dashboard-image-fallback">
+          304
+        </div>
+      )}
+
+      <div>
+        <strong>
+          {item.name}
+        </strong>
+
+        <span>
+          {item.strength ||
+            item.codeName}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function ProductRow({
+  item,
+}) {
+  const [
+    imageFailed,
+    setImageFailed,
+  ] = useState(false);
+
+  const quantity =
+    Number(
+      item.quantity ||
+        0
+    );
+
+  const price =
+    Number(
+      item.price ||
+        0
+    );
+
+  return (
+    <div className="customer-dashboard-product-row">
+      <div className="customer-dashboard-product-image">
+        {item.image &&
+        !imageFailed ? (
+          <img
+            src={
+              item.image
+            }
+            alt={`${item.name} ${item.strength || ""}`}
+            loading="lazy"
+            onError={() =>
+              setImageFailed(
+                true
+              )
+            }
+          />
+        ) : (
+          <div className="customer-dashboard-image-fallback">
+            304
+          </div>
+        )}
+      </div>
+
+      <div className="customer-dashboard-product-copy">
+        <strong>
+          {item.name}
+        </strong>
+
+        <span>
+          {item.codeName}
+
+          {item.codeName &&
+          item.strength
+            ? " · "
+            : ""}
+
+          {item.strength}
+        </span>
+
+        <span>
+          Quantity:{" "}
+          {
+            quantity
+          }{" "}
+          ·{" "}
+          {formatMoney(
+            price
+          )}{" "}
+          each
+        </span>
+      </div>
+
+      <strong className="customer-dashboard-line-total">
+        {formatMoney(
+          quantity *
+            price
+        )}
+      </strong>
+    </div>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  detail,
+}) {
+  return (
+    <div className="customer-dashboard-stat-card">
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
+
+      <small>
+        {detail}
+      </small>
+    </div>
+  );
+}
+
+function InfoBox({
+  label,
+  value,
+}) {
+  return (
+    <div className="customer-dashboard-info-box">
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
+    </div>
+  );
+}
+
+function DetailRow({
+  label,
+  value,
+}) {
+  return (
+    <div className="customer-dashboard-detail-row">
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
+    </div>
+  );
+}
+
+const customerDashboardCss = `
+  .customer-dashboard-page,
+  .customer-dashboard-page *,
+  .customer-dashboard-page *::before,
+  .customer-dashboard-page *::after {
+    box-sizing: border-box;
+  }
+
+  .customer-dashboard-page {
+    width: 100%;
+    max-width: 100%;
+    padding: 90px 60px;
+    overflow-x: hidden;
+  }
+
+  .customer-dashboard-inner {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .customer-dashboard-hero {
+    position: relative;
+    margin-bottom: 24px;
+    padding: 64px 56px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 34px;
+    background:
+      radial-gradient(
+        circle at top,
+        rgba(61,165,255,0.22),
+        transparent 42%
+      ),
+      rgba(255,255,255,0.035);
+    box-shadow: 0 30px 90px rgba(0,0,0,0.5);
+    text-align: center;
+  }
+
+  .customer-dashboard-device-pill {
+    position: absolute;
+    top: 22px;
+    right: 24px;
+    padding: 8px 12px;
+    border: 1px solid rgba(61,165,255,0.28);
+    border-radius: 999px;
+    background: rgba(61,165,255,0.12);
+    color: #9ed8ff;
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+  }
+
+  .customer-dashboard-hero h1 {
+    margin-bottom: 20px;
+    font-size: clamp(45px, 7vw, 62px);
+    line-height: 1.05;
+    background: linear-gradient(180deg, #ffffff, #9d9d9d);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .customer-dashboard-hero > p:not(.eyebrow) {
+    max-width: 820px;
+    margin: 0 auto;
+    color: #c8c8c8;
+    font-size: 18px;
+    line-height: 1.8;
+  }
+
+  .customer-dashboard-actions {
+    display: flex;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-top: 28px;
+  }
+
+  .customer-dashboard-security {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 22px;
+    margin-bottom: 30px;
+    padding: 20px 22px;
+    border: 1px solid rgba(255,190,80,0.3);
+    border-radius: 20px;
+    background: rgba(255,170,50,0.08);
+    color: #ffe0a8;
+  }
+
+  .customer-dashboard-security p {
+    max-width: 800px;
+    margin-top: 5px;
+    color: #cdbd9e;
+    line-height: 1.6;
+  }
+
+  .customer-dashboard-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 18px;
+    margin-bottom: 30px;
+  }
+
+  .customer-dashboard-stat-card {
+    min-width: 0;
+    display: grid;
+    gap: 8px;
+    padding: 22px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 22px;
+    background: rgba(255,255,255,0.035);
+    box-shadow: 0 22px 60px rgba(0,0,0,0.32);
+  }
+
+  .customer-dashboard-stat-card span,
+  .customer-dashboard-info-box span,
+  .customer-dashboard-address-box span,
+  .customer-dashboard-latest-order span,
+  .customer-dashboard-detail-row span {
+    color: #9ed8ff;
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+  }
+
+  .customer-dashboard-stat-card strong {
+    color: #ffffff;
+    font-size: 28px;
+    overflow-wrap: anywhere;
+  }
+
+  .customer-dashboard-stat-card small {
+    color: #8d98a2;
+  }
+
+  .customer-dashboard-overview {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+    gap: 30px;
+    align-items: start;
+    margin-bottom: 30px;
+  }
+
+  .customer-dashboard-panel,
+  .customer-dashboard-partner,
+  .customer-dashboard-orders {
+    min-width: 0;
+    padding: 38px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 30px;
+    background:
+      radial-gradient(
+        circle at top left,
+        rgba(61,165,255,0.14),
+        transparent 35%
+      ),
+      rgba(255,255,255,0.035);
+    box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+  }
+
+  .customer-dashboard-partner {
+    position: sticky;
+    top: 110px;
+    padding: 30px;
+  }
+
+  .customer-dashboard-panel h2,
+  .customer-dashboard-partner h2,
+  .customer-dashboard-orders h2 {
+    margin-bottom: 24px;
+    font-size: clamp(29px, 4vw, 38px);
+    line-height: 1.12;
+    background: linear-gradient(180deg, #ffffff, #9d9d9d);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .customer-dashboard-info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .customer-dashboard-info-box,
+  .customer-dashboard-address-box {
+    min-width: 0;
+    display: grid;
+    gap: 7px;
+    padding: 16px;
+    border: 1px solid rgba(61,165,255,0.22);
+    border-radius: 16px;
+    background: rgba(61,165,255,0.1);
+    color: #c8eaff;
+    overflow-wrap: anywhere;
+  }
+
+  .customer-dashboard-address-box {
+    grid-column: 1 / -1;
+  }
+
+  .customer-dashboard-partner .customer-dashboard-info-box {
+    margin-bottom: 12px;
+  }
+
+  .customer-dashboard-latest-order {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 20px;
+    padding: 16px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 16px;
+    background: rgba(255,255,255,0.04);
+  }
+
+  .customer-dashboard-latest-order > div {
+    display: grid;
+    gap: 6px;
+  }
+
+  .customer-dashboard-latest-order strong {
+    color: #ffffff;
+    overflow-wrap: anywhere;
+  }
+
+  .customer-dashboard-latest-order small {
+    grid-column: 1 / -1;
+    color: #8f9ba6;
+  }
+
+  .customer-dashboard-muted {
+    color: #c8c8c8;
+    line-height: 1.7;
+  }
+
+  .customer-dashboard-full-button {
+    width: 100%;
+    margin-top: 14px;
+  }
+
+  .customer-dashboard-partner-note {
+    margin-top: 20px;
+    padding: 15px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 15px;
+    background: rgba(255,255,255,0.035);
+    color: #929da6;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .customer-dashboard-section-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 18px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+  }
+
+  .customer-dashboard-empty {
+    padding: 34px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 22px;
+    background: rgba(255,255,255,0.04);
+    color: #c8c8c8;
+    line-height: 1.8;
+    text-align: center;
+  }
+
+  .customer-dashboard-empty h3 {
+    margin-bottom: 8px;
+    color: #ffffff;
+    font-size: 24px;
+  }
+
+  .customer-dashboard-empty button {
+    margin-top: 20px;
+  }
+
+  .customer-dashboard-order-stack {
+    display: grid;
+    gap: 18px;
+  }
+
+  .customer-dashboard-order-card {
+    min-width: 0;
+    padding: 22px;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 24px;
+    background: rgba(255,255,255,0.04);
+  }
+
+  .customer-dashboard-order-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(230px, 310px) auto;
+    gap: 20px;
+    align-items: center;
+  }
+
+  .customer-dashboard-order-main {
+    min-width: 0;
+  }
+
+  .customer-dashboard-order-heading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+
+  .customer-dashboard-order-heading p {
+    color: #9ed8ff;
+    font-size: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+
+  .customer-dashboard-status {
+    padding: 6px 9px;
+    border-radius: 999px;
+    background: rgba(61,165,255,0.13);
+    color: #b8e4ff;
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .customer-dashboard-order-main h3 {
+    margin-bottom: 7px;
+    color: #ffffff;
+    font-size: 28px;
+  }
+
+  .customer-dashboard-order-main > p {
+    color: #aaaaaa;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
+
+  .customer-dashboard-order-main > p strong {
+    color: #d6d6d6;
+  }
+
+  .customer-dashboard-order-preview {
+    min-width: 0;
+    display: grid;
+    gap: 8px;
+  }
+
+  .customer-dashboard-preview-item {
+    display: grid;
+    grid-template-columns: 46px minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    padding: 7px;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 12px;
+    background: rgba(0,0,0,0.15);
+  }
+
+  .customer-dashboard-preview-item img,
+  .customer-dashboard-image-fallback {
+    width: 46px;
+    height: 54px;
+    object-fit: contain;
+    border-radius: 9px;
+  }
+
+  .customer-dashboard-image-fallback {
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(61,165,255,0.27);
+    background: #10161c;
+    color: #9ed8ff;
+    font-size: 11px;
+    font-weight: 900;
+  }
+
+  .customer-dashboard-preview-item > div:last-child {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+  }
+
+  .customer-dashboard-preview-item strong {
+    color: #ffffff;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .customer-dashboard-preview-item span,
+  .customer-dashboard-order-preview > span {
+    color: #929ba3;
+    font-size: 11px;
+  }
+
+  .customer-dashboard-order-details {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr;
+    gap: 16px;
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .customer-dashboard-order-details > section {
+    min-width: 0;
+    padding: 17px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 17px;
+    background: rgba(0,0,0,0.16);
+  }
+
+  .customer-dashboard-order-details h4 {
+    margin-bottom: 14px;
+    color: #ffffff;
+    font-size: 20px;
+  }
+
+  .customer-dashboard-product-stack {
+    display: grid;
+    gap: 12px;
+  }
+
+  .customer-dashboard-product-row {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    padding: 11px;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 14px;
+    background: rgba(255,255,255,0.035);
+  }
+
+  .customer-dashboard-product-image {
+    width: 72px;
+    height: 85px;
+    display: grid;
+    place-items: center;
+  }
+
+  .customer-dashboard-product-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  .customer-dashboard-product-image .customer-dashboard-image-fallback {
+    width: 65px;
+    height: 75px;
+  }
+
+  .customer-dashboard-product-copy {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+  }
+
+  .customer-dashboard-product-copy strong {
+    color: #ffffff;
+    overflow-wrap: anywhere;
+  }
+
+  .customer-dashboard-product-copy span {
+    color: #929ba3;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .customer-dashboard-line-total {
+    color: #9ed8ff;
+    white-space: nowrap;
+  }
+
+  .customer-dashboard-detail-row {
+    display: grid;
+    gap: 5px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    overflow-wrap: anywhere;
+  }
+
+  .customer-dashboard-detail-row:last-child {
+    border-bottom: 0;
+  }
+
+  .customer-dashboard-detail-row strong {
+    color: #d4d4d4;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .customer-dashboard-research-notice {
+    margin-top: 30px;
+    padding: 20px;
+    border: 1px solid rgba(61,165,255,0.28);
+    border-radius: 20px;
+    background: rgba(61,165,255,0.12);
+    color: #9ed8ff;
+    font-weight: 900;
+    line-height: 1.6;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  @media (max-width: 1050px) {
+    .customer-dashboard-page {
+      padding: 65px 24px;
+    }
+
+    .customer-dashboard-stats {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .customer-dashboard-overview {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .customer-dashboard-partner {
+      position: static;
+    }
+
+    .customer-dashboard-order-summary {
+      grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
+    }
+
+    .customer-dashboard-order-summary > button {
+      grid-column: 1 / -1;
+    }
+
+    .customer-dashboard-order-details {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  @media (max-width: 720px) {
+    .customer-dashboard-page {
+      padding: 44px 12px;
+    }
+
+    .customer-dashboard-hero,
+    .customer-dashboard-panel,
+    .customer-dashboard-partner,
+    .customer-dashboard-orders {
+      padding: 20px;
+      border-radius: 22px;
+    }
+
+    .customer-dashboard-device-pill {
+      position: static;
+      width: fit-content;
+      margin: 0 auto 20px;
+    }
+
+    .customer-dashboard-security {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .customer-dashboard-security button,
+    .customer-dashboard-actions,
+    .customer-dashboard-actions button {
+      width: 100%;
+    }
+
+    .customer-dashboard-info-grid,
+    .customer-dashboard-order-summary {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .customer-dashboard-address-box {
+      grid-column: auto;
+    }
+
+    .customer-dashboard-order-summary > button {
+      grid-column: auto;
+      width: 100%;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .customer-dashboard-page {
+      padding: 34px 8px;
+    }
+
+    .customer-dashboard-hero,
+    .customer-dashboard-panel,
+    .customer-dashboard-partner,
+    .customer-dashboard-orders,
+    .customer-dashboard-order-card {
+      padding: 15px;
+    }
+
+    .customer-dashboard-stats,
+    .customer-dashboard-latest-order {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .customer-dashboard-latest-order small {
+      grid-column: auto;
+    }
+
+    .customer-dashboard-product-row {
+      grid-template-columns: 65px minmax(0, 1fr);
+    }
+
+    .customer-dashboard-line-total {
+      grid-column: 2;
+    }
+  }
+`;
 
 export default CustomerDashboard;
