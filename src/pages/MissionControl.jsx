@@ -1,59 +1,31 @@
-import {
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useEffect, useMemo, useState } from "react";
+import { products } from "../data/products";
 
-import {
-  products,
-} from "../data/products";
-
-const documentAdminSessionKey =
-  "304-document-admin-session";
+const documentAdminSessionKey = "304-document-admin-session";
 
 function getCatalogVariants() {
-  return products.flatMap(
-    (product) =>
-      product.variants?.length
-        ? product.variants.map(
-            (variant) => ({
-              ...product,
-              ...variant,
+  return products.flatMap((product) => {
+    const variants = product.variants?.length
+      ? product.variants
+      : [product];
 
-              productName:
-                product.name,
-
-              category:
-                product.category,
-
-              image:
-                variant.image ||
-                product.image ||
-                null,
-            })
-          )
-        : [
-            {
-              ...product,
-
-              productName:
-                product.name,
-            },
-          ]
-  );
+    return variants.map((variant) => ({
+      ...product,
+      ...variant,
+      productName: product.name,
+      category: product.category,
+      image: variant.image || product.image || null,
+    }));
+  });
 }
 
 function isValidUrl(value) {
-  if (
-    typeof value !== "string" ||
-    !value.trim()
-  ) {
+  if (typeof value !== "string" || !value.trim()) {
     return false;
   }
 
   try {
-    const url =
-      new URL(value);
+    const url = new URL(value);
 
     return (
       url.protocol === "https:" ||
@@ -64,29 +36,21 @@ function isValidUrl(value) {
   }
 }
 
-function isDocumentationComplete(
-  record
-) {
+function isDocumentationComplete(record) {
   return Boolean(
     record?.batchNumber &&
       record?.labName &&
       record?.testDate &&
-      isValidUrl(
-        record?.coaUrl
-      ) &&
-      isValidUrl(
-        record?.verificationUrl
-      )
+      isValidUrl(record?.coaUrl) &&
+      isValidUrl(record?.verificationUrl)
   );
 }
 
 function MissionControl({
   onNavigate = () => {},
 }) {
-  const [
-    records,
-    setRecords,
-  ] = useState([]);
+  const [records, setRecords] =
+    useState([]);
 
   const [
     documentsLoading,
@@ -108,47 +72,37 @@ function MissionControl({
     setRefreshKey,
   ] = useState(0);
 
-  const catalogStats =
-    useMemo(() => {
-      const variants =
-        getCatalogVariants();
+  const catalogStats = useMemo(() => {
+    const variants =
+      getCatalogVariants();
 
-      const imageCount =
+    return {
+      productCount: products.length,
+
+      variantCount:
+        variants.length,
+
+      imageCount:
         variants.filter(
           (variant) =>
-            Boolean(
-              variant.image
-            )
-        ).length;
+            Boolean(variant.image)
+        ).length,
 
-      const pricedCount =
+      pricedCount:
         variants.filter(
           (variant) =>
             Number.isFinite(
               variant.price
             )
-        ).length;
+        ).length,
 
-      const bestSellerCount =
+      bestSellerCount:
         products.filter(
           (product) =>
             product.isBestSeller
-        ).length;
-
-      return {
-        productCount:
-          products.length,
-
-        variantCount:
-          variants.length,
-
-        imageCount,
-
-        pricedCount,
-
-        bestSellerCount,
-      };
-    }, []);
+        ).length,
+    };
+  }, []);
 
   useEffect(() => {
     const controller =
@@ -156,11 +110,10 @@ function MissionControl({
 
     async function requestRecords({
       endpoint,
-      secret,
+      secret = "",
     }) {
       const headers = {
-        Accept:
-          "application/json",
+        Accept: "application/json",
       };
 
       if (secret) {
@@ -169,17 +122,13 @@ function MissionControl({
       }
 
       const response =
-        await fetch(
-          endpoint,
-          {
-            method: "GET",
-            headers,
-            cache: "no-store",
-
-            signal:
-              controller.signal,
-          }
-        );
+        await fetch(endpoint, {
+          method: "GET",
+          headers,
+          cache: "no-store",
+          signal:
+            controller.signal,
+        });
 
       let result;
 
@@ -210,10 +159,7 @@ function MissionControl({
     }
 
     async function loadDocumentation() {
-      setDocumentsLoading(
-        true
-      );
-
+      setDocumentsLoading(true);
       setDocumentsError("");
 
       try {
@@ -242,9 +188,7 @@ function MissionControl({
             );
 
             return;
-          } catch (
-            adminError
-          ) {
+          } catch (adminError) {
             if (
               adminError.name ===
               "AbortError"
@@ -258,8 +202,6 @@ function MissionControl({
           await requestRecords({
             endpoint:
               "/api/documents",
-
-            secret: "",
           });
 
         setRecords(
@@ -301,9 +243,8 @@ function MissionControl({
 
     loadDocumentation();
 
-    return () => {
+    return () =>
       controller.abort();
-    };
   }, [refreshKey]);
 
   const documentationStats =
@@ -546,10 +487,11 @@ function MissionControl({
               <p className="mission-subtitle">
                 Review catalog
                 readiness, live
-                documentation status,
-                customer tools,
-                partner operations,
-                and website launch
+                documentation
+                status, customer
+                tools, partner
+                operations, and
+                website launch
                 progress.
               </p>
 
@@ -665,14 +607,12 @@ function MissionControl({
                 </p>
 
                 <h2>
-                  Records Could Not Be
-                  Loaded
+                  Records Could Not
+                  Be Loaded
                 </h2>
 
                 <p>
-                  {
-                    documentsError
-                  }
+                  {documentsError}
                 </p>
               </div>
 
@@ -906,6 +846,18 @@ function MissionControl({
                   className="secondary-btn"
                   onClick={() =>
                     onNavigate(
+                      "qrManager"
+                    )
+                  }
+                >
+                  Open QR Manager
+                </button>
+
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() =>
+                    onNavigate(
                       "quality"
                     )
                   }
@@ -917,15 +869,15 @@ function MissionControl({
 
               <div className="mission-qr-note">
                 <strong>
-                  QR Generator:
+                  QR Generator Active:
                 </strong>{" "}
-                Not built yet. A
-                dedicated QR tool can
-                be added next to
-                generate printable QR
-                codes that point to
-                each published public
-                record.
+                Generate downloadable
+                and printable QR
+                codes for genuine
+                published records.
+                Each code opens the
+                matching public
+                verification page.
               </div>
             </section>
           </div>
@@ -976,6 +928,18 @@ function MissionControl({
 
               <ToolCard
                 icon="03"
+                title="QR Manager"
+                description="Generate downloadable and printable QR codes for genuine published documentation records."
+                buttonLabel="Open QR Manager"
+                onClick={() =>
+                  onNavigate(
+                    "qrManager"
+                  )
+                }
+              />
+
+              <ToolCard
+                icon="04"
                 title="Customer Manager"
                 description="Review prototype customer accounts, research acceptance, and order activity."
                 buttonLabel="Manage Customers"
@@ -987,7 +951,7 @@ function MissionControl({
               />
 
               <ToolCard
-                icon="04"
+                icon="05"
                 title="Site Settings"
                 description="Manage storefront messages, contact details, availability, and website settings."
                 buttonLabel="Open Settings"
@@ -999,7 +963,7 @@ function MissionControl({
               />
 
               <ToolCard
-                icon="05"
+                icon="06"
                 title="Partner HQ"
                 description="Review research partner activity, affiliate tools, applications, and rewards."
                 buttonLabel="Open Partner HQ"
@@ -1011,7 +975,7 @@ function MissionControl({
               />
 
               <ToolCard
-                icon="06"
+                icon="07"
                 title="Marketing Center"
                 description="Prepare social posts, launch messages, promotions, and brand content."
                 buttonLabel="Open Marketing"
@@ -1038,8 +1002,8 @@ function MissionControl({
                 Products without a
                 valid price display
                 Price Coming Soon and
-                cannot be added to the
-                cart.
+                cannot be added to
+                the cart.
               </p>
 
               <button
@@ -1066,10 +1030,11 @@ function MissionControl({
               </h2>
 
               <p>
-                Catalog pages identify
-                products as being for
-                research use only and
-                not intended for human
+                Catalog pages
+                identify products as
+                being for research
+                use only and not
+                intended for human
                 consumption.
               </p>
 
@@ -1204,22 +1169,24 @@ const missionControlCss = `
     flex-wrap: wrap;
     padding: 48px;
     margin-bottom: 24px;
-    border: 1px solid rgba(255,255,255,0.09);
+    border: 1px solid rgba(255, 255, 255, 0.09);
     border-radius: 34px;
     background:
       radial-gradient(
         circle at top left,
-        rgba(61,165,255,0.2),
+        rgba(61, 165, 255, 0.2),
         transparent 42%
       ),
-      rgba(255,255,255,0.035);
+      rgba(255, 255, 255, 0.035);
     box-shadow:
-      0 30px 90px rgba(0,0,0,0.48);
+      0 30px 90px
+      rgba(0, 0, 0, 0.48);
   }
 
   .mission-title {
     margin-bottom: 18px;
-    font-size: clamp(45px, 7vw, 64px);
+    font-size:
+      clamp(45px, 7vw, 64px);
     line-height: 1.02;
     background:
       linear-gradient(
@@ -1227,8 +1194,10 @@ const missionControlCss = `
         #ffffff,
         #8f8f8f
       );
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    -webkit-background-clip:
+      text;
+    -webkit-text-fill-color:
+      transparent;
   }
 
   .mission-subtitle {
@@ -1261,20 +1230,29 @@ const missionControlCss = `
 
   .mission-source-pill,
   .mission-live-pill {
-    border: 1px solid rgba(61,165,255,0.3);
-    background: rgba(61,165,255,0.12);
+    border:
+      1px solid
+      rgba(61, 165, 255, 0.3);
+    background:
+      rgba(61, 165, 255, 0.12);
     color: #9ed8ff;
   }
 
   .mission-loading-pill {
-    border: 1px solid rgba(255,255,255,0.11);
-    background: rgba(255,255,255,0.055);
+    border:
+      1px solid
+      rgba(255, 255, 255, 0.11);
+    background:
+      rgba(255, 255, 255, 0.055);
     color: #c8c8c8;
   }
 
   .mission-error-pill {
-    border: 1px solid rgba(255,110,110,0.28);
-    background: rgba(255,60,60,0.09);
+    border:
+      1px solid
+      rgba(255, 110, 110, 0.28);
+    background:
+      rgba(255, 60, 60, 0.09);
     color: #ffd0d0;
   }
 
@@ -1287,7 +1265,10 @@ const missionControlCss = `
   .mission-stats-grid {
     display: grid;
     grid-template-columns:
-      repeat(4, minmax(0, 1fr));
+      repeat(
+        4,
+        minmax(0, 1fr)
+      );
     gap: 18px;
     margin-bottom: 24px;
   }
@@ -1297,11 +1278,15 @@ const missionControlCss = `
     display: grid;
     gap: 8px;
     padding: 24px;
-    border: 1px solid rgba(255,255,255,0.09);
+    border:
+      1px solid
+      rgba(255, 255, 255, 0.09);
     border-radius: 24px;
-    background: rgba(255,255,255,0.035);
+    background:
+      rgba(255, 255, 255, 0.035);
     box-shadow:
-      0 24px 65px rgba(0,0,0,0.3);
+      0 24px 65px
+      rgba(0, 0, 0, 0.3);
     overflow-wrap: anywhere;
   }
 
@@ -1325,15 +1310,19 @@ const missionControlCss = `
 
   .mission-error-panel {
     display: flex;
-    justify-content: space-between;
+    justify-content:
+      space-between;
     align-items: center;
     gap: 22px;
     flex-wrap: wrap;
     margin-bottom: 24px;
     padding: 24px;
-    border: 1px solid rgba(255,110,110,0.26);
+    border:
+      1px solid
+      rgba(255, 110, 110, 0.26);
     border-radius: 22px;
-    background: rgba(255,60,60,0.08);
+    background:
+      rgba(255, 60, 60, 0.08);
     color: #ffd1d1;
   }
 
@@ -1357,24 +1346,28 @@ const missionControlCss = `
   .mission-notice-panel {
     min-width: 0;
     padding: 30px;
-    border: 1px solid rgba(255,255,255,0.09);
+    border:
+      1px solid
+      rgba(255, 255, 255, 0.09);
     border-radius: 28px;
-    background: rgba(255,255,255,0.035);
+    background:
+      rgba(255, 255, 255, 0.035);
   }
 
   .mission-launch-panel {
     background:
       radial-gradient(
         circle at top left,
-        rgba(61,165,255,0.12),
+        rgba(61, 165, 255, 0.12),
         transparent 38%
       ),
-      rgba(255,255,255,0.035);
+      rgba(255, 255, 255, 0.035);
   }
 
   .mission-panel-heading {
     display: flex;
-    justify-content: space-between;
+    justify-content:
+      space-between;
     align-items: flex-start;
     gap: 20px;
     flex-wrap: wrap;
@@ -1382,7 +1375,8 @@ const missionControlCss = `
 
   .mission-section-title {
     color: #ffffff;
-    font-size: clamp(29px, 4vw, 35px);
+    font-size:
+      clamp(29px, 4vw, 35px);
     line-height: 1.15;
   }
 
@@ -1396,7 +1390,8 @@ const missionControlCss = `
     margin: 24px 0;
     overflow: hidden;
     border-radius: 999px;
-    background: rgba(255,255,255,0.07);
+    background:
+      rgba(255, 255, 255, 0.07);
   }
 
   .mission-progress-fill {
@@ -1405,11 +1400,12 @@ const missionControlCss = `
     background:
       linear-gradient(
         90deg,
-        rgba(61,165,255,0.55),
+        rgba(61, 165, 255, 0.55),
         #9ed8ff
       );
     box-shadow:
-      0 0 24px rgba(61,165,255,0.32);
+      0 0 24px
+      rgba(61, 165, 255, 0.32);
   }
 
   .mission-check-list {
@@ -1419,13 +1415,17 @@ const missionControlCss = `
 
   .mission-check-row {
     display: flex;
-    justify-content: space-between;
+    justify-content:
+      space-between;
     align-items: center;
     gap: 15px;
     padding: 13px;
-    border: 1px solid rgba(255,255,255,0.07);
+    border:
+      1px solid
+      rgba(255, 255, 255, 0.07);
     border-radius: 14px;
-    background: rgba(0,0,0,0.22);
+    background:
+      rgba(0, 0, 0, 0.22);
     color: #c8c8c8;
   }
 
@@ -1443,13 +1443,15 @@ const missionControlCss = `
     display: grid;
     place-items: center;
     border-radius: 50%;
-    background: rgba(255,255,255,0.07);
+    background:
+      rgba(255, 255, 255, 0.07);
     color: #9ca8b3;
     font-weight: 900;
   }
 
   .mission-check-complete {
-    background: rgba(61,165,255,0.2);
+    background:
+      rgba(61, 165, 255, 0.2);
     color: #9ed8ff;
   }
 
@@ -1465,7 +1467,10 @@ const missionControlCss = `
   .mission-documentation-grid {
     display: grid;
     grid-template-columns:
-      repeat(2, minmax(0, 1fr));
+      repeat(
+        2,
+        minmax(0, 1fr)
+      );
     gap: 12px;
     margin-top: 22px;
   }
@@ -1475,9 +1480,12 @@ const missionControlCss = `
     display: grid;
     gap: 7px;
     padding: 17px;
-    border: 1px solid rgba(255,255,255,0.08);
+    border:
+      1px solid
+      rgba(255, 255, 255, 0.08);
     border-radius: 16px;
-    background: rgba(0,0,0,0.23);
+    background:
+      rgba(0, 0, 0, 0.23);
     color: #9ca8b3;
     overflow-wrap: anywhere;
   }
@@ -1488,8 +1496,10 @@ const missionControlCss = `
   }
 
   .mission-document-ready {
-    border-color: rgba(61,165,255,0.24);
-    background: rgba(61,165,255,0.09);
+    border-color:
+      rgba(61, 165, 255, 0.24);
+    background:
+      rgba(61, 165, 255, 0.09);
   }
 
   .mission-document-ready strong {
@@ -1505,9 +1515,12 @@ const missionControlCss = `
   .mission-qr-note {
     margin-top: 16px;
     padding: 14px;
-    border: 1px solid rgba(255,255,255,0.08);
+    border:
+      1px solid
+      rgba(255, 255, 255, 0.08);
     border-radius: 14px;
-    background: rgba(0,0,0,0.21);
+    background:
+      rgba(0, 0, 0, 0.21);
     color: #9ca8b3;
     font-size: 12px;
     line-height: 1.65;
@@ -1523,7 +1536,8 @@ const missionControlCss = `
 
   .mission-tools-heading {
     display: flex;
-    justify-content: space-between;
+    justify-content:
+      space-between;
     align-items: flex-end;
     gap: 20px;
     flex-wrap: wrap;
@@ -1539,7 +1553,10 @@ const missionControlCss = `
   .mission-tools-grid {
     display: grid;
     grid-template-columns:
-      repeat(3, minmax(0, 1fr));
+      repeat(
+        3,
+        minmax(0, 1fr)
+      );
     gap: 16px;
   }
 
@@ -1549,15 +1566,17 @@ const missionControlCss = `
     display: flex;
     flex-direction: column;
     padding: 22px;
-    border: 1px solid rgba(255,255,255,0.08);
+    border:
+      1px solid
+      rgba(255, 255, 255, 0.08);
     border-radius: 21px;
     background:
       radial-gradient(
         circle at top left,
-        rgba(61,165,255,0.09),
+        rgba(61, 165, 255, 0.09),
         transparent 40%
       ),
-      rgba(0,0,0,0.22);
+      rgba(0, 0, 0, 0.22);
   }
 
   .mission-tool-icon {
@@ -1566,9 +1585,12 @@ const missionControlCss = `
     display: grid;
     place-items: center;
     margin-bottom: 18px;
-    border: 1px solid rgba(61,165,255,0.26);
+    border:
+      1px solid
+      rgba(61, 165, 255, 0.26);
     border-radius: 15px;
-    background: rgba(61,165,255,0.12);
+    background:
+      rgba(61, 165, 255, 0.12);
     color: #9ed8ff;
     font-weight: 900;
   }
@@ -1593,7 +1615,10 @@ const missionControlCss = `
   .mission-bottom-grid {
     display: grid;
     grid-template-columns:
-      repeat(2, minmax(0, 1fr));
+      repeat(
+        2,
+        minmax(0, 1fr)
+      );
     gap: 24px;
   }
 
@@ -1624,7 +1649,10 @@ const missionControlCss = `
 
     .mission-stats-grid {
       grid-template-columns:
-        repeat(2, minmax(0, 1fr));
+        repeat(
+          2,
+          minmax(0, 1fr)
+        );
     }
 
     .mission-dashboard-grid {
@@ -1634,7 +1662,10 @@ const missionControlCss = `
 
     .mission-tools-grid {
       grid-template-columns:
-        repeat(2, minmax(0, 1fr));
+        repeat(
+          2,
+          minmax(0, 1fr)
+        );
     }
   }
 
@@ -1684,7 +1715,8 @@ const missionControlCss = `
     }
 
     .mission-check-row {
-      align-items: flex-start;
+      align-items:
+        flex-start;
     }
   }
 `;
