@@ -32,6 +32,17 @@ const initialForm = {
   agreementAccepted: false,
 };
 
+const emptySummary = {
+  totalCount: 0,
+  pendingCount: 0,
+  earnedCount: 0,
+  voidedCount: 0,
+  pendingCommissionCents: 0,
+  earnedCommissionCents: 0,
+  voidedCommissionCents: 0,
+  earnedRevenueCents: 0,
+};
+
 function normalizeCode(value) {
   return String(value || "")
     .toUpperCase()
@@ -73,12 +84,28 @@ function formatDate(value) {
   }
 
   return date.toLocaleString("en-US", {
-    month: "long",
+    month: "short",
     day: "numeric",
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function formatMoneyFromCents(value) {
+  return (Number(value || 0) / 100).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+  });
+}
+
+function formatPercentFromBasisPoints(value) {
+  const percentage = Number(value || 0) / 100;
+
+  return `${percentage.toLocaleString("en-US", {
+    minimumFractionDigits: percentage % 1 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}%`;
 }
 
 async function readApiJson(response) {
@@ -110,98 +137,130 @@ async function readApiJson(response) {
   return result;
 }
 
+function buildReferralLink(code) {
+  if (!code || typeof window === "undefined") {
+    return "";
+  }
+
+  return `${window.location.origin}/checkout?ref=${encodeURIComponent(
+    code
+  )}`;
+}
+
+async function copyText(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const input = document.createElement("textarea");
+
+  input.value = value;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand("copy");
+  document.body.removeChild(input);
+}
+
 function PartnerApplication({
   onNavigate = () => {},
   onSubmitApplication = null,
 }) {
-  const [formData, setFormData] =
-    useState(initialForm);
+  const [formData, setFormData] = useState(initialForm);
+  const [application, setApplication] = useState(null);
+  const [eligibility, setEligibility] = useState(null);
+  const [summary, setSummary] = useState(emptySummary);
+  const [referrals, setReferrals] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSummaryLoading, setIsSummaryLoading] =
+    useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [summaryError, setSummaryError] = useState("");
+  const [submitError, setSubmitError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [copyMessage, setCopyMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [codeState, setCodeState] = useState("idle");
+  const [codeMessage, setCodeMessage] = useState("");
+  const availabilityRequest = useRef(0);
 
-  const [
-    application,
-    setApplication,
-  ] = useState(null);
+  const isDenied = application?.status === "denied";
+  const isApproved = application?.status === "approved";
+  const isSuspended = application?.status === "suspended";
 
-  const [
-    eligibility,
-    setEligibility,
-  ] = useState(null);
+  const lockedApplication = Boolean(
+    application &&
+      ["pending", "approved", "suspended"].includes(
+        application.status
+      )
+  );
 
-  const [
-    isLoading,
-    setIsLoading,
-  ] = useState(true);
+  const referralLink = useMemo(
+    () => buildReferralLink(application?.code),
+    [application?.code]
+  );
 
-  const [
-    loadError,
-    setLoadError,
-  ] = useState("");
+  const localCodeError = useMemo(
+    () => getLocalCodeError(formData.code),
+    [formData.code]
+  );
 
-  const [
-    submitError,
-    setSubmitError,
-  ] = useState("");
+  const formComplete = Boolean(
+    eligibility?.eligible &&
+      !lockedApplication &&
+      !localCodeError &&
+      codeState === "available" &&
+      formData.primaryPlatform &&
+      formData.audienceSize &&
+      formData.promotionPlan.trim() &&
+      formData.agreementAccepted
+  );
 
-  const [
-    successMessage,
-    setSuccessMessage,
-  ] = useState("");
+  async function loadPartnerSummary() {
+    setIsSummaryLoading(true);
+    setSummaryError("");
 
-  const [
-    isSubmitting,
-    setIsSubmitting,
-  ] = useState(false);
+    try {
+      const response = await fetch("/api/partner/summary", {
+        method: "GET",
 
-  const [
-    codeState,
-    setCodeState,
-  ] = useState("idle");
+        headers: {
+          Accept: "application/json",
+        },
 
-  const [
-    codeMessage,
-    setCodeMessage,
-  ] = useState("");
+        credentials: "same-origin",
+        cache: "no-store",
+      });
 
-  const availabilityRequest =
-    useRef(0);
+      const result = await readApiJson(response);
 
-  const isDenied =
-    application?.status ===
-    "denied";
+      setApplication(
+        (current) => result.application || current
+      );
 
-  const lockedApplication =
-    Boolean(
-      application &&
-        [
-          "pending",
-          "approved",
-          "suspended",
-        ].includes(
-          application.status
-        )
-    );
+      setSummary({
+        ...emptySummary,
+        ...(result.summary || {}),
+      });
 
-  const localCodeError =
-    useMemo(
-      () =>
-        getLocalCodeError(
-          formData.code
-        ),
-      [formData.code]
-    );
-
-  const formComplete =
-    Boolean(
-      eligibility?.eligible &&
-        !lockedApplication &&
-        !localCodeError &&
-        codeState ===
-          "available" &&
-        formData.primaryPlatform &&
-        formData.audienceSize &&
-        formData.promotionPlan.trim() &&
-        formData.agreementAccepted
-    );
+      setReferrals(
+        Array.isArray(result.referrals)
+          ? result.referrals
+          : []
+      );
+    } catch (error) {
+      setSummaryError(
+        error.message ||
+          "Partner referral history could not be loaded."
+      );
+    } finally {
+      setIsSummaryLoading(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -211,88 +270,118 @@ function PartnerApplication({
       setLoadError("");
 
       try {
-        const response =
-          await fetch(
-            "/api/partner/application",
-            {
-              method: "GET",
+        const response = await fetch(
+          "/api/partner/application",
+          {
+            method: "GET",
 
-              headers: {
-                Accept:
-                  "application/json",
-              },
+            headers: {
+              Accept: "application/json",
+            },
 
-              credentials:
-                "same-origin",
+            credentials: "same-origin",
+            cache: "no-store",
+          }
+        );
 
-              cache: "no-store",
-            }
-          );
-
-        const result =
-          await readApiJson(
-            response
-          );
+        const result = await readApiJson(response);
 
         if (!active) {
           return;
         }
 
-        setApplication(
-          result.application ||
-            null
-        );
+        const savedApplication = result.application || null;
 
-        setEligibility(
-          result.eligibility ||
-            null
-        );
+        setApplication(savedApplication);
+        setEligibility(result.eligibility || null);
 
-        if (
-          result.application
-            ?.status ===
-          "denied"
-        ) {
+        if (savedApplication?.status === "denied") {
           setFormData({
-            code:
-              result.application
-                .code || "",
+            code: savedApplication.code || "",
 
             primaryPlatform:
-              result.application
-                .primaryPlatform ||
-              "",
+              savedApplication.primaryPlatform || "",
 
             profileUrl:
-              result.application
-                .profileUrl || "",
+              savedApplication.profileUrl || "",
 
             audienceSize:
-              result.application
-                .audienceSize || "",
+              savedApplication.audienceSize || "",
 
             promotionPlan:
-              result.application
-                .promotionPlan ||
-              "",
+              savedApplication.promotionPlan || "",
 
             experience:
-              result.application
-                .experience || "",
+              savedApplication.experience || "",
 
-            agreementAccepted:
-              false,
+            agreementAccepted: false,
           });
         }
-      } catch (error) {
-        if (!active) {
-          return;
-        }
 
-        setLoadError(
-          error.message ||
-            "Partner Program access could not be loaded."
-        );
+        if (
+          ["approved", "suspended"].includes(
+            savedApplication?.status
+          )
+        ) {
+          setIsSummaryLoading(true);
+
+          try {
+            const summaryResponse = await fetch(
+              "/api/partner/summary",
+              {
+                method: "GET",
+
+                headers: {
+                  Accept: "application/json",
+                },
+
+                credentials: "same-origin",
+                cache: "no-store",
+              }
+            );
+
+            const summaryResult =
+              await readApiJson(summaryResponse);
+
+            if (!active) {
+              return;
+            }
+
+            setApplication(
+              summaryResult.application ||
+                savedApplication
+            );
+
+            setSummary({
+              ...emptySummary,
+              ...(summaryResult.summary || {}),
+            });
+
+            setReferrals(
+              Array.isArray(summaryResult.referrals)
+                ? summaryResult.referrals
+                : []
+            );
+          } catch (error) {
+            if (active) {
+              setSummaryError(
+                error.message ||
+                  "Partner referral history could not be loaded."
+              );
+            }
+          } finally {
+            if (active) {
+              setIsSummaryLoading(false);
+            }
+          }
+        }
+      } catch (error) {
+        if (active) {
+          setLoadError(
+            error.message ||
+              "Partner Program access could not be loaded."
+          );
+        }
       } finally {
         if (active) {
           setIsLoading(false);
@@ -312,119 +401,85 @@ function PartnerApplication({
       return undefined;
     }
 
-    const code =
-      formData.code;
-
-    const error =
-      getLocalCodeError(code);
+    const code = formData.code;
+    const error = getLocalCodeError(code);
 
     if (!code) {
       setCodeState("idle");
       setCodeMessage("");
-
       return undefined;
     }
 
     if (error) {
       setCodeState("invalid");
       setCodeMessage(error);
-
       return undefined;
     }
 
     const requestNumber =
-      availabilityRequest.current +
-      1;
+      availabilityRequest.current + 1;
 
-    availabilityRequest.current =
-      requestNumber;
+    availabilityRequest.current = requestNumber;
 
     setCodeState("checking");
+    setCodeMessage("Checking availability...");
 
-    setCodeMessage(
-      "Checking availability..."
-    );
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `/api/partner/code-availability?code=${encodeURIComponent(
+            code
+          )}`,
+          {
+            method: "GET",
 
-    const timer =
-      window.setTimeout(
-        async () => {
-          try {
-            const response =
-              await fetch(
-                `/api/partner/code-availability?code=${encodeURIComponent(
-                  code
-                )}`,
-                {
-                  method: "GET",
+            headers: {
+              Accept: "application/json",
+            },
 
-                  headers: {
-                    Accept:
-                      "application/json",
-                  },
-
-                  credentials:
-                    "same-origin",
-
-                  cache:
-                    "no-store",
-                }
-              );
-
-            const result =
-              await readApiJson(
-                response
-              );
-
-            if (
-              availabilityRequest.current !==
-              requestNumber
-            ) {
-              return;
-            }
-
-            setCodeState(
-              result.available
-                ? "available"
-                : "unavailable"
-            );
-
-            setCodeMessage(
-              result.message ||
-                (
-                  result.available
-                    ? "This affiliate code is available."
-                    : "That affiliate code has already been claimed."
-                )
-            );
-          } catch (error) {
-            if (
-              availabilityRequest.current !==
-              requestNumber
-            ) {
-              return;
-            }
-
-            setCodeState(
-              "error"
-            );
-
-            setCodeMessage(
-              error.message ||
-                "Code availability could not be checked."
-            );
+            credentials: "same-origin",
+            cache: "no-store",
           }
-        },
-        450
-      );
+        );
 
-    return () =>
-      window.clearTimeout(
-        timer
-      );
-  }, [
-    formData.code,
-    lockedApplication,
-  ]);
+        const result = await readApiJson(response);
+
+        if (
+          availabilityRequest.current !== requestNumber
+        ) {
+          return;
+        }
+
+        setCodeState(
+          result.available
+            ? "available"
+            : "unavailable"
+        );
+
+        setCodeMessage(
+          result.message ||
+            (result.available
+              ? "This affiliate code is available."
+              : "That affiliate code has already been claimed.")
+        );
+      } catch (error) {
+        if (
+          availabilityRequest.current !== requestNumber
+        ) {
+          return;
+        }
+
+        setCodeState("error");
+
+        setCodeMessage(
+          error.message ||
+            "Code availability could not be checked."
+        );
+      }
+    }, 450);
+
+    return () => window.clearTimeout(timer);
+  }, [formData.code, lockedApplication]);
 
   function handleChange(event) {
     const {
@@ -437,32 +492,22 @@ function PartnerApplication({
     setSubmitError("");
     setSuccessMessage("");
 
-    setFormData(
-      (current) => ({
-        ...current,
+    setFormData((current) => ({
+      ...current,
 
-        [name]:
-          type ===
-          "checkbox"
-            ? checked
-            : name === "code"
-              ? normalizeCode(
-                  value
-                )
-              : value,
-      })
-    );
+      [name]:
+        type === "checkbox"
+          ? checked
+          : name === "code"
+          ? normalizeCode(value)
+          : value,
+    }));
   }
 
-  async function handleSubmit(
-    event
-  ) {
+  async function handleSubmit(event) {
     event.preventDefault();
 
-    if (
-      !formComplete ||
-      isSubmitting
-    ) {
+    if (!formComplete || isSubmitting) {
       setSubmitError(
         "Complete the required fields and confirm that your affiliate code is available."
       );
@@ -475,61 +520,47 @@ function PartnerApplication({
     setSuccessMessage("");
 
     try {
-      const response =
-        await fetch(
-          "/api/partner/apply",
-          {
-            method: "POST",
+      const response = await fetch(
+        "/api/partner/apply",
+        {
+          method: "POST",
 
-            headers: {
-              "Content-Type":
-                "application/json",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
 
-              Accept:
-                "application/json",
-            },
+          credentials: "same-origin",
 
-            credentials:
-              "same-origin",
+          body: JSON.stringify({
+            code: formData.code,
 
-            body:
-              JSON.stringify({
-                code:
-                  formData.code,
+            primaryPlatform:
+              formData.primaryPlatform,
 
-                primaryPlatform:
-                  formData.primaryPlatform,
+            profileUrl:
+              formData.profileUrl.trim(),
 
-                profileUrl:
-                  formData.profileUrl.trim(),
+            audienceSize:
+              formData.audienceSize,
 
-                audienceSize:
-                  formData.audienceSize,
+            promotionPlan:
+              formData.promotionPlan.trim(),
 
-                promotionPlan:
-                  formData.promotionPlan.trim(),
+            experience:
+              formData.experience.trim(),
 
-                experience:
-                  formData.experience.trim(),
-
-                agreementAccepted:
-                  formData.agreementAccepted,
-              }),
-          }
-        );
-
-      const result =
-        await readApiJson(
-          response
-        );
-
-      const savedApplication =
-        result.application ||
-        null;
-
-      setApplication(
-        savedApplication
+            agreementAccepted:
+              formData.agreementAccepted,
+          }),
+        }
       );
+
+      const result = await readApiJson(response);
+      const savedApplication =
+        result.application || null;
+
+      setApplication(savedApplication);
 
       setSuccessMessage(
         result.message ||
@@ -537,8 +568,7 @@ function PartnerApplication({
       );
 
       if (
-        typeof onSubmitApplication ===
-        "function"
+        typeof onSubmitApplication === "function"
       ) {
         onSubmitApplication(
           savedApplication?.code ||
@@ -546,10 +576,7 @@ function PartnerApplication({
         );
       } else {
         window.setTimeout(
-          () =>
-            onNavigate(
-              "dashboard"
-            ),
+          () => onNavigate("dashboard"),
           700
         );
       }
@@ -563,208 +590,837 @@ function PartnerApplication({
     }
   }
 
+  async function handleCopyReferralLink() {
+    if (!referralLink) {
+      return;
+    }
+
+    setCopyMessage("");
+
+    try {
+      await copyText(referralLink);
+      setCopyMessage("Referral link copied.");
+    } catch {
+      setCopyMessage(
+        "The link could not be copied. Select and copy it manually."
+      );
+    }
+  }
+
   if (isLoading) {
     return (
-      <>
-        <style>
-          {partnerApplicationCss}
-        </style>
-
-        <main className="partner-application-page">
-          <section className="partner-state-card">
-            <p className="eyebrow">
-              PARTNER PROGRAM
-            </p>
-
-            <h1>
-              Loading Application
-            </h1>
-
-            <p>
-              Checking your
-              secure account
-              eligibility and
-              Partner Program
-              record.
-            </p>
-          </section>
-        </main>
-      </>
+      <PageShell>
+        <StateCard
+          eyebrow="PARTNER PROGRAM"
+          title="Loading Partner Center"
+          text="Checking your secure account eligibility, application, and referral record."
+        />
+      </PageShell>
     );
   }
 
   if (loadError) {
     return (
-      <>
-        <style>
-          {partnerApplicationCss}
-        </style>
+      <PageShell>
+        <StateCard
+          eyebrow="PARTNER PROGRAM"
+          title="Partner Center Unavailable"
+          text={loadError}
+        >
+          <div className="partner-button-row">
+            <button
+              type="button"
+              className="primary-btn"
+              onClick={() =>
+                window.location.reload()
+              }
+            >
+              Try Again
+            </button>
 
-        <main className="partner-application-page">
-          <section className="partner-state-card">
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() =>
+                onNavigate("dashboard")
+              }
+            >
+              Return To Dashboard
+            </button>
+          </div>
+        </StateCard>
+      </PageShell>
+    );
+  }
+
+  if (isApproved || isSuspended) {
+    return (
+      <PageShell>
+        <section className="partner-application-inner">
+          <div className="partner-topbar">
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() =>
+                onNavigate("dashboard")
+              }
+            >
+              ← Research Hub
+            </button>
+
+            <StatusPill
+              status={application.status}
+            />
+          </div>
+
+          <header className="partner-hero">
             <p className="eyebrow">
-              PARTNER PROGRAM
+              304 PEPTIDES PARTNER CENTER
             </p>
 
             <h1>
-              Application
-              Unavailable
+              {isApproved
+                ? "Referral Dashboard"
+                : "Partner Access Suspended"}
             </h1>
 
+            <p>
+              {isApproved
+                ? "Share your secure referral link and review attributed orders, pending commissions, and earned commissions."
+                : "Your code remains reserved, but it is not active for new referrals. Your existing referral history remains available below."}
+            </p>
+          </header>
+
+          {application.customerMessage && (
+            <div className="partner-message-box">
+              <strong>
+                Message from 304 Peptides
+              </strong>
+
+              <p>
+                {application.customerMessage}
+              </p>
+            </div>
+          )}
+
+          {summaryError && (
             <div
               className="partner-error"
               role="alert"
             >
-              {loadError}
+              {summaryError}
             </div>
+          )}
 
-            <div className="partner-button-row">
-              <button
-                type="button"
-                className="primary-btn"
-                onClick={() =>
-                  window.location.reload()
-                }
-              >
-                Try Again
-              </button>
-
-              <button
-                type="button"
-                className="secondary-btn"
-                onClick={() =>
-                  onNavigate(
-                    "dashboard"
-                  )
-                }
-              >
-                Return To
-                Dashboard
-              </button>
-            </div>
-          </section>
-        </main>
-      </>
-    );
-  }
-
-  if (lockedApplication) {
-    return (
-      <>
-        <style>
-          {partnerApplicationCss}
-        </style>
-
-        <main className="partner-application-page">
-          <section className="partner-state-card">
-            <StatusPill
-              status={
-                application.status
+          <section className="partner-dashboard-grid">
+            <MetricCard
+              label="Affiliate Code"
+              value={application.code}
+              detail={
+                isApproved
+                  ? "Active"
+                  : "Inactive"
               }
             />
 
-            <p className="eyebrow">
-              PARTNER PROGRAM
-            </p>
-
-            <h1>
-              {getStatusTitle(
-                application.status
+            <MetricCard
+              label="Commission Rate"
+              value={formatPercentFromBasisPoints(
+                application.commissionRateBps
               )}
-            </h1>
+              detail="Captured when an order is submitted"
+            />
 
-            <p>
-              {getStatusCopy(
-                application.status
+            <MetricCard
+              label="Pending Commission"
+              value={formatMoneyFromCents(
+                summary.pendingCommissionCents
               )}
-            </p>
+              detail={`${summary.pendingCount} pending referral(s)`}
+            />
 
-            <div className="partner-record-grid">
-              <RecordBox
-                label="Your Affiliate Code"
-                value={
-                  application.code
-                }
-              />
+            <MetricCard
+              label="Earned Commission"
+              value={formatMoneyFromCents(
+                summary.earnedCommissionCents
+              )}
+              detail={`${summary.earnedCount} earned referral(s)`}
+            />
 
-              <RecordBox
-                label="Status"
-                value={
-                  application.status
-                }
-              />
+            <MetricCard
+              label="Attributed Orders"
+              value={summary.totalCount}
+              detail={`${summary.voidedCount} voided referral(s)`}
+            />
 
-              <RecordBox
-                label="Submitted"
-                value={formatDate(
-                  application.submittedAt
-                )}
-              />
+            <MetricCard
+              label="Earned Referral Revenue"
+              value={formatMoneyFromCents(
+                summary.earnedRevenueCents
+              )}
+              detail="Paid or later order statuses"
+            />
+          </section>
 
-              <RecordBox
-                label="Primary Platform"
-                value={
-                  application.primaryPlatform
-                }
-              />
+          <section className="partner-share-panel">
+            <div>
+              <p className="eyebrow">
+                YOUR REFERRAL LINK
+              </p>
+
+              <h2>
+                {isApproved
+                  ? "Share This Checkout Link"
+                  : "Link Currently Inactive"}
+              </h2>
+
+              <p>
+                Customers who open this link will
+                see your code prefilled at checkout.
+                They must apply the code before
+                submitting. It does not change their
+                subtotal.
+              </p>
             </div>
 
-            {application.customerMessage && (
-              <div className="partner-message-box">
-                <strong>
-                  Message from
-                  304 Peptides
-                </strong>
+            <div className="partner-link-row">
+              <input
+                type="text"
+                value={referralLink}
+                readOnly
+                aria-label="Partner referral link"
+              />
 
-                <p>
-                  {
-                    application.customerMessage
-                  }
-                </p>
-              </div>
-            )}
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={handleCopyReferralLink}
+                disabled={!isApproved}
+              >
+                Copy Link
+              </button>
+            </div>
 
-            {successMessage && (
+            {copyMessage && (
               <div
                 className="partner-success"
                 aria-live="polite"
               >
-                {successMessage}
+                {copyMessage}
               </div>
             )}
 
-            <div className="partner-button-row">
-              <button
-                type="button"
-                className="primary-btn"
-                onClick={() =>
-                  onNavigate(
-                    "dashboard"
-                  )
-                }
-              >
-                Return To
-                Dashboard
-              </button>
+            <div className="partner-share-note">
+              <strong>
+                No self-referrals or checkout discount
+              </strong>
+
+              <span>
+                The signed-in partner account cannot
+                use its own code. Referral attribution
+                credits the partner only and leaves
+                the customer subtotal unchanged.
+              </span>
+            </div>
+          </section>
+
+          <section className="partner-referral-panel">
+            <div className="partner-section-heading">
+              <div>
+                <p className="eyebrow">
+                  REFERRAL HISTORY
+                </p>
+
+                <h2>Attributed Orders</h2>
+              </div>
 
               <button
                 type="button"
                 className="secondary-btn"
-                onClick={() =>
-                  onNavigate(
-                    "contact"
-                  )
-                }
+                onClick={loadPartnerSummary}
+                disabled={isSummaryLoading}
               >
-                Contact Support
+                {isSummaryLoading
+                  ? "Refreshing..."
+                  : "Refresh History"}
               </button>
             </div>
+
+            {isSummaryLoading &&
+            referrals.length === 0 ? (
+              <EmptyState
+                title="Loading Referral History"
+                text="Retrieving your secure referral records."
+              />
+            ) : referrals.length === 0 ? (
+              <EmptyState
+                title="No Referrals Yet"
+                text="An attributed order will appear here after a different customer account applies your active code and submits checkout."
+              />
+            ) : (
+              <div className="partner-referral-stack">
+                {referrals.map((referral) => (
+                  <article
+                    key={referral.orderId}
+                    className={`partner-referral-card partner-referral-${referral.referralStatus}`}
+                  >
+                    <div className="partner-referral-heading">
+                      <div>
+                        <p className="eyebrow">
+                          ORDER #{referral.orderId}
+                        </p>
+
+                        <h3>
+                          {formatMoneyFromCents(
+                            referral.orderSubtotalCents
+                          )}
+                        </h3>
+
+                        <p>
+                          {formatDate(
+                            referral.createdAt
+                          )}
+                        </p>
+                      </div>
+
+                      <ReferralStatusPill
+                        status={
+                          referral.referralStatus
+                        }
+                      />
+                    </div>
+
+                    <div className="partner-record-grid">
+                      <RecordBox
+                        label="Order Status"
+                        value={referral.orderStatus}
+                      />
+
+                      <RecordBox
+                        label="Captured Rate"
+                        value={formatPercentFromBasisPoints(
+                          referral.commissionRateBps
+                        )}
+                      />
+
+                      <RecordBox
+                        label="Commission"
+                        value={formatMoneyFromCents(
+                          referral.commissionAmountCents
+                        )}
+                      />
+
+                      <RecordBox
+                        label={
+                          referral.referralStatus ===
+                          "earned"
+                            ? "Earned"
+                            : referral.referralStatus ===
+                              "voided"
+                            ? "Voided"
+                            : "Last Updated"
+                        }
+                        value={formatDate(
+                          referral.referralStatus ===
+                          "earned"
+                            ? referral.earnedAt
+                            : referral.referralStatus ===
+                              "voided"
+                            ? referral.voidedAt
+                            : referral.updatedAt
+                        )}
+                      />
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
-        </main>
-      </>
+
+          <div className="partner-button-row partner-center-actions">
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() =>
+                onNavigate("contact")
+              }
+            >
+              Contact Support
+            </button>
+          </div>
+        </section>
+      </PageShell>
     );
   }
 
+  if (application?.status === "pending") {
+    return (
+      <PageShell>
+        <StateCard
+          eyebrow="PARTNER PROGRAM"
+          title="Application Under Review"
+          text="Your selected affiliate code is reserved while the application is reviewed. It is not active for referrals yet."
+        >
+          <StatusPill
+            status={application.status}
+          />
+
+          <div className="partner-record-grid">
+            <RecordBox
+              label="Your Affiliate Code"
+              value={application.code}
+            />
+
+            <RecordBox
+              label="Status"
+              value="Pending Review"
+            />
+
+            <RecordBox
+              label="Submitted"
+              value={formatDate(
+                application.submittedAt
+              )}
+            />
+
+            <RecordBox
+              label="Primary Platform"
+              value={
+                application.primaryPlatform
+              }
+            />
+          </div>
+
+          {application.customerMessage && (
+            <div className="partner-message-box">
+              <strong>
+                Message from 304 Peptides
+              </strong>
+
+              <p>
+                {application.customerMessage}
+              </p>
+            </div>
+          )}
+
+          <div className="partner-button-row">
+            <button
+              type="button"
+              className="primary-btn"
+              onClick={() =>
+                onNavigate("dashboard")
+              }
+            >
+              Return To Dashboard
+            </button>
+
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() =>
+                onNavigate("contact")
+              }
+            >
+              Contact Support
+            </button>
+          </div>
+        </StateCard>
+      </PageShell>
+    );
+  }
+
+  return (
+    <PageShell>
+      <section className="partner-application-inner">
+        <div className="partner-topbar">
+          <button
+            type="button"
+            className="secondary-btn"
+            onClick={() =>
+              onNavigate("dashboard")
+            }
+          >
+            ← Research Hub
+          </button>
+
+          <span
+            className={
+              eligibility?.eligible
+                ? "partner-eligible"
+                : "partner-ineligible"
+            }
+          >
+            {eligibility?.eligible
+              ? "Eligible To Apply"
+              : "Order Required"}
+          </span>
+        </div>
+
+        <header className="partner-hero">
+          <p className="eyebrow">
+            304 PEPTIDES PARTNER PROGRAM
+          </p>
+
+          <h1>
+            Create Your Own Affiliate Code
+          </h1>
+
+          <p>
+            Choose a unique code that fits your
+            page or audience. Your code is reserved
+            when the application is submitted and
+            becomes active after approval.
+          </p>
+        </header>
+
+        {!eligibility?.eligible ? (
+          <StateCard
+            eyebrow="ELIGIBILITY"
+            title="Complete Your First Order Request"
+            text="A secure account-linked order request is required before a Partner Program application can be submitted."
+          >
+            <button
+              type="button"
+              className="primary-btn"
+              onClick={() =>
+                onNavigate("products")
+              }
+            >
+              Browse Products
+            </button>
+          </StateCard>
+        ) : (
+          <div className="partner-layout">
+            <form
+              className="partner-form"
+              onSubmit={handleSubmit}
+            >
+              {isDenied && (
+                <div className="partner-denied-notice">
+                  <strong>
+                    Previous application not approved
+                  </strong>
+
+                  <p>
+                    {application.customerMessage ||
+                      "You may update the application and choose an available code before submitting again."}
+                  </p>
+                </div>
+              )}
+
+              <section className="partner-form-section">
+                <p className="eyebrow">
+                  YOUR AFFILIATE CODE
+                </p>
+
+                <h2>Choose Your Code</h2>
+
+                <label className="partner-field">
+                  <span>Affiliate Code</span>
+
+                  <div className="partner-code-input-row">
+                    <input
+                      name="code"
+                      type="text"
+                      value={formData.code}
+                      onChange={handleChange}
+                      placeholder="DANNY304"
+                      autoComplete="off"
+                      maxLength="20"
+                      disabled={isSubmitting}
+                      aria-describedby="partner-code-message"
+                    />
+
+                    <strong>
+                      {formData.code.length}/20
+                    </strong>
+                  </div>
+
+                  <small>
+                    4–20 characters. Letters,
+                    numbers, and single hyphens only.
+                    Codes are not case-sensitive.
+                  </small>
+
+                  {formData.code && (
+                    <div
+                      id="partner-code-message"
+                      className={`partner-code-message partner-code-${codeState}`}
+                      aria-live="polite"
+                    >
+                      {codeMessage ||
+                        localCodeError}
+                    </div>
+                  )}
+                </label>
+              </section>
+
+              <section className="partner-form-section">
+                <p className="eyebrow">
+                  AUDIENCE DETAILS
+                </p>
+
+                <h2>
+                  Tell Us Where You Share
+                </h2>
+
+                <div className="partner-form-grid">
+                  <SelectField
+                    name="primaryPlatform"
+                    label="Primary Platform"
+                    value={
+                      formData.primaryPlatform
+                    }
+                    onChange={handleChange}
+                    options={platformOptions}
+                    disabled={isSubmitting}
+                  />
+
+                  <SelectField
+                    name="audienceSize"
+                    label="Approximate Audience Size"
+                    value={formData.audienceSize}
+                    onChange={handleChange}
+                    options={audienceOptions}
+                    disabled={isSubmitting}
+                  />
+
+                  <label className="partner-field partner-full-field">
+                    <span>
+                      Profile or Page URL — Optional
+                    </span>
+
+                    <input
+                      name="profileUrl"
+                      type="url"
+                      value={formData.profileUrl}
+                      onChange={handleChange}
+                      placeholder="https://..."
+                      autoComplete="url"
+                      maxLength="500"
+                      disabled={isSubmitting}
+                    />
+                  </label>
+                </div>
+              </section>
+
+              <section className="partner-form-section">
+                <p className="eyebrow">
+                  PROMOTION PLAN
+                </p>
+
+                <h2>
+                  How Will You Share 304 Peptides?
+                </h2>
+
+                <label className="partner-field">
+                  <span>Promotion Plan</span>
+
+                  <textarea
+                    name="promotionPlan"
+                    rows="6"
+                    value={
+                      formData.promotionPlan
+                    }
+                    onChange={handleChange}
+                    placeholder="Describe the educational content, audience, and channels you plan to use."
+                    maxLength="2000"
+                    disabled={isSubmitting}
+                  />
+
+                  <small>
+                    {
+                      formData.promotionPlan
+                        .length
+                    }
+                    /2000 characters
+                  </small>
+                </label>
+
+                <label className="partner-field">
+                  <span>
+                    Relevant Experience — Optional
+                  </span>
+
+                  <textarea
+                    name="experience"
+                    rows="4"
+                    value={formData.experience}
+                    onChange={handleChange}
+                    placeholder="Share any experience with content creation, communities, research education, or affiliate programs."
+                    maxLength="1000"
+                    disabled={isSubmitting}
+                  />
+
+                  <small>
+                    {formData.experience.length}
+                    /1000 characters
+                  </small>
+                </label>
+              </section>
+
+              <section className="partner-agreement">
+                <p className="eyebrow">
+                  REQUIRED AGREEMENT
+                </p>
+
+                <h2>
+                  Partner Program Standards
+                </h2>
+
+                <ul>
+                  <li>
+                    Use research-only language and
+                    do not make medical claims.
+                  </li>
+
+                  <li>
+                    Do not represent yourself as
+                    304 Peptides staff or ownership.
+                  </li>
+
+                  <li>
+                    Do not use your own code for
+                    self-referrals.
+                  </li>
+
+                  <li>
+                    Do not use spam, deceptive
+                    advertising, or misleading
+                    discounts.
+                  </li>
+
+                  <li>
+                    Partner approval and code access
+                    may be suspended for violations.
+                  </li>
+                </ul>
+
+                <label className="partner-checkbox-row">
+                  <input
+                    name="agreementAccepted"
+                    type="checkbox"
+                    checked={
+                      formData.agreementAccepted
+                    }
+                    onChange={handleChange}
+                    disabled={isSubmitting}
+                  />
+
+                  <span>
+                    I understand and agree to follow
+                    the Partner Program standards and
+                    research-use restrictions.
+                  </span>
+                </label>
+              </section>
+
+              {submitError && (
+                <div
+                  className="partner-error"
+                  role="alert"
+                >
+                  {submitError}
+                </div>
+              )}
+
+              {successMessage && (
+                <div
+                  className="partner-success"
+                  aria-live="polite"
+                >
+                  {successMessage}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="primary-btn partner-submit"
+                disabled={
+                  !formComplete ||
+                  isSubmitting
+                }
+              >
+                {isSubmitting
+                  ? "Submitting Application..."
+                  : isDenied
+                  ? "Resubmit Partner Application"
+                  : "Submit Partner Application"}
+              </button>
+
+              {!formComplete &&
+                !isSubmitting && (
+                  <p className="partner-helper">
+                    Complete the required fields,
+                    confirm code availability, and
+                    accept the Partner Program
+                    agreement.
+                  </p>
+                )}
+            </form>
+
+            <aside className="partner-sidebar">
+              <section>
+                <p className="eyebrow">
+                  HOW CODES WORK
+                </p>
+
+                <h2>
+                  Your Code, Pending Approval
+                </h2>
+
+                <Step
+                  number="01"
+                  title="Choose it"
+                  text="Create a memorable code that represents your page, name, or audience."
+                />
+
+                <Step
+                  number="02"
+                  title="Reserve it"
+                  text="Submission reserves the code so another applicant cannot claim it during review."
+                />
+
+                <Step
+                  number="03"
+                  title="Activate it"
+                  text="The code becomes active only after an administrator approves the application."
+                />
+              </section>
+
+              <section className="partner-sidebar-note">
+                <strong>
+                  No self-referrals
+                </strong>
+
+                <p>
+                  A partner cannot earn commission
+                  or customer discounts by using
+                  their own code.
+                </p>
+              </section>
+
+              <section className="partner-sidebar-note">
+                <strong>
+                  For Research Use Only
+                </strong>
+
+                <p>
+                  Partner content must describe
+                  products only within the site’s
+                  research-use framework and must
+                  not promote human consumption.
+                </p>
+              </section>
+            </aside>
+          </div>
+        )}
+      </section>
+    </PageShell>
+  );
+}
+
+function PageShell({ children }) {
   return (
     <>
       <style>
@@ -772,556 +1428,34 @@ function PartnerApplication({
       </style>
 
       <main className="partner-application-page">
-        <section className="partner-application-inner">
-          <div className="partner-topbar">
-            <button
-              type="button"
-              className="secondary-btn"
-              onClick={() =>
-                onNavigate(
-                  "dashboard"
-                )
-              }
-            >
-              ← Research Hub
-            </button>
-
-            <span
-              className={
-                eligibility?.eligible
-                  ? "partner-eligible"
-                  : "partner-ineligible"
-              }
-            >
-              {eligibility?.eligible
-                ? "Eligible To Apply"
-                : "Order Required"}
-            </span>
-          </div>
-
-          <header className="partner-hero">
-            <p className="eyebrow">
-              304 PEPTIDES
-              PARTNER PROGRAM
-            </p>
-
-            <h1>
-              Create Your Own
-              Affiliate Code
-            </h1>
-
-            <p>
-              Choose a unique
-              code that fits
-              your page or
-              audience. Your
-              code is reserved
-              when the
-              application is
-              submitted and
-              becomes active
-              after approval.
-            </p>
-          </header>
-
-          {!eligibility?.eligible ? (
-            <section className="partner-state-card">
-              <p className="eyebrow">
-                ELIGIBILITY
-              </p>
-
-              <h2>
-                Complete Your
-                First Order
-                Request
-              </h2>
-
-              <p>
-                A secure
-                account-linked
-                order request is
-                required before
-                a Partner
-                Program
-                application can
-                be submitted.
-              </p>
-
-              <button
-                type="button"
-                className="primary-btn"
-                onClick={() =>
-                  onNavigate(
-                    "products"
-                  )
-                }
-              >
-                Browse Products
-              </button>
-            </section>
-          ) : (
-            <div className="partner-layout">
-              <form
-                className="partner-form"
-                onSubmit={
-                  handleSubmit
-                }
-              >
-                {isDenied && (
-                  <div className="partner-denied-notice">
-                    <strong>
-                      Previous
-                      application
-                      not approved
-                    </strong>
-
-                    <p>
-                      {application.customerMessage ||
-                        "You may update the application and choose an available code before submitting again."}
-                    </p>
-                  </div>
-                )}
-
-                <section className="partner-form-section">
-                  <p className="eyebrow">
-                    YOUR AFFILIATE
-                    CODE
-                  </p>
-
-                  <h2>
-                    Choose Your
-                    Code
-                  </h2>
-
-                  <label className="partner-field">
-                    <span>
-                      Affiliate Code
-                    </span>
-
-                    <div className="partner-code-input-row">
-                      <input
-                        name="code"
-                        type="text"
-                        value={
-                          formData.code
-                        }
-                        onChange={
-                          handleChange
-                        }
-                        placeholder="DANNY304"
-                        autoComplete="off"
-                        maxLength="20"
-                        disabled={
-                          isSubmitting
-                        }
-                        aria-describedby="partner-code-message"
-                      />
-
-                      <strong>
-                        {
-                          formData
-                            .code
-                            .length
-                        }
-                        /20
-                      </strong>
-                    </div>
-
-                    <small>
-                      4–20
-                      characters.
-                      Letters,
-                      numbers, and
-                      single
-                      hyphens only.
-                      Codes are not
-                      case-sensitive.
-                    </small>
-
-                    {formData.code && (
-                      <div
-                        id="partner-code-message"
-                        className={`partner-code-message partner-code-${codeState}`}
-                        aria-live="polite"
-                      >
-                        {codeMessage ||
-                          localCodeError}
-                      </div>
-                    )}
-                  </label>
-                </section>
-
-                <section className="partner-form-section">
-                  <p className="eyebrow">
-                    AUDIENCE
-                    DETAILS
-                  </p>
-
-                  <h2>
-                    Tell Us Where
-                    You Share
-                  </h2>
-
-                  <div className="partner-form-grid">
-                    <SelectField
-                      name="primaryPlatform"
-                      label="Primary Platform"
-                      value={
-                        formData.primaryPlatform
-                      }
-                      onChange={
-                        handleChange
-                      }
-                      options={
-                        platformOptions
-                      }
-                      disabled={
-                        isSubmitting
-                      }
-                    />
-
-                    <SelectField
-                      name="audienceSize"
-                      label="Approximate Audience Size"
-                      value={
-                        formData.audienceSize
-                      }
-                      onChange={
-                        handleChange
-                      }
-                      options={
-                        audienceOptions
-                      }
-                      disabled={
-                        isSubmitting
-                      }
-                    />
-
-                    <label className="partner-field partner-full-field">
-                      <span>
-                        Profile or
-                        Page URL —
-                        Optional
-                      </span>
-
-                      <input
-                        name="profileUrl"
-                        type="url"
-                        value={
-                          formData.profileUrl
-                        }
-                        onChange={
-                          handleChange
-                        }
-                        placeholder="https://..."
-                        autoComplete="url"
-                        maxLength="500"
-                        disabled={
-                          isSubmitting
-                        }
-                      />
-                    </label>
-                  </div>
-                </section>
-
-                <section className="partner-form-section">
-                  <p className="eyebrow">
-                    PROMOTION PLAN
-                  </p>
-
-                  <h2>
-                    How Will You
-                    Share 304
-                    Peptides?
-                  </h2>
-
-                  <label className="partner-field">
-                    <span>
-                      Promotion
-                      Plan
-                    </span>
-
-                    <textarea
-                      name="promotionPlan"
-                      rows="6"
-                      value={
-                        formData.promotionPlan
-                      }
-                      onChange={
-                        handleChange
-                      }
-                      placeholder="Describe the educational content, audience, and channels you plan to use."
-                      maxLength="2000"
-                      disabled={
-                        isSubmitting
-                      }
-                    />
-
-                    <small>
-                      {
-                        formData
-                          .promotionPlan
-                          .length
-                      }
-                      /2000
-                      characters
-                    </small>
-                  </label>
-
-                  <label className="partner-field">
-                    <span>
-                      Relevant
-                      Experience —
-                      Optional
-                    </span>
-
-                    <textarea
-                      name="experience"
-                      rows="4"
-                      value={
-                        formData.experience
-                      }
-                      onChange={
-                        handleChange
-                      }
-                      placeholder="Share any experience with content creation, communities, research education, or affiliate programs."
-                      maxLength="1000"
-                      disabled={
-                        isSubmitting
-                      }
-                    />
-
-                    <small>
-                      {
-                        formData
-                          .experience
-                          .length
-                      }
-                      /1000
-                      characters
-                    </small>
-                  </label>
-                </section>
-
-                <section className="partner-agreement">
-                  <p className="eyebrow">
-                    REQUIRED
-                    AGREEMENT
-                  </p>
-
-                  <h2>
-                    Partner
-                    Program
-                    Standards
-                  </h2>
-
-                  <ul>
-                    <li>
-                      Use
-                      research-only
-                      language and
-                      do not make
-                      medical
-                      claims.
-                    </li>
-
-                    <li>
-                      Do not
-                      represent
-                      yourself as
-                      304 Peptides
-                      staff or
-                      ownership.
-                    </li>
-
-                    <li>
-                      Do not use
-                      your own
-                      code for
-                      self-referrals.
-                    </li>
-
-                    <li>
-                      Do not use
-                      spam,
-                      deceptive
-                      advertising,
-                      or
-                      misleading
-                      discounts.
-                    </li>
-
-                    <li>
-                      Partner
-                      approval and
-                      code access
-                      may be
-                      suspended
-                      for
-                      violations.
-                    </li>
-                  </ul>
-
-                  <label className="partner-checkbox-row">
-                    <input
-                      name="agreementAccepted"
-                      type="checkbox"
-                      checked={
-                        formData.agreementAccepted
-                      }
-                      onChange={
-                        handleChange
-                      }
-                      disabled={
-                        isSubmitting
-                      }
-                    />
-
-                    <span>
-                      I understand
-                      and agree to
-                      follow the
-                      Partner
-                      Program
-                      standards
-                      and
-                      research-use
-                      restrictions.
-                    </span>
-                  </label>
-                </section>
-
-                {submitError && (
-                  <div
-                    className="partner-error"
-                    role="alert"
-                  >
-                    {submitError}
-                  </div>
-                )}
-
-                {successMessage && (
-                  <div
-                    className="partner-success"
-                    aria-live="polite"
-                  >
-                    {
-                      successMessage
-                    }
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  className="primary-btn partner-submit"
-                  disabled={
-                    !formComplete ||
-                    isSubmitting
-                  }
-                >
-                  {isSubmitting
-                    ? "Submitting Application..."
-                    : isDenied
-                      ? "Resubmit Partner Application"
-                      : "Submit Partner Application"}
-                </button>
-
-                {!formComplete &&
-                  !isSubmitting && (
-                    <p className="partner-helper">
-                      Complete the
-                      required
-                      fields,
-                      confirm code
-                      availability,
-                      and accept
-                      the Partner
-                      Program
-                      agreement.
-                    </p>
-                  )}
-              </form>
-
-              <aside className="partner-sidebar">
-                <section>
-                  <p className="eyebrow">
-                    HOW CODES WORK
-                  </p>
-
-                  <h2>
-                    Your Code,
-                    Pending
-                    Approval
-                  </h2>
-
-                  <Step
-                    number="01"
-                    title="Choose it"
-                    text="Create a memorable code that represents your page, name, or audience."
-                  />
-
-                  <Step
-                    number="02"
-                    title="Reserve it"
-                    text="Submission reserves the code so another applicant cannot claim it during review."
-                  />
-
-                  <Step
-                    number="03"
-                    title="Activate it"
-                    text="The code becomes active only after an administrator approves the application."
-                  />
-                </section>
-
-                <section className="partner-sidebar-note">
-                  <strong>
-                    No
-                    self-referrals
-                  </strong>
-
-                  <p>
-                    A partner
-                    cannot earn
-                    commission or
-                    customer
-                    discounts by
-                    using their
-                    own code.
-                    Self-use may
-                    still be
-                    recorded for
-                    fraud and
-                    performance
-                    review.
-                  </p>
-                </section>
-
-                <section className="partner-sidebar-note">
-                  <strong>
-                    For Research
-                    Use Only
-                  </strong>
-
-                  <p>
-                    Partner
-                    content must
-                    describe
-                    products only
-                    within the
-                    site’s
-                    research-use
-                    framework and
-                    must not
-                    promote human
-                    consumption.
-                  </p>
-                </section>
-              </aside>
-            </div>
-          )}
-        </section>
+        {children}
       </main>
     </>
+  );
+}
+
+function StateCard({
+  eyebrow,
+  title,
+  text,
+  children,
+}) {
+  return (
+    <section className="partner-state-card">
+      <p className="eyebrow">
+        {eyebrow}
+      </p>
+
+      <h1>
+        {title}
+      </h1>
+
+      <p>
+        {text}
+      </p>
+
+      {children}
+    </section>
   );
 }
 
@@ -1349,27 +1483,35 @@ function SelectField({
           Select One
         </option>
 
-        {options.map(
-          (option) => (
-            <option
-              key={option}
-              value={option}
-            >
-              {option}
-            </option>
-          )
-        )}
+        {options.map((option) => (
+          <option
+            key={option}
+            value={option}
+          >
+            {option}
+          </option>
+        ))}
       </select>
     </label>
   );
 }
 
-function StatusPill({
-  status,
-}) {
+function StatusPill({ status }) {
   return (
     <span
       className={`partner-status-pill partner-status-${status}`}
+    >
+      {String(
+        status || "pending"
+      ).toUpperCase()}
+    </span>
+  );
+}
+
+function ReferralStatusPill({ status }) {
+  return (
+    <span
+      className={`partner-status-pill partner-referral-status-${status}`}
     >
       {String(
         status || "pending"
@@ -1389,9 +1531,47 @@ function RecordBox({
       </span>
 
       <strong>
-        {value ||
-          "Not available"}
+        {value || "Not available"}
       </strong>
+    </div>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  detail,
+}) {
+  return (
+    <div className="partner-metric-card">
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
+
+      <small>
+        {detail}
+      </small>
+    </div>
+  );
+}
+
+function EmptyState({
+  title,
+  text,
+}) {
+  return (
+    <div className="partner-empty-state">
+      <h3>
+        {title}
+      </h3>
+
+      <p>
+        {text}
+      </p>
     </div>
   );
 }
@@ -1420,46 +1600,6 @@ function Step({
   );
 }
 
-function getStatusTitle(
-  status
-) {
-  const titles = {
-    pending:
-      "Application Under Review",
-
-    approved:
-      "Partner Code Approved",
-
-    suspended:
-      "Partner Access Suspended",
-  };
-
-  return (
-    titles[status] ||
-    "Partner Application"
-  );
-}
-
-function getStatusCopy(
-  status
-) {
-  const copy = {
-    pending:
-      "Your selected affiliate code is reserved while the application is reviewed. It is not active for referrals yet.",
-
-    approved:
-      "Your customer-created affiliate code is approved and ready for the referral-tracking phase of the Partner Program.",
-
-    suspended:
-      "Your affiliate code remains reserved but is not active. Review the message below or contact support for assistance.",
-  };
-
-  return (
-    copy[status] ||
-    "Review your current Partner Program record below."
-  );
-}
-
 const partnerApplicationCss = `
 .partner-application-page,
 .partner-application-page *,
@@ -1481,7 +1621,9 @@ const partnerApplicationCss = `
 
 .partner-topbar,
 .partner-button-row,
-.partner-code-input-row {
+.partner-code-input-row,
+.partner-section-heading,
+.partner-referral-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1508,31 +1650,37 @@ const partnerApplicationCss = `
 }
 
 .partner-eligible,
-.partner-status-approved {
+.partner-status-approved,
+.partner-referral-status-earned {
   border: 1px solid rgba(72, 214, 151, .35);
   background: rgba(72, 214, 151, .11);
   color: #b8f3d8;
 }
 
 .partner-ineligible,
-.partner-status-pending {
+.partner-status-denied,
+.partner-status-suspended,
+.partner-referral-status-voided {
+  border: 1px solid rgba(255, 95, 95, .35);
+  background: rgba(255, 70, 70, .1);
+  color: #ffd0d0;
+}
+
+.partner-status-pending,
+.partner-referral-status-pending {
   border: 1px solid rgba(255, 190, 80, .35);
   background: rgba(255, 170, 50, .1);
   color: #ffe0a8;
 }
 
-.partner-status-suspended {
-  border: 1px solid rgba(255, 95, 95, .38);
-  background: rgba(255, 70, 70, .12);
-  color: #ffcaca;
-}
-
 .partner-hero,
 .partner-form,
 .partner-sidebar > section,
-.partner-state-card {
+.partner-state-card,
+.partner-share-panel,
+.partner-referral-panel {
   border: 1px solid rgba(255, 255, 255, .1);
-  border-radius: 25px;
+  border-radius: 24px;
   background:
     radial-gradient(
       circle at top left,
@@ -1544,38 +1692,53 @@ const partnerApplicationCss = `
 }
 
 .partner-hero {
-  padding: 50px;
-  margin-bottom: 24px;
+  padding: 42px;
+  margin-bottom: 22px;
   text-align: center;
 }
 
 .partner-hero h1,
 .partner-state-card h1 {
-  margin: 8px 0 17px;
+  margin: 8px 0 16px;
   font-size: clamp(38px, 7vw, 62px);
   line-height: 1.04;
 }
 
 .partner-hero > p:not(.eyebrow),
-.partner-state-card > p:not(.eyebrow) {
+.partner-state-card > p:not(.eyebrow),
+.partner-share-panel > div > p:not(.eyebrow) {
   max-width: 820px;
   margin: 0 auto;
-  color: #b8c1c8;
-  line-height: 1.75;
+  color: #b6c0c8;
+  line-height: 1.72;
 }
 
 .partner-layout {
   display: grid;
   grid-template-columns:
-    minmax(0, 1.55fr)
-    minmax(300px, .75fr);
-  gap: 20px;
+    minmax(0, 1.4fr)
+    minmax(300px, .6fr);
+  gap: 22px;
   align-items: start;
 }
 
-.partner-form {
-  min-width: 0;
+.partner-form,
+.partner-sidebar > section,
+.partner-state-card,
+.partner-share-panel,
+.partner-referral-panel {
   padding: 28px;
+}
+
+.partner-state-card {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.partner-state-card .partner-status-pill {
+  margin-bottom: 14px;
 }
 
 .partner-form-section,
@@ -1591,28 +1754,49 @@ const partnerApplicationCss = `
 .partner-form-section h2,
 .partner-agreement h2,
 .partner-sidebar h2,
-.partner-state-card h2 {
+.partner-share-panel h2,
+.partner-referral-panel h2 {
   margin: 6px 0 18px;
   font-size: clamp(27px, 4vw, 36px);
-  line-height: 1.12;
+}
+
+.partner-form-grid,
+.partner-record-grid,
+.partner-dashboard-grid {
+  display: grid;
+  gap: 12px;
 }
 
 .partner-form-grid {
-  display: grid;
   grid-template-columns:
     repeat(2, minmax(0, 1fr));
-  gap: 15px;
+}
+
+.partner-record-grid {
+  grid-template-columns:
+    repeat(4, minmax(0, 1fr));
+  margin-top: 20px;
+}
+
+.partner-dashboard-grid {
+  grid-template-columns:
+    repeat(3, minmax(0, 1fr));
+  margin: 22px 0;
 }
 
 .partner-field {
-  min-width: 0;
   display: grid;
   gap: 8px;
   margin-top: 15px;
 }
 
+.partner-full-field {
+  grid-column: 1 / -1;
+}
+
 .partner-field > span,
-.partner-record-box span {
+.partner-record-box > span,
+.partner-metric-card > span {
   color: #9ed8ff;
   font-size: 11px;
   font-weight: 900;
@@ -1622,9 +1806,11 @@ const partnerApplicationCss = `
 
 .partner-field input,
 .partner-field select,
-.partner-field textarea {
+.partner-field textarea,
+.partner-code-input-row input,
+.partner-link-row input {
   width: 100%;
-  padding: 15px;
+  padding: 14px;
   border: 1px solid rgba(255, 255, 255, .14);
   border-radius: 12px;
   outline: none;
@@ -1635,7 +1821,9 @@ const partnerApplicationCss = `
 
 .partner-field input:focus,
 .partner-field select:focus,
-.partner-field textarea:focus {
+.partner-field textarea:focus,
+.partner-code-input-row input:focus,
+.partner-link-row input:focus {
   border-color: rgba(61, 165, 255, .65);
   box-shadow: 0 0 0 3px rgba(61, 165, 255, .12);
 }
@@ -1647,17 +1835,11 @@ const partnerApplicationCss = `
 
 .partner-field textarea {
   resize: vertical;
-  min-height: 110px;
 }
 
 .partner-field small,
-.partner-helper {
-  color: #8e99a2;
-  line-height: 1.55;
-}
-
-.partner-full-field {
-  grid-column: 1 / -1;
+.partner-metric-card small {
+  color: #8f9aa2;
 }
 
 .partner-code-input-row {
@@ -1665,150 +1847,46 @@ const partnerApplicationCss = `
 }
 
 .partner-code-input-row input {
-  flex: 1;
+  min-width: 0;
+  font-weight: 900;
+  letter-spacing: .8px;
+  text-transform: uppercase;
 }
 
 .partner-code-input-row strong {
-  min-width: 54px;
-  color: #aeb8bf;
+  flex: 0 0 auto;
+  color: #8f9aa2;
   font-size: 12px;
-  text-align: right;
 }
 
-.partner-code-message {
-  padding: 11px 12px;
-  border-radius: 11px;
-  font-size: 13px;
-  line-height: 1.45;
+.partner-code-message,
+.partner-error,
+.partner-success,
+.partner-message-box,
+.partner-denied-notice,
+.partner-share-note {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 14px;
+  line-height: 1.58;
 }
 
-.partner-code-checking {
-  border: 1px solid rgba(61, 165, 255, .25);
-  background: rgba(61, 165, 255, .08);
-  color: #c7eaff;
-}
-
-.partner-code-available {
+.partner-code-available,
+.partner-success {
   border: 1px solid rgba(72, 214, 151, .3);
   background: rgba(72, 214, 151, .09);
   color: #b8f3d8;
 }
 
+.partner-code-checking {
+  border: 1px solid rgba(255, 190, 80, .3);
+  background: rgba(255, 170, 50, .08);
+  color: #ffe0a8;
+}
+
 .partner-code-invalid,
 .partner-code-unavailable,
-.partner-code-error {
-  border: 1px solid rgba(255, 95, 95, .32);
-  background: rgba(255, 70, 70, .1);
-  color: #ffd0d0;
-}
-
-.partner-agreement ul {
-  display: grid;
-  gap: 10px;
-  margin: 0 0 18px 20px;
-  color: #bac3ca;
-  line-height: 1.55;
-}
-
-.partner-checkbox-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 16px;
-  border: 1px solid rgba(255, 190, 80, .25);
-  border-radius: 14px;
-  background: rgba(255, 170, 50, .07);
-  color: #e6d7ba;
-  line-height: 1.6;
-  cursor: pointer;
-}
-
-.partner-checkbox-row input {
-  width: 19px;
-  height: 19px;
-  margin-top: 3px;
-  flex: 0 0 auto;
-}
-
-.partner-submit {
-  width: 100%;
-  margin-top: 22px;
-}
-
-.partner-submit:disabled {
-  opacity: .45;
-  cursor: not-allowed;
-}
-
-.partner-helper {
-  margin-top: 12px;
-  text-align: center;
-  font-size: 13px;
-}
-
-.partner-sidebar {
-  display: grid;
-  gap: 16px;
-  position: sticky;
-  top: 24px;
-}
-
-.partner-sidebar > section {
-  padding: 24px;
-}
-
-.partner-step {
-  display: grid;
-  grid-template-columns:
-    42px minmax(0, 1fr);
-  gap: 12px;
-  padding: 15px 0;
-  border-top: 1px solid rgba(255, 255, 255, .08);
-}
-
-.partner-step > span {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  background: rgba(61, 165, 255, .13);
-  color: #9ed8ff;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.partner-step strong,
-.partner-sidebar-note strong,
-.partner-message-box strong,
-.partner-denied-notice strong {
-  color: #fff;
-}
-
-.partner-step p,
-.partner-sidebar-note p,
-.partner-message-box p,
-.partner-denied-notice p {
-  margin-top: 5px;
-  color: #aab5bd;
-  line-height: 1.6;
-}
-
-.partner-sidebar-note {
-  background: rgba(255, 255, 255, .03) !important;
-}
-
-.partner-error,
-.partner-success,
-.partner-denied-notice,
-.partner-message-box {
-  margin: 16px 0;
-  padding: 15px;
-  border-radius: 14px;
-  line-height: 1.6;
-}
-
+.partner-code-error,
 .partner-error,
 .partner-denied-notice {
   border: 1px solid rgba(255, 95, 95, .34);
@@ -1816,51 +1894,109 @@ const partnerApplicationCss = `
   color: #ffd0d0;
 }
 
-.partner-success {
-  border: 1px solid rgba(72, 214, 151, .3);
-  background: rgba(72, 214, 151, .09);
-  color: #b8f3d8;
-}
-
 .partner-message-box {
   border: 1px solid rgba(61, 165, 255, .28);
   background: rgba(61, 165, 255, .08);
 }
 
-.partner-state-card {
+.partner-message-box p,
+.partner-denied-notice p,
+.partner-share-note span {
+  margin-top: 6px;
+  color: #b8c4cc;
+}
+
+.partner-agreement ul {
+  display: grid;
+  gap: 9px;
+  padding-left: 22px;
+  color: #b8c4cc;
+  line-height: 1.6;
+}
+
+.partner-checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 18px;
+  color: #d0d7dc;
+  line-height: 1.65;
+}
+
+.partner-checkbox-row input {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  margin-top: 3px;
+  accent-color: #3da5ff;
+}
+
+.partner-submit {
   width: 100%;
-  max-width: 850px;
-  margin: 0 auto;
-  padding: 46px;
+  margin-top: 22px;
+}
+
+.partner-helper {
+  margin-top: 11px;
+  color: #8f9aa2;
+  font-size: 12px;
   text-align: center;
 }
 
-.partner-state-card .partner-status-pill {
-  margin-bottom: 12px;
+.partner-sidebar {
+  position: sticky;
+  top: 105px;
+  display: grid;
+  gap: 16px;
 }
 
-.partner-record-grid {
+.partner-step {
   display: grid;
   grid-template-columns:
-    repeat(2, minmax(0, 1fr));
+    40px
+    minmax(0, 1fr);
   gap: 12px;
-  margin: 28px 0;
-  text-align: left;
+  margin-top: 16px;
 }
 
-.partner-record-box {
+.partner-step > span {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(61, 165, 255, .3);
+  border-radius: 999px;
+  background: rgba(61, 165, 255, .1);
+  color: #9ed8ff;
+  font-weight: 900;
+}
+
+.partner-step p,
+.partner-sidebar-note p {
+  margin-top: 5px;
+  color: #aeb8bf;
+  line-height: 1.55;
+}
+
+.partner-sidebar-note {
+  border-color: rgba(255, 255, 255, .08) !important;
+  background: rgba(255, 255, 255, .025) !important;
+}
+
+.partner-record-box,
+.partner-metric-card {
   min-width: 0;
   display: grid;
   gap: 7px;
-  padding: 15px;
+  padding: 16px;
   border: 1px solid rgba(255, 255, 255, .09);
   border-radius: 14px;
-  background: rgba(0, 0, 0, .17);
+  background: rgba(255, 255, 255, .035);
+  overflow-wrap: anywhere;
 }
 
-.partner-record-box strong {
-  overflow-wrap: anywhere;
-  text-transform: capitalize;
+.partner-metric-card strong {
+  font-size: 27px;
 }
 
 .partner-button-row {
@@ -1868,7 +2004,95 @@ const partnerApplicationCss = `
   margin-top: 22px;
 }
 
-@media (max-width: 900px) {
+.partner-share-panel,
+.partner-referral-panel {
+  margin-top: 22px;
+}
+
+.partner-link-row {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr)
+    auto;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.partner-link-row input {
+  color: #c9ebff;
+  background: rgba(61, 165, 255, .08);
+}
+
+.partner-share-note {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  background: rgba(255, 255, 255, .03);
+}
+
+.partner-referral-stack {
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.partner-referral-card {
+  padding: 20px;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 18px;
+  background: rgba(0, 0, 0, .17);
+}
+
+.partner-referral-pending {
+  border-color: rgba(255, 190, 80, .25);
+}
+
+.partner-referral-earned {
+  border-color: rgba(72, 214, 151, .25);
+}
+
+.partner-referral-voided {
+  border-color: rgba(255, 95, 95, .25);
+}
+
+.partner-referral-heading h3 {
+  margin: 5px 0;
+  font-size: 27px;
+}
+
+.partner-referral-heading p:not(.eyebrow) {
+  color: #9ca8b0;
+}
+
+.partner-empty-state {
+  padding: 42px 18px;
+  margin-top: 18px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .025);
+  text-align: center;
+}
+
+.partner-empty-state h3 {
+  margin-bottom: 7px;
+  font-size: 25px;
+}
+
+.partner-empty-state p {
+  color: #aeb8bf;
+  line-height: 1.6;
+}
+
+.partner-center-actions {
+  justify-content: flex-end;
+}
+
+button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 960px) {
   .partner-layout {
     grid-template-columns:
       minmax(0, 1fr);
@@ -1877,9 +2101,19 @@ const partnerApplicationCss = `
   .partner-sidebar {
     position: static;
   }
+
+  .partner-dashboard-grid {
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+  }
+
+  .partner-record-grid {
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+  }
 }
 
-@media (max-width: 650px) {
+@media (max-width: 680px) {
   .partner-application-page {
     padding: 48px 12px;
   }
@@ -1887,13 +2121,17 @@ const partnerApplicationCss = `
   .partner-hero,
   .partner-form,
   .partner-sidebar > section,
-  .partner-state-card {
+  .partner-state-card,
+  .partner-share-panel,
+  .partner-referral-panel {
     padding: 20px;
-    border-radius: 20px;
+    border-radius: 19px;
   }
 
   .partner-form-grid,
-  .partner-record-grid {
+  .partner-record-grid,
+  .partner-dashboard-grid,
+  .partner-link-row {
     grid-template-columns:
       minmax(0, 1fr);
   }
@@ -1902,7 +2140,10 @@ const partnerApplicationCss = `
     grid-column: auto;
   }
 
-  .partner-button-row button {
+  .partner-button-row,
+  .partner-button-row button,
+  .partner-link-row button,
+  .partner-section-heading > button {
     width: 100%;
   }
 }

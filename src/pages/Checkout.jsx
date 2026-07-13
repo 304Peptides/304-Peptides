@@ -185,13 +185,11 @@ function loadTurnstileScript() {
 
         if (attempts >= 100) {
           turnstileScriptPromise = null;
-
           reject(
             new Error(
               "Cloudflare Turnstile did not become ready."
             )
           );
-
           return;
         }
 
@@ -214,16 +212,13 @@ function loadTurnstileScript() {
         "error",
         () => {
           turnstileScriptPromise = null;
-
           reject(
             new Error(
               "Cloudflare Turnstile could not be loaded."
             )
           );
         },
-        {
-          once: true,
-        }
+        { once: true }
       );
 
       finishLoading();
@@ -231,19 +226,14 @@ function loadTurnstileScript() {
     }
 
     const script = document.createElement("script");
-
     script.id = turnstileScriptId;
-
     script.src =
       "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-
     script.async = true;
     script.defer = true;
     script.onload = finishLoading;
-
     script.onerror = () => {
       turnstileScriptPromise = null;
-
       reject(
         new Error(
           "Cloudflare Turnstile could not be loaded."
@@ -259,7 +249,6 @@ function loadTurnstileScript() {
 
 function validateCheckoutForm(formData) {
   const errors = {};
-
   const email = formData.email.trim();
   const zip = formData.zip.trim();
 
@@ -310,6 +299,50 @@ function formatPrice(value) {
     : "Unavailable";
 }
 
+function normalizeReferralCode(value) {
+  return String(value || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9-]/g, "")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+/, "")
+    .slice(0, 20);
+}
+
+function getReferralCodeFromUrl() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+
+    return normalizeReferralCode(
+      params.get("ref") ||
+        params.get("referral") ||
+        params.get("code") ||
+        ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+function getReferralCodeError(code) {
+  if (!code) {
+    return "";
+  }
+
+  if (code.length < 4 || code.length > 20) {
+    return "Referral codes must contain 4–20 characters.";
+  }
+
+  if (!/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(code)) {
+    return "Use letters, numbers, and single hyphens only.";
+  }
+
+  if (!/[A-Z]/.test(code)) {
+    return "Referral codes must contain at least one letter.";
+  }
+
+  return "";
+}
+
 function TurnstileWidget({
   siteKey,
   resetKey,
@@ -318,7 +351,6 @@ function TurnstileWidget({
 }) {
   const containerRef = useRef(null);
   const widgetIdRef = useRef(null);
-
   const [status, setStatus] = useState("loading");
 
   useEffect(() => {
@@ -460,24 +492,19 @@ function Checkout({
   );
 
   const [settings, setSettings] = useState(loadSettings);
-
   const [account, setAccount] = useState(
     initialCachedAccount
   );
-
   const [accountStatus, setAccountStatus] =
     useState("checking");
-
   const [accountError, setAccountError] = useState("");
 
   const [formData, setFormData] = useState({
     firstName: initialCachedAccount?.firstName || "",
     lastName: initialCachedAccount?.lastName || "",
-
     email: String(initialCachedAccount?.email || "")
       .trim()
       .toLowerCase(),
-
     address: "",
     city: "",
     state: "",
@@ -486,23 +513,32 @@ function Checkout({
 
   const [touched, setTouched] = useState({});
   const [paymentMethod, setPaymentMethod] = useState("");
-
   const [researchAgreement, setResearchAgreement] =
     useState(false);
-
   const [ageAgreement, setAgeAgreement] =
     useState(false);
-
   const [isSubmitting, setIsSubmitting] =
     useState(false);
-
   const [submitError, setSubmitError] = useState("");
-
   const [turnstileToken, setTurnstileToken] =
     useState("");
-
   const [turnstileResetKey, setTurnstileResetKey] =
     useState(0);
+  const [referralCode, setReferralCode] = useState(
+    getReferralCodeFromUrl
+  );
+  const [validatedReferralCode, setValidatedReferralCode] =
+    useState("");
+  const [referralStatus, setReferralStatus] = useState(
+    referralCode ? "unverified" : "idle"
+  );
+  const [referralMessage, setReferralMessage] = useState(
+    referralCode
+      ? "Apply this referral code before submitting the order."
+      : ""
+  );
+  const [isValidatingReferral, setIsValidatingReferral] =
+    useState(false);
 
   const submissionLockRef = useRef(false);
 
@@ -521,7 +557,6 @@ function Checkout({
           ...currentSettings,
           ...event.detail,
         }));
-
         return;
       }
 
@@ -538,7 +573,6 @@ function Checkout({
       "304-site-settings-updated",
       updateSettings
     );
-
     window.addEventListener(
       "storage",
       handleStorageChange
@@ -549,7 +583,6 @@ function Checkout({
         "304-site-settings-updated",
         updateSettings
       );
-
       window.removeEventListener(
         "storage",
         handleStorageChange
@@ -569,11 +602,9 @@ function Checkout({
           "/api/auth/session",
           {
             method: "GET",
-
             headers: {
               Accept: "application/json",
             },
-
             credentials: "same-origin",
             cache: "no-store",
           }
@@ -595,7 +626,6 @@ function Checkout({
         }
 
         const verifiedAccount = result.account;
-
         const verifiedEmail = String(
           verifiedAccount.email || ""
         )
@@ -613,17 +643,14 @@ function Checkout({
 
         setFormData((currentData) => ({
           ...currentData,
-
           firstName:
             currentData.firstName.trim() ||
             verifiedAccount.firstName ||
             "",
-
           lastName:
             currentData.lastName.trim() ||
             verifiedAccount.lastName ||
             "",
-
           email: verifiedEmail,
         }));
 
@@ -634,10 +661,8 @@ function Checkout({
         }
 
         clearCachedAccount();
-
         setAccount(null);
         setAccountStatus("error");
-
         setAccountError(
           error.message ||
             "Your secure account could not be verified."
@@ -715,6 +740,11 @@ function Checkout({
   const formComplete =
     Object.keys(formErrors).length === 0;
 
+  const referralReady =
+    !referralCode ||
+    (referralStatus === "valid" &&
+      validatedReferralCode === referralCode);
+
   const canPlaceOrder =
     cartItems.length > 0 &&
     checkoutAvailable &&
@@ -724,6 +754,7 @@ function Checkout({
     ageAgreement &&
     Boolean(turnstileToken) &&
     accountEmailMatches &&
+    referralReady &&
     !isSubmitting;
 
   const storeStatusLabel =
@@ -749,7 +780,6 @@ function Checkout({
     }
 
     setSubmitError("");
-
     setFormData((currentData) => ({
       ...currentData,
       [name]: nextValue,
@@ -775,6 +805,110 @@ function Checkout({
     });
   }
 
+  function handleReferralCodeChange(event) {
+    const nextCode = normalizeReferralCode(event.target.value);
+
+    setSubmitError("");
+    setReferralCode(nextCode);
+    setValidatedReferralCode("");
+    setReferralStatus(nextCode ? "unverified" : "idle");
+    setReferralMessage(
+      nextCode
+        ? "Apply this referral code before submitting the order."
+        : ""
+    );
+  }
+
+  function removeReferralCode() {
+    setSubmitError("");
+    setReferralCode("");
+    setValidatedReferralCode("");
+    setReferralStatus("idle");
+    setReferralMessage("");
+  }
+
+  async function validateReferralCode() {
+    if (
+      accountStatus !== "verified" ||
+      !accountEmailMatches ||
+      isValidatingReferral ||
+      isSubmitting
+    ) {
+      return;
+    }
+
+    const code = normalizeReferralCode(referralCode);
+    const localError = getReferralCodeError(code);
+
+    setReferralCode(code);
+    setSubmitError("");
+
+    if (!code) {
+      removeReferralCode();
+      return;
+    }
+
+    if (localError) {
+      setValidatedReferralCode("");
+      setReferralStatus("invalid");
+      setReferralMessage(localError);
+      return;
+    }
+
+    setIsValidatingReferral(true);
+    setReferralStatus("checking");
+    setReferralMessage("Checking referral code...");
+
+    try {
+      const response = await fetch(
+        `/api/referral/validate?code=${encodeURIComponent(code)}`,
+        {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+          },
+          credentials: "same-origin",
+          cache: "no-store",
+        }
+      );
+
+      const result = await readApiJson(
+        response,
+        "The referral code could not be checked."
+      );
+
+      if (!result.valid) {
+        setValidatedReferralCode("");
+        setReferralStatus("invalid");
+        setReferralMessage(
+          result.message || "That referral code is not active."
+        );
+        return;
+      }
+
+      const approvedCode = normalizeReferralCode(
+        result.code || code
+      );
+
+      setReferralCode(approvedCode);
+      setValidatedReferralCode(approvedCode);
+      setReferralStatus("valid");
+      setReferralMessage(
+        result.message ||
+          "Referral code applied. The order subtotal is unchanged."
+      );
+    } catch (error) {
+      setValidatedReferralCode("");
+      setReferralStatus("error");
+      setReferralMessage(
+        error.message ||
+          "The referral code could not be checked."
+      );
+    } finally {
+      setIsValidatingReferral(false);
+    }
+  }
+
   async function handlePlaceOrder(event) {
     event.preventDefault();
     markAllFieldsTouched();
@@ -786,7 +920,13 @@ function Checkout({
       setSubmitError(
         "Your secure account email could not be confirmed. Refresh checkout or log in again."
       );
+      return;
+    }
 
+    if (!referralReady) {
+      setSubmitError(
+        "Apply the referral code or remove it before submitting the order."
+      );
       return;
     }
 
@@ -799,7 +939,6 @@ function Checkout({
     }
 
     submissionLockRef.current = true;
-
     setSubmitError("");
     setIsSubmitting(true);
 
@@ -811,12 +950,14 @@ function Checkout({
       city: formData.city.trim(),
       state: formData.state,
       zip: formData.zip.trim(),
-
       preferredPaymentMethod: paymentMethod,
-
       preferredPaymentLabel:
         selectedPaymentOption?.label || "",
-
+      ...(validatedReferralCode
+        ? {
+            referralCode: validatedReferralCode,
+          }
+        : {}),
       items: cartItems.map((item) => ({
         name: item.name || "",
         codeName: item.codeName || "",
@@ -827,7 +968,6 @@ function Checkout({
     };
 
     const controller = new AbortController();
-
     const timeoutId = window.setTimeout(
       () => controller.abort(),
       25000
@@ -836,19 +976,15 @@ function Checkout({
     try {
       const response = await fetch("/api/order", {
         method: "POST",
-
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
         },
-
         credentials: "same-origin",
-
         body: JSON.stringify({
           order: orderPayload,
           turnstileToken,
         }),
-
         signal: controller.signal,
       });
 
@@ -857,22 +993,45 @@ function Checkout({
         "The order request could not be submitted."
       );
 
+      const confirmedOrder =
+        result.order && typeof result.order === "object"
+          ? result.order
+          : {};
+
       const createdAt =
-        result.createdAt || new Date().toISOString();
+        confirmedOrder.createdAt ||
+        result.createdAt ||
+        new Date().toISOString();
 
       onPlaceOrder({
         ...orderPayload,
-
-        id: result.orderId,
-        orderId: result.orderId,
+        ...confirmedOrder,
+        id:
+          confirmedOrder.orderId ||
+          confirmedOrder.id ||
+          result.orderId,
+        orderId:
+          confirmedOrder.orderId ||
+          confirmedOrder.id ||
+          result.orderId,
         createdAt,
-
         status:
+          confirmedOrder.status ||
           result.status ||
           "Order Request Received",
-
-        totalQuantity,
-        subtotal,
+        totalQuantity:
+          Number(confirmedOrder.totalQuantity) ||
+          totalQuantity,
+        subtotal:
+          Number.isFinite(Number(confirmedOrder.subtotal))
+            ? Number(confirmedOrder.subtotal)
+            : subtotal,
+        referralCode:
+          confirmedOrder.referralCode ||
+          validatedReferralCode ||
+          "",
+        referralTracking:
+          result.referralTracking || null,
       });
     } catch (error) {
       console.error(
@@ -881,7 +1040,6 @@ function Checkout({
       );
 
       setTurnstileToken("");
-
       setTurnstileResetKey(
         (currentKey) => currentKey + 1
       );
@@ -894,7 +1052,6 @@ function Checkout({
       );
     } finally {
       window.clearTimeout(timeoutId);
-
       submissionLockRef.current = false;
       setIsSubmitting(false);
     }
@@ -990,7 +1147,6 @@ function Checkout({
         <main className="checkout-page">
           <section className="checkout-state-panel">
             <p className="eyebrow">CHECKOUT</p>
-
             <h1>Cart Update Required</h1>
 
             <p>
@@ -1006,7 +1162,6 @@ function Checkout({
                   key={`${item.codeName}-${item.strength}`}
                 >
                   <strong>{item.name}</strong>
-
                   <span>
                     {item.codeName} · {item.strength}
                   </span>
@@ -1058,7 +1213,6 @@ function Checkout({
               <p className="eyebrow">
                 CUSTOMER INFORMATION
               </p>
-
               <h2>Shipping Details</h2>
 
               <div className="checkout-country-note">
@@ -1071,7 +1225,6 @@ function Checkout({
               <div className="checkout-account-note">
                 <div>
                   <strong>Secure Account Order</strong>
-
                   <span>
                     This order will be linked to{" "}
                     {accountEmail}.
@@ -1205,7 +1358,6 @@ function Checkout({
                 <p className="eyebrow">
                   PAYMENT PREFERENCE
                 </p>
-
                 <h2>
                   Choose An Invoice Payment Method
                 </h2>
@@ -1240,7 +1392,6 @@ function Checkout({
                           disabled={isSubmitting}
                           onChange={(event) => {
                             setSubmitError("");
-
                             setPaymentMethod(
                               event.target.value
                             );
@@ -1273,9 +1424,94 @@ function Checkout({
 
               <section className="checkout-section-card">
                 <p className="eyebrow">
-                  REQUIRED AGREEMENTS
+                  PARTNER REFERRAL
+                </p>
+                <h2>Referral Code — Optional</h2>
+
+                <p className="checkout-section-copy">
+                  Enter an approved partner code to
+                  credit the partner for this order. A
+                  referral code does not discount or
+                  otherwise change your order subtotal.
                 </p>
 
+                <div className="checkout-referral-row">
+                  <input
+                    type="text"
+                    value={referralCode}
+                    onChange={handleReferralCodeChange}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        validateReferralCode();
+                      }
+                    }}
+                    placeholder="Enter referral code"
+                    autoComplete="off"
+                    maxLength="20"
+                    disabled={
+                      isSubmitting ||
+                      isValidatingReferral
+                    }
+                    aria-label="Referral code"
+                  />
+
+                  <button
+                    type="button"
+                    className="secondary-btn checkout-referral-apply"
+                    onClick={validateReferralCode}
+                    disabled={
+                      !referralCode ||
+                      isSubmitting ||
+                      isValidatingReferral
+                    }
+                  >
+                    {isValidatingReferral
+                      ? "Checking..."
+                      : referralStatus === "valid"
+                      ? "Applied"
+                      : "Apply Code"}
+                  </button>
+
+                  {referralCode && (
+                    <button
+                      type="button"
+                      className="checkout-referral-remove"
+                      onClick={removeReferralCode}
+                      disabled={
+                        isSubmitting ||
+                        isValidatingReferral
+                      }
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+
+                {referralMessage && (
+                  <div
+                    className={`checkout-referral-message checkout-referral-${referralStatus}`}
+                    aria-live="polite"
+                  >
+                    {referralMessage}
+                  </div>
+                )}
+
+                <div className="checkout-referral-note">
+                  <strong>No self-referrals</strong>
+
+                  <span>
+                    Partners cannot use their own code
+                    on an order placed through the same
+                    customer account.
+                  </span>
+                </div>
+              </section>
+
+              <section className="checkout-section-card">
+                <p className="eyebrow">
+                  REQUIRED AGREEMENTS
+                </p>
                 <h2>Research-Use Confirmation</h2>
 
                 <div className="checkout-agreement-info">
@@ -1307,7 +1543,6 @@ function Checkout({
                     disabled={isSubmitting}
                     onChange={(event) => {
                       setSubmitError("");
-
                       setResearchAgreement(
                         event.target.checked
                       );
@@ -1328,7 +1563,6 @@ function Checkout({
                     disabled={isSubmitting}
                     onChange={(event) => {
                       setSubmitError("");
-
                       setAgeAgreement(
                         event.target.checked
                       );
@@ -1347,7 +1581,6 @@ function Checkout({
 
             <aside className="checkout-summary-panel">
               <p className="eyebrow">ORDER SUMMARY</p>
-
               <h2>Review Order</h2>
 
               <div className="checkout-summary-items">
@@ -1395,6 +1628,16 @@ function Checkout({
               <SummaryRow
                 label="Product Subtotal"
                 value={formatPrice(subtotal)}
+              />
+
+              <SummaryRow
+                label="Referral Code"
+                value={
+                  validatedReferralCode ||
+                  (referralCode
+                    ? "Not Applied"
+                    : "None")
+                }
               />
 
               <SummaryRow
@@ -1484,7 +1727,8 @@ function Checkout({
               {!canPlaceOrder && !isSubmitting && (
                 <p className="checkout-helper-text">
                   Complete all required fields, select a
-                  payment preference, accept both
+                  payment preference, apply or remove
+                  any entered referral code, accept both
                   confirmations, and complete the
                   security verification.
                 </p>
@@ -1529,9 +1773,7 @@ function CheckoutState({
       <main className="checkout-page">
         <section className="checkout-state-panel">
           <p className="eyebrow">{eyebrow}</p>
-
           <h1>{title}</h1>
-
           <p>{message}</p>
 
           <div className="checkout-state-notice">
@@ -1665,10 +1907,7 @@ function SelectField({
   );
 }
 
-function SummaryRow({
-  label,
-  value,
-}) {
+function SummaryRow({ label, value }) {
   return (
     <div className="checkout-summary-row">
       <span>{label}</span>
@@ -2060,6 +2299,108 @@ const checkoutCss = `
     font-size: 13px;
   }
 
+  .checkout-referral-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .checkout-referral-row input {
+    width: 100%;
+    min-width: 0;
+    padding: 15px;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 14px;
+    outline: none;
+    background: rgba(0,0,0,0.2);
+    color: #ffffff;
+    font: inherit;
+    font-weight: 800;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+  }
+
+  .checkout-referral-row input:focus {
+    border-color: rgba(61,165,255,0.65);
+    box-shadow: 0 0 0 3px rgba(61,165,255,0.12);
+  }
+
+  .checkout-referral-row input:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .checkout-referral-apply {
+    white-space: nowrap;
+  }
+
+  .checkout-referral-remove {
+    padding: 10px 0;
+    border: 0;
+    background: transparent;
+    color: #9ca8b0;
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    text-decoration: underline;
+  }
+
+  .checkout-referral-remove:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .checkout-referral-message,
+  .checkout-referral-note {
+    margin-top: 12px;
+    padding: 13px;
+    border-radius: 14px;
+    line-height: 1.55;
+  }
+
+  .checkout-referral-message {
+    border: 1px solid rgba(61,165,255,0.25);
+    background: rgba(61,165,255,0.08);
+    color: #c5eaff;
+    font-size: 13px;
+  }
+
+  .checkout-referral-valid {
+    border-color: rgba(72,214,151,0.32);
+    background: rgba(72,214,151,0.09);
+    color: #b8f3d8;
+  }
+
+  .checkout-referral-invalid,
+  .checkout-referral-error {
+    border-color: rgba(255,95,95,0.34);
+    background: rgba(255,70,70,0.1);
+    color: #ffd0d0;
+  }
+
+  .checkout-referral-checking {
+    border-color: rgba(255,190,80,0.3);
+    background: rgba(255,170,50,0.08);
+    color: #ffe0a8;
+  }
+
+  .checkout-referral-note {
+    display: grid;
+    gap: 4px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.03);
+  }
+
+  .checkout-referral-note strong {
+    color: #ffffff;
+  }
+
+  .checkout-referral-note span {
+    color: #9ca8b0;
+    font-size: 13px;
+  }
+
   .checkout-agreement-info {
     margin-bottom: 18px;
   }
@@ -2288,8 +2629,13 @@ const checkoutCss = `
     }
 
     .checkout-form-grid,
-    .checkout-payment-grid {
+    .checkout-payment-grid,
+    .checkout-referral-row {
       grid-template-columns: minmax(0, 1fr);
+    }
+
+    .checkout-referral-row button {
+      width: 100%;
     }
 
     .checkout-field-full {

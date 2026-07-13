@@ -23,6 +23,9 @@ const MAX_PARTNER_PROMOTION_PLAN_LENGTH = 2_000;
 const MAX_PARTNER_EXPERIENCE_LENGTH = 1_000;
 const MAX_PARTNER_CUSTOMER_MESSAGE_LENGTH = 1_000;
 const MAX_PARTNER_ADMIN_NOTES_LENGTH = 2_000;
+const MAX_REFERRAL_CODE_LENGTH = 20;
+const MAX_REFERRAL_CUSTOMER_EMAIL_LENGTH = 254;
+const MAX_COMMISSION_RATE_BPS = 5_000;
 
 const RESERVED_PARTNER_CODES = new Set([
   "304",
@@ -61,12 +64,31 @@ export default {
       return handlePartnerApplicationSubmission(request, env);
     }
 
+    if (url.pathname === "/api/referral/validate") {
+      return handleReferralValidationRequest(request, env, url);
+    }
+
+    if (url.pathname === "/api/partner/summary") {
+      return handlePartnerSummaryRequest(request, env);
+    }
+
     if (url.pathname === "/api/admin/partner-applications") {
       return handleAdminPartnerApplicationsRequest(request, env);
     }
 
     if (url.pathname === "/api/admin/partner-applications/action") {
       return handleAdminPartnerActionRequest(request, env);
+    }
+
+    if (
+      url.pathname ===
+      "/api/admin/partner-applications/commission-rate"
+    ) {
+      return handleAdminCommissionRateRequest(request, env);
+    }
+
+    if (url.pathname === "/api/admin/partner-referrals") {
+      return handleAdminPartnerReferralsRequest(request, env);
     }
 
     if (url.pathname === "/api/admin/accounts") {
@@ -87,14 +109,24 @@ export default {
 
     if (
       request.method === "POST" &&
-      ["/api/auth/register", "/api/auth/login"].includes(url.pathname)
+      ["/api/auth/register", "/api/auth/login"].includes(
+        url.pathname
+      )
     ) {
-      const response = await coreWorker.fetch(request, env, context);
+      const response = await coreWorker.fetch(
+        request,
+        env,
+        context
+      );
+
       return upgradeAuthenticationResponse(response, env);
     }
 
     if (url.pathname === "/api/auth/session") {
-      const sessionState = await inspectCustomerSession(request, env);
+      const sessionState = await inspectCustomerSession(
+        request,
+        env
+      );
 
       if (!sessionState.session) {
         return jsonResponse(
@@ -105,7 +137,10 @@ export default {
           },
           200,
           sessionState.hasToken
-            ? { "Set-Cookie": buildClearedSessionCookie() }
+            ? {
+                "Set-Cookie":
+                  buildClearedSessionCookie(),
+              }
             : {}
         );
       }
@@ -113,33 +148,51 @@ export default {
       return jsonResponse({
         success: true,
         authenticated: true,
-        account: toPublicAccount(sessionState.session.account),
+
+        account: toPublicAccount(
+          sessionState.session.account
+        ),
+
         requiresPasswordChange: Boolean(
-          sessionState.session.account.mustChangePassword
+          sessionState.session.account
+            .mustChangePassword
         ),
       });
     }
 
     if (url.pathname === "/api/account/orders") {
-      const sessionState = await inspectCustomerSession(request, env);
+      const sessionState = await inspectCustomerSession(
+        request,
+        env
+      );
 
       if (!sessionState.session) {
         return jsonResponse(
           {
             success: false,
-            error: "Customer authentication is required.",
+
+            error:
+              "Customer authentication is required.",
           },
           401,
-          { "Set-Cookie": buildClearedSessionCookie() }
+          {
+            "Set-Cookie":
+              buildClearedSessionCookie(),
+          }
         );
       }
 
-      if (sessionState.session.account.mustChangePassword) {
+      if (
+        sessionState.session.account
+          .mustChangePassword
+      ) {
         return jsonResponse(
           {
             success: false,
+
             error:
               "Change your temporary password before accessing account orders.",
+
             requiresPasswordChange: true,
           },
           403
@@ -147,74 +200,90 @@ export default {
       }
     }
 
-    if (url.pathname === "/api/order" && request.method === "POST") {
-      const sessionState = await inspectCustomerSession(request, env);
+    if (
+      url.pathname === "/api/order" &&
+      request.method === "POST"
+    ) {
+      return handleOrderWithReferral(
+        request,
+        env,
+        context
+      );
+    }
 
-      if (sessionState.hasToken && !sessionState.session) {
-        return jsonResponse(
-          {
-            success: false,
-            error:
-              "Your secure session has expired. Log in again before submitting the order.",
-          },
-          401,
-          { "Set-Cookie": buildClearedSessionCookie() }
-        );
-      }
-
-      if (
-        sessionState.session &&
-        sessionState.session.account.mustChangePassword
-      ) {
-        return jsonResponse(
-          {
-            success: false,
-            error:
-              "Change your temporary password before submitting an order.",
-            requiresPasswordChange: true,
-          },
-          403
-        );
-      }
+    if (
+      url.pathname.startsWith(
+        "/api/admin/orders/"
+      ) &&
+      ["PATCH", "DELETE"].includes(
+        request.method
+      )
+    ) {
+      return handleAdminOrderMutationWithReferralSync(
+        request,
+        env,
+        context,
+        url
+      );
     }
 
     return coreWorker.fetch(request, env, context);
   },
 };
 
-async function handleCustomerPartnerApplicationRequest(request, env) {
+async function handleCustomerPartnerApplicationRequest(
+  request,
+  env
+) {
   try {
     validatePartnerEnvironment(env);
 
     if (request.method !== "GET") {
-      throw new ApiRequestError("Method not allowed.", 405);
+      throw new ApiRequestError(
+        "Method not allowed.",
+        405
+      );
     }
 
     requireSameOrigin(request);
 
-    const sessionState = await requireEligibleCustomerSession(request, env);
+    const sessionState =
+      await requireEligibleCustomerSession(
+        request,
+        env
+      );
 
-    const application = await getRegistryApplication(
-      env,
-      sessionState.session.account.id
-    );
+    const application =
+      await getRegistryApplication(
+        env,
+        sessionState.session.account.id
+      );
 
-    const hasOrder = await customerHasStoredOrder(
-      env,
-      sessionState.session.account.id
-    );
+    const hasOrder =
+      await customerHasStoredOrder(
+        env,
+        sessionState.session.account.id
+      );
 
     return jsonResponse({
       success: true,
-      application: toCustomerPartnerApplication(application),
+
+      application:
+        toCustomerPartnerApplication(
+          application
+        ),
+
       eligibility: {
         eligible: hasOrder,
         hasOrder,
+
         requirement: hasOrder
           ? "Eligible to apply."
           : "Submit at least one order request before applying to the Partner Program.",
       },
-      codeRules: getPartnerCodeRules(),
+
+      codeRules:
+        getPartnerCodeRules(),
     });
   } catch (error) {
     console.error(
@@ -235,41 +304,56 @@ async function handlePartnerCodeAvailabilityRequest(
     validatePartnerEnvironment(env);
 
     if (request.method !== "GET") {
-      throw new ApiRequestError("Method not allowed.", 405);
+      throw new ApiRequestError(
+        "Method not allowed.",
+        405
+      );
     }
 
     requireSameOrigin(request);
 
-    const sessionState = await requireEligibleCustomerSession(
-      request,
-      env
-    );
+    const sessionState =
+      await requireEligibleCustomerSession(
+        request,
+        env
+      );
 
     const code = validatePartnerCode(
       url.searchParams.get("code")
     );
 
-    const registryResponse = await partnerRegistryFetch(
-      env,
-      `/availability?code=${encodeURIComponent(
-        code
-      )}&accountId=${encodeURIComponent(
-        sessionState.session.account.id
-      )}`,
-      {
-        method: "GET",
-      }
-    );
+    const registryResponse =
+      await partnerRegistryFetch(
+        env,
 
-    const result = await readInternalJsonResponse(
-      registryResponse
-    );
+        `/availability?code=${encodeURIComponent(
+          code
+        )}&accountId=${encodeURIComponent(
+          sessionState.session.account.id
+        )}`,
+
+        {
+          method: "GET",
+        }
+      );
+
+    const result =
+      await readInternalJsonResponse(
+        registryResponse
+      );
 
     return jsonResponse({
       success: true,
       code,
-      available: Boolean(result.available),
-      ownedByAccount: Boolean(result.ownedByAccount),
+
+      available: Boolean(
+        result.available
+      ),
+
+      ownedByAccount: Boolean(
+        result.ownedByAccount
+      ),
+
       message: result.available
         ? result.ownedByAccount
           ? "This code is already reserved for your account."
@@ -294,7 +378,10 @@ async function handlePartnerApplicationSubmission(
     validatePartnerEnvironment(env);
 
     if (request.method !== "POST") {
-      throw new ApiRequestError("Method not allowed.", 405);
+      throw new ApiRequestError(
+        "Method not allowed.",
+        405
+      );
     }
 
     requireSameOrigin(request);
@@ -306,17 +393,20 @@ async function handlePartnerApplicationSubmission(
       "partner-apply"
     );
 
-    const sessionState = await requireEligibleCustomerSession(
-      request,
-      env
-    );
+    const sessionState =
+      await requireEligibleCustomerSession(
+        request,
+        env
+      );
 
-    const account = sessionState.session.account;
+    const account =
+      sessionState.session.account;
 
-    const hasOrder = await customerHasStoredOrder(
-      env,
-      account.id
-    );
+    const hasOrder =
+      await customerHasStoredOrder(
+        env,
+        account.id
+      );
 
     if (!hasOrder) {
       throw new ApiRequestError(
@@ -325,44 +415,56 @@ async function handlePartnerApplicationSubmission(
       );
     }
 
-    const body = await readJsonRequest(
-      request,
-      MAX_AUTH_REQUEST_LENGTH
-    );
+    const body =
+      await readJsonRequest(
+        request,
+        MAX_AUTH_REQUEST_LENGTH
+      );
 
-    if (body.agreementAccepted !== true) {
+    if (
+      body.agreementAccepted !==
+      true
+    ) {
       throw new ApiRequestError(
         "Accept the Partner Program agreement before submitting the application.",
         400
       );
     }
 
-    const code = validatePartnerCode(body.code);
+    const code =
+      validatePartnerCode(
+        body.code
+      );
 
-    const primaryPlatform = cleanText(
-      body.primaryPlatform,
-      MAX_PARTNER_PLATFORM_LENGTH
-    );
+    const primaryPlatform =
+      cleanText(
+        body.primaryPlatform,
+        MAX_PARTNER_PLATFORM_LENGTH
+      );
 
-    const profileUrl = validateOptionalHttpUrl(
-      body.profileUrl,
-      MAX_PARTNER_PROFILE_URL_LENGTH
-    );
+    const profileUrl =
+      validateOptionalHttpUrl(
+        body.profileUrl,
+        MAX_PARTNER_PROFILE_URL_LENGTH
+      );
 
-    const audienceSize = cleanText(
-      body.audienceSize,
-      MAX_PARTNER_AUDIENCE_LENGTH
-    );
+    const audienceSize =
+      cleanText(
+        body.audienceSize,
+        MAX_PARTNER_AUDIENCE_LENGTH
+      );
 
-    const promotionPlan = cleanMultilineText(
-      body.promotionPlan,
-      MAX_PARTNER_PROMOTION_PLAN_LENGTH
-    );
+    const promotionPlan =
+      cleanMultilineText(
+        body.promotionPlan,
+        MAX_PARTNER_PROMOTION_PLAN_LENGTH
+      );
 
-    const experience = cleanMultilineText(
-      body.experience,
-      MAX_PARTNER_EXPERIENCE_LENGTH
-    );
+    const experience =
+      cleanMultilineText(
+        body.experience,
+        MAX_PARTNER_EXPERIENCE_LENGTH
+      );
 
     if (
       !primaryPlatform ||
@@ -378,40 +480,59 @@ async function handlePartnerApplicationSubmission(
     const submittedPayload = {
       accountId: account.id,
       email: account.email,
-      firstName: account.firstName || "",
-      lastName: account.lastName || "",
+
+      firstName:
+        account.firstName || "",
+
+      lastName:
+        account.lastName || "",
+
       code,
       primaryPlatform,
       profileUrl,
       audienceSize,
       promotionPlan,
       experience,
-      agreementAcceptedAt: new Date().toISOString(),
-      agreementVersion: PARTNER_AGREEMENT_VERSION,
+
+      agreementAcceptedAt:
+        new Date().toISOString(),
+
+      agreementVersion:
+        PARTNER_AGREEMENT_VERSION,
     };
 
-    const registryResponse = await partnerRegistryFetch(
-      env,
-      "/apply",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(submittedPayload),
-      }
-    );
+    const registryResponse =
+      await partnerRegistryFetch(
+        env,
+        "/apply",
+        {
+          method: "POST",
 
-    const result = await readInternalJsonResponse(
-      registryResponse
-    );
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+
+          body: JSON.stringify(
+            submittedPayload
+          ),
+        }
+      );
+
+    const result =
+      await readInternalJsonResponse(
+        registryResponse
+      );
 
     return jsonResponse(
       {
         success: true,
-        application: toCustomerPartnerApplication(
-          result.application
-        ),
+
+        application:
+          toCustomerPartnerApplication(
+            result.application
+          ),
+
         message:
           result.message ||
           "Your partner application was submitted for review.",
@@ -436,34 +557,49 @@ async function handleAdminPartnerApplicationsRequest(
     validatePartnerEnvironment(env);
 
     if (request.method !== "GET") {
-      throw new ApiRequestError("Method not allowed.", 405);
+      throw new ApiRequestError(
+        "Method not allowed.",
+        405
+      );
     }
 
     requireSameOrigin(request);
 
-    await requireAdminAuthorization(request, env);
-
-    const registryResponse = await partnerRegistryFetch(
-      env,
-      "/admin/list",
-      {
-        method: "GET",
-      }
+    await requireAdminAuthorization(
+      request,
+      env
     );
 
-    const result = await readInternalJsonResponse(
-      registryResponse
-    );
+    const registryResponse =
+      await partnerRegistryFetch(
+        env,
+        "/admin/list",
+        {
+          method: "GET",
+        }
+      );
 
-    const applications = Array.isArray(result.applications)
-      ? result.applications.map(toAdminPartnerApplication)
-      : [];
+    const result =
+      await readInternalJsonResponse(
+        registryResponse
+      );
+
+    const applications =
+      Array.isArray(
+        result.applications
+      )
+        ? result.applications.map(
+            toAdminPartnerApplication
+          )
+        : [];
 
     return jsonResponse({
       success: true,
       applications,
       records: applications,
-      count: applications.length,
+
+      count:
+        applications.length,
     });
   } catch (error) {
     console.error(
@@ -483,13 +619,19 @@ async function handleAdminPartnerActionRequest(
     validatePartnerEnvironment(env);
 
     if (request.method !== "POST") {
-      throw new ApiRequestError("Method not allowed.", 405);
+      throw new ApiRequestError(
+        "Method not allowed.",
+        405
+      );
     }
 
     requireSameOrigin(request);
     validateJsonContentType(request);
 
-    await requireAdminAuthorization(request, env);
+    await requireAdminAuthorization(
+      request,
+      env
+    );
 
     await enforceAuthenticationRateLimit(
       request,
@@ -497,30 +639,35 @@ async function handleAdminPartnerActionRequest(
       "partner-admin-action"
     );
 
-    const body = await readJsonRequest(
-      request,
-      MAX_AUTH_REQUEST_LENGTH
-    );
+    const body =
+      await readJsonRequest(
+        request,
+        MAX_AUTH_REQUEST_LENGTH
+      );
 
-    const action = cleanText(
-      body.action,
-      30
-    ).toLowerCase();
+    const action =
+      cleanText(
+        body.action,
+        30
+      ).toLowerCase();
 
-    const accountId = cleanText(
-      body.accountId,
-      150
-    );
+    const accountId =
+      cleanText(
+        body.accountId,
+        150
+      );
 
-    const customerMessage = cleanMultilineText(
-      body.customerMessage,
-      MAX_PARTNER_CUSTOMER_MESSAGE_LENGTH
-    );
+    const customerMessage =
+      cleanMultilineText(
+        body.customerMessage,
+        MAX_PARTNER_CUSTOMER_MESSAGE_LENGTH
+      );
 
-    const adminNotes = cleanMultilineText(
-      body.adminNotes,
-      MAX_PARTNER_ADMIN_NOTES_LENGTH
-    );
+    const adminNotes =
+      cleanMultilineText(
+        body.adminNotes,
+        MAX_PARTNER_ADMIN_NOTES_LENGTH
+      );
 
     if (!accountId) {
       throw new ApiRequestError(
@@ -544,7 +691,9 @@ async function handleAdminPartnerActionRequest(
     }
 
     if (
-      ["deny", "suspend"].includes(action) &&
+      ["deny", "suspend"].includes(
+        action
+      ) &&
       !customerMessage
     ) {
       throw new ApiRequestError(
@@ -555,45 +704,54 @@ async function handleAdminPartnerActionRequest(
       );
     }
 
-    const reviewedBy = cleanText(
-      request.headers.get(
-        "Cf-Access-Authenticated-User-Email"
-      ) ||
+    const reviewedBy =
+      cleanText(
         request.headers.get(
-          "CF-Access-Authenticated-User-Email"
+          "Cf-Access-Authenticated-User-Email"
         ) ||
-        "authorized administrator",
-      254
-    );
+          request.headers.get(
+            "CF-Access-Authenticated-User-Email"
+          ) ||
+          "authorized administrator",
+        254
+      );
 
-    const registryResponse = await partnerRegistryFetch(
-      env,
-      "/admin/action",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action,
-          accountId,
-          customerMessage,
-          adminNotes,
-          reviewedBy,
-        }),
-      }
-    );
+    const registryResponse =
+      await partnerRegistryFetch(
+        env,
+        "/admin/action",
+        {
+          method: "POST",
 
-    const result = await readInternalJsonResponse(
-      registryResponse
-    );
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+
+          body: JSON.stringify({
+            action,
+            accountId,
+            customerMessage,
+            adminNotes,
+            reviewedBy,
+          }),
+        }
+      );
+
+    const result =
+      await readInternalJsonResponse(
+        registryResponse
+      );
 
     return jsonResponse({
       success: true,
       action,
-      application: toAdminPartnerApplication(
-        result.application
-      ),
+
+      application:
+        toAdminPartnerApplication(
+          result.application
+        ),
+
       message:
         result.message ||
         "The partner application was updated.",
@@ -608,14 +766,1180 @@ async function handleAdminPartnerActionRequest(
   }
 }
 
+async function handleReferralValidationRequest(
+  request,
+  env,
+  url
+) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "GET") {
+      throw new ApiRequestError(
+        "Method not allowed.",
+        405
+      );
+    }
+
+    requireSameOrigin(request);
+
+    const sessionState =
+      await requireEligibleCustomerSession(
+        request,
+        env
+      );
+
+    const code =
+      validatePartnerCode(
+        url.searchParams.get("code")
+      );
+
+    const registryResponse =
+      await partnerRegistryFetch(
+        env,
+
+        `/referral/validate?code=${encodeURIComponent(
+          code
+        )}&customerAccountId=${encodeURIComponent(
+          sessionState.session.account.id
+        )}`,
+
+        {
+          method: "GET",
+        }
+      );
+
+    const result =
+      await readInternalJsonResponse(
+        registryResponse
+      );
+
+    return jsonResponse({
+      success: true,
+
+      valid: Boolean(
+        result.valid
+      ),
+
+      code:
+        result.code || code,
+
+      reason:
+        cleanText(
+          result.reason,
+          50
+        ),
+
+      message:
+        result.message ||
+        (
+          result.valid
+            ? "Referral code applied. The order subtotal is unchanged."
+            : "That referral code is not active."
+        ),
+
+      discountAmount: 0,
+      changesOrderTotal: false,
+    });
+  } catch (error) {
+    console.error(
+      "Referral validation request error:",
+      error
+    );
+
+    return handleApiError(error);
+  }
+}
+
+async function handlePartnerSummaryRequest(
+  request,
+  env
+) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "GET") {
+      throw new ApiRequestError(
+        "Method not allowed.",
+        405
+      );
+    }
+
+    requireSameOrigin(request);
+
+    const sessionState =
+      await requireEligibleCustomerSession(
+        request,
+        env
+      );
+
+    const registryResponse =
+      await partnerRegistryFetch(
+        env,
+
+        `/partner/summary?accountId=${encodeURIComponent(
+          sessionState.session.account.id
+        )}`,
+
+        {
+          method: "GET",
+        }
+      );
+
+    const result =
+      await readInternalJsonResponse(
+        registryResponse
+      );
+
+    return jsonResponse({
+      success: true,
+
+      application:
+        toCustomerPartnerApplication(
+          result.application
+        ),
+
+      summary:
+        toCustomerReferralSummary(
+          result.summary
+        ),
+
+      referrals:
+        Array.isArray(
+          result.referrals
+        )
+          ? result.referrals.map(
+              toCustomerReferralRecord
+            )
+          : [],
+    });
+  } catch (error) {
+    console.error(
+      "Partner summary request error:",
+      error
+    );
+
+    return handleApiError(error);
+  }
+}
+
+async function handleAdminCommissionRateRequest(
+  request,
+  env
+) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "POST") {
+      throw new ApiRequestError(
+        "Method not allowed.",
+        405
+      );
+    }
+
+    requireSameOrigin(request);
+    validateJsonContentType(request);
+
+    await requireAdminAuthorization(
+      request,
+      env
+    );
+
+    await enforceAuthenticationRateLimit(
+      request,
+      env,
+      "partner-commission-rate"
+    );
+
+    const body =
+      await readJsonRequest(
+        request,
+        MAX_AUTH_REQUEST_LENGTH
+      );
+
+    const accountId =
+      cleanText(
+        body.accountId,
+        150
+      );
+
+    if (!accountId) {
+      throw new ApiRequestError(
+        "A partner account ID is required.",
+        400
+      );
+    }
+
+    const commissionRateBps =
+      normalizeCommissionRateBps(
+        body
+      );
+
+    const registryResponse =
+      await partnerRegistryFetch(
+        env,
+        "/admin/commission-rate",
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+
+          body: JSON.stringify({
+            accountId,
+            commissionRateBps,
+          }),
+        }
+      );
+
+    const result =
+      await readInternalJsonResponse(
+        registryResponse
+      );
+
+    return jsonResponse({
+      success: true,
+
+      application:
+        toAdminPartnerApplication(
+          result.application
+        ),
+
+      message:
+        result.message ||
+        "The partner commission rate was updated for future referrals.",
+    });
+  } catch (error) {
+    console.error(
+      "Admin commission-rate request error:",
+      error
+    );
+
+    return handleApiError(error);
+  }
+}
+
+async function handleAdminPartnerReferralsRequest(
+  request,
+  env
+) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "GET") {
+      throw new ApiRequestError(
+        "Method not allowed.",
+        405
+      );
+    }
+
+    requireSameOrigin(request);
+
+    await requireAdminAuthorization(
+      request,
+      env
+    );
+
+    const registryResponse =
+      await partnerRegistryFetch(
+        env,
+        "/admin/referrals",
+        {
+          method: "GET",
+        }
+      );
+
+    const result =
+      await readInternalJsonResponse(
+        registryResponse
+      );
+
+    const referrals =
+      Array.isArray(
+        result.referrals
+      )
+        ? result.referrals.map(
+            toAdminReferralRecord
+          )
+        : [];
+
+    return jsonResponse({
+      success: true,
+      referrals,
+      records: referrals,
+
+      count:
+        referrals.length,
+    });
+  } catch (error) {
+    console.error(
+      "Admin partner referrals request error:",
+      error
+    );
+
+    return handleApiError(error);
+  }
+}
+
+async function handleOrderWithReferral(
+  request,
+  env,
+  context
+) {
+  try {
+    validateEnvironment(env);
+
+    const sessionState =
+      await inspectCustomerSession(
+        request,
+        env
+      );
+
+    if (
+      sessionState.hasToken &&
+      !sessionState.session
+    ) {
+      return jsonResponse(
+        {
+          success: false,
+
+          error:
+            "Your secure session has expired. Log in again before submitting the order.",
+        },
+        401,
+        {
+          "Set-Cookie":
+            buildClearedSessionCookie(),
+        }
+      );
+    }
+
+    if (
+      sessionState.session &&
+      sessionState.session.account
+        .mustChangePassword
+    ) {
+      return jsonResponse(
+        {
+          success: false,
+
+          error:
+            "Change your temporary password before submitting an order.",
+
+          requiresPasswordChange: true,
+        },
+        403
+      );
+    }
+
+    const submittedReferralCode =
+      await extractReferralCodeFromOrderRequest(
+        request
+      );
+
+    let validatedReferral = null;
+
+    if (submittedReferralCode) {
+      validatePartnerEnvironment(env);
+
+      if (!sessionState.session) {
+        throw new ApiRequestError(
+          "Log in before applying a referral code to an order.",
+          401
+        );
+      }
+
+      const code =
+        validatePartnerCode(
+          submittedReferralCode
+        );
+
+      const registryResponse =
+        await partnerRegistryFetch(
+          env,
+
+          `/referral/validate?code=${encodeURIComponent(
+            code
+          )}&customerAccountId=${encodeURIComponent(
+            sessionState.session.account.id
+          )}`,
+
+          {
+            method: "GET",
+          }
+        );
+
+      const result =
+        await readInternalJsonResponse(
+          registryResponse
+        );
+
+      if (!result.valid) {
+        throw new ApiRequestError(
+          result.message ||
+            "That referral code is not active.",
+
+          result.reason ===
+          "self_referral"
+            ? 409
+            : 400
+        );
+      }
+
+      validatedReferral = {
+        code:
+          cleanText(
+            result.code || code,
+            MAX_REFERRAL_CODE_LENGTH
+          ),
+      };
+    }
+
+    const response =
+      await coreWorker.fetch(
+        request,
+        env,
+        context
+      );
+
+    if (
+      !response.ok ||
+      !validatedReferral
+    ) {
+      return response;
+    }
+
+    let result;
+
+    try {
+      result =
+        await response
+          .clone()
+          .json();
+    } catch {
+      return response;
+    }
+
+    if (!result?.success) {
+      return response;
+    }
+
+    const orderId =
+      cleanText(
+        result.orderId ||
+          result.order?.orderId ||
+          result.order?.id,
+        100
+      ).toUpperCase();
+
+    if (!orderId) {
+      return appendJsonResponseFields(
+        response,
+        result,
+        {
+          referralTracking: {
+            success: false,
+
+            code:
+              validatedReferral.code,
+
+            message:
+              "The order was accepted, but the referral record could not be attached because the order number was unavailable.",
+          },
+        }
+      );
+    }
+
+    let storedOrder =
+      result.order &&
+      typeof result.order ===
+        "object"
+        ? result.order
+        : await env.DOCUMENTS_KV.get(
+            `${ORDER_KEY_PREFIX}${orderId}`,
+            "json"
+          );
+
+    if (
+      !storedOrder ||
+      typeof storedOrder !==
+        "object"
+    ) {
+      return appendJsonResponseFields(
+        response,
+        result,
+        {
+          referralTracking: {
+            success: false,
+
+            code:
+              validatedReferral.code,
+
+            message:
+              "The order was accepted, but its referral record could not be completed.",
+          },
+        }
+      );
+    }
+
+    try {
+      const referralResponse =
+        await partnerRegistryFetch(
+          env,
+          "/referral/record",
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+
+            body: JSON.stringify({
+              orderId,
+
+              code:
+                validatedReferral.code,
+
+              customerAccountId:
+                sessionState.session.account
+                  .id,
+
+              customerEmail:
+                storedOrder.customer
+                  ?.email ||
+                sessionState.session.account
+                  .email ||
+                "",
+
+              orderSubtotal:
+                Number(
+                  storedOrder.subtotal ||
+                    0
+                ),
+
+              orderStatus:
+                storedOrder.status ||
+                "Order Request Received",
+            }),
+          }
+        );
+
+      const referralResult =
+        await readInternalJsonResponse(
+          referralResponse
+        );
+
+      const referral =
+        toCustomerReferralRecord(
+          referralResult.referral
+        );
+
+      storedOrder =
+        await attachReferralToStoredOrder(
+          env,
+          storedOrder,
+          referral
+        );
+
+      return appendJsonResponseFields(
+        response,
+        result,
+        {
+          order:
+            storedOrder,
+
+          referralTracking: {
+            success: true,
+
+            code:
+              referral.partnerCode,
+
+            status:
+              referral.referralStatus,
+
+            message:
+              "Referral code recorded. The order subtotal was not changed.",
+
+            changesOrderTotal: false,
+            discountAmount: 0,
+          },
+        }
+      );
+    } catch (referralError) {
+      console.error(
+        "The order succeeded, but referral tracking failed:",
+        referralError
+      );
+
+      return appendJsonResponseFields(
+        response,
+        result,
+        {
+          referralTracking: {
+            success: false,
+
+            code:
+              validatedReferral.code,
+
+            message:
+              "The order was accepted, but referral tracking needs administrator review.",
+          },
+        }
+      );
+    }
+  } catch (error) {
+    console.error(
+      "Referral-aware order request error:",
+      error
+    );
+
+    return handleApiError(error);
+  }
+}
+
+async function handleAdminOrderMutationWithReferralSync(
+  request,
+  env,
+  context,
+  url
+) {
+  const response =
+    await coreWorker.fetch(
+      request,
+      env,
+      context
+    );
+
+  if (!response.ok) {
+    return response;
+  }
+
+  let result;
+
+  try {
+    result =
+      await response
+        .clone()
+        .json();
+  } catch {
+    return response;
+  }
+
+  if (!result?.success) {
+    return response;
+  }
+
+  const encodedOrderId =
+    url.pathname.slice(
+      "/api/admin/orders/".length
+    );
+
+  let orderId = "";
+
+  try {
+    orderId =
+      decodeURIComponent(
+        encodedOrderId
+      )
+        .trim()
+        .toUpperCase();
+  } catch {
+    orderId =
+      encodedOrderId
+        .trim()
+        .toUpperCase();
+  }
+
+  if (!orderId) {
+    return response;
+  }
+
+  const orderStatus =
+    request.method === "DELETE"
+      ? "Cancelled"
+      : result.order?.status ||
+        result.record?.status ||
+        "";
+
+  if (
+    !orderStatus ||
+    !env.PARTNER_REGISTRY
+  ) {
+    return response;
+  }
+
+  try {
+    const registryResponse =
+      await partnerRegistryFetch(
+        env,
+        "/referral/order-status",
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+
+          body: JSON.stringify({
+            orderId,
+            orderStatus,
+          }),
+        }
+      );
+
+    const registryResult =
+      await readInternalJsonResponse(
+        registryResponse
+      );
+
+    return appendJsonResponseFields(
+      response,
+      result,
+      {
+        referralSync: {
+          success: true,
+
+          referral:
+            registryResult.referral
+              ? toAdminReferralRecord(
+                  registryResult.referral
+                )
+              : null,
+
+          message:
+            registryResult.message ||
+            "Referral status synchronized.",
+        },
+      }
+    );
+  } catch (error) {
+    console.error(
+      "Referral order-status synchronization failed:",
+      error
+    );
+
+    return appendJsonResponseFields(
+      response,
+      result,
+      {
+        referralSync: {
+          success: false,
+
+          message:
+            "The order was updated, but referral status synchronization needs review.",
+        },
+      }
+    );
+  }
+}
+
+async function extractReferralCodeFromOrderRequest(
+  request
+) {
+  const contentType =
+    request.headers.get(
+      "Content-Type"
+    ) || "";
+
+  if (
+    !contentType
+      .toLowerCase()
+      .includes(
+        "application/json"
+      )
+  ) {
+    return "";
+  }
+
+  try {
+    const payload =
+      await request
+        .clone()
+        .json();
+
+    const submittedOrder =
+      payload?.order ||
+      payload;
+
+    return cleanText(
+      submittedOrder?.referralCode ||
+        payload?.referralCode,
+      MAX_REFERRAL_CODE_LENGTH
+    ).toUpperCase();
+  } catch {
+    return "";
+  }
+}
+
+async function attachReferralToStoredOrder(
+  env,
+  order,
+  referral
+) {
+  const orderId =
+    cleanText(
+      order.orderId ||
+        order.id,
+      100
+    ).toUpperCase();
+
+  if (!orderId) {
+    return order;
+  }
+
+  const now =
+    new Date().toISOString();
+
+  const updatedOrder = {
+    ...order,
+    id: orderId,
+    orderId,
+
+    referralCode:
+      referral.partnerCode,
+
+    referralStatus:
+      referral.referralStatus,
+
+    referralCommissionRateBps:
+      referral.commissionRateBps,
+
+    referralCommissionAmountCents:
+      referral.commissionAmountCents,
+
+    referralAttachedAt:
+      referral.createdAt ||
+      now,
+
+    updatedAt:
+      order.updatedAt ||
+      now,
+  };
+
+  await env.DOCUMENTS_KV.put(
+    `${ORDER_KEY_PREFIX}${orderId}`,
+
+    JSON.stringify(
+      updatedOrder
+    ),
+
+    {
+      metadata: {
+        orderId,
+
+        status:
+          cleanText(
+            updatedOrder.status,
+            100
+          ),
+
+        email:
+          cleanText(
+            updatedOrder.customer
+              ?.email,
+            MAX_REFERRAL_CUSTOMER_EMAIL_LENGTH
+          ).toLowerCase(),
+
+        createdAt:
+          updatedOrder.createdAt ||
+          "",
+
+        updatedAt:
+          updatedOrder.updatedAt ||
+          "",
+
+        referralCode:
+          referral.partnerCode,
+
+        referralStatus:
+          referral.referralStatus,
+      },
+    }
+  );
+
+  return updatedOrder;
+}
+
+function appendJsonResponseFields(
+  response,
+  existingBody,
+  additionalFields
+) {
+  const headers =
+    new Headers(
+      response.headers
+    );
+
+  headers.set(
+    "Content-Type",
+    "application/json; charset=utf-8"
+  );
+
+  headers.set(
+    "Cache-Control",
+    "no-store"
+  );
+
+  headers.delete(
+    "Content-Length"
+  );
+
+  return new Response(
+    JSON.stringify({
+      ...existingBody,
+      ...additionalFields,
+    }),
+    {
+      status:
+        response.status,
+
+      statusText:
+        response.statusText,
+
+      headers,
+    }
+  );
+}
+
+function normalizeCommissionRateBps(
+  body
+) {
+  let rate;
+
+  if (
+    body.commissionRateBps !==
+    undefined
+  ) {
+    rate =
+      Number(
+        body.commissionRateBps
+      );
+  } else {
+    rate =
+      Number(
+        body.commissionRatePercent
+      ) * 100;
+  }
+
+  if (
+    !Number.isInteger(
+      rate
+    ) ||
+    rate < 0 ||
+    rate >
+      MAX_COMMISSION_RATE_BPS
+  ) {
+    throw new ApiRequestError(
+      "Commission rate must be between 0% and 50%, using no more than two decimal places.",
+      400
+    );
+  }
+
+  return rate;
+}
+
+function toCustomerReferralSummary(
+  summary
+) {
+  const source =
+    summary &&
+    typeof summary ===
+      "object"
+      ? summary
+      : {};
+
+  return {
+    totalCount:
+      Number(
+        source.totalCount ||
+          0
+      ),
+
+    pendingCount:
+      Number(
+        source.pendingCount ||
+          0
+      ),
+
+    earnedCount:
+      Number(
+        source.earnedCount ||
+          0
+      ),
+
+    voidedCount:
+      Number(
+        source.voidedCount ||
+          0
+      ),
+
+    pendingCommissionCents:
+      Number(
+        source.pendingCommissionCents ||
+          0
+      ),
+
+    earnedCommissionCents:
+      Number(
+        source.earnedCommissionCents ||
+          0
+      ),
+
+    voidedCommissionCents:
+      Number(
+        source.voidedCommissionCents ||
+          0
+      ),
+
+    earnedRevenueCents:
+      Number(
+        source.earnedRevenueCents ||
+          0
+      ),
+  };
+}
+
+function toCustomerReferralRecord(
+  referral
+) {
+  if (
+    !referral ||
+    typeof referral !==
+      "object"
+  ) {
+    return null;
+  }
+
+  return {
+    orderId:
+      cleanText(
+        referral.orderId,
+        100
+      ),
+
+    partnerCode:
+      cleanText(
+        referral.partnerCode,
+        MAX_REFERRAL_CODE_LENGTH
+      ),
+
+    orderSubtotalCents:
+      Number(
+        referral.orderSubtotalCents ||
+          0
+      ),
+
+    commissionRateBps:
+      Number(
+        referral.commissionRateBps ||
+          0
+      ),
+
+    commissionAmountCents:
+      Number(
+        referral.commissionAmountCents ||
+          0
+      ),
+
+    referralStatus:
+      cleanText(
+        referral.referralStatus ||
+          "pending",
+        30
+      ),
+
+    orderStatus:
+      cleanText(
+        referral.orderStatus ||
+          "Order Request Received",
+        100
+      ),
+
+    createdAt:
+      referral.createdAt ||
+      "",
+
+    updatedAt:
+      referral.updatedAt ||
+      "",
+
+    earnedAt:
+      referral.earnedAt ||
+      "",
+
+    voidedAt:
+      referral.voidedAt ||
+      "",
+  };
+}
+
+function toAdminReferralRecord(
+  referral
+) {
+  if (
+    !referral ||
+    typeof referral !==
+      "object"
+  ) {
+    return null;
+  }
+
+  return {
+    ...toCustomerReferralRecord(
+      referral
+    ),
+
+    partnerAccountId:
+      cleanText(
+        referral.partnerAccountId,
+        150
+      ),
+
+    customerAccountId:
+      cleanText(
+        referral.customerAccountId,
+        150
+      ),
+
+    customerEmail:
+      cleanText(
+        referral.customerEmail,
+        MAX_REFERRAL_CUSTOMER_EMAIL_LENGTH
+      ).toLowerCase(),
+
+    partnerEmail:
+      cleanText(
+        referral.partnerEmail,
+        MAX_REFERRAL_CUSTOMER_EMAIL_LENGTH
+      ).toLowerCase(),
+
+    partnerFirstName:
+      cleanText(
+        referral.partnerFirstName,
+        100
+      ),
+
+    partnerLastName:
+      cleanText(
+        referral.partnerLastName,
+        100
+      ),
+  };
+}
+
 async function requireEligibleCustomerSession(
   request,
   env
 ) {
-  const sessionState = await inspectCustomerSession(
-    request,
-    env
-  );
+  const sessionState =
+    await inspectCustomerSession(
+      request,
+      env
+    );
 
   if (!sessionState.session) {
     throw new ApiRequestError(
@@ -625,7 +1949,8 @@ async function requireEligibleCustomerSession(
   }
 
   if (
-    sessionState.session.account.mustChangePassword
+    sessionState.session.account
+      .mustChangePassword
   ) {
     throw new ApiRequestError(
       "Change your temporary password before accessing Partner Program tools.",
@@ -640,21 +1965,28 @@ async function getRegistryApplication(
   env,
   accountId
 ) {
-  const registryResponse = await partnerRegistryFetch(
-    env,
-    `/application?accountId=${encodeURIComponent(
-      accountId
-    )}`,
-    {
-      method: "GET",
-    }
-  );
+  const registryResponse =
+    await partnerRegistryFetch(
+      env,
 
-  const result = await readInternalJsonResponse(
-    registryResponse
-  );
+      `/application?accountId=${encodeURIComponent(
+        accountId
+      )}`,
 
-  return result.application || null;
+      {
+        method: "GET",
+      }
+    );
+
+  const result =
+    await readInternalJsonResponse(
+      registryResponse
+    );
+
+  return (
+    result.application ||
+    null
+  );
 }
 
 async function partnerRegistryFetch(
@@ -662,11 +1994,15 @@ async function partnerRegistryFetch(
   pathname,
   init
 ) {
-  const id = env.PARTNER_REGISTRY.idFromName(
-    PARTNER_REGISTRY_NAME
-  );
+  const id =
+    env.PARTNER_REGISTRY.idFromName(
+      PARTNER_REGISTRY_NAME
+    );
 
-  const stub = env.PARTNER_REGISTRY.get(id);
+  const stub =
+    env.PARTNER_REGISTRY.get(
+      id
+    );
 
   return stub.fetch(
     new Request(
@@ -676,11 +2012,14 @@ async function partnerRegistryFetch(
   );
 }
 
-async function readInternalJsonResponse(response) {
+async function readInternalJsonResponse(
+  response
+) {
   let result;
 
   try {
-    result = await response.json();
+    result =
+      await response.json();
   } catch {
     throw new ApiRequestError(
       "The partner registry returned an invalid response.",
@@ -695,6 +2034,7 @@ async function readInternalJsonResponse(response) {
     throw new ApiRequestError(
       result?.error ||
         "The partner registry request could not be completed.",
+
       response.status >= 400
         ? response.status
         : 503
@@ -713,47 +2053,65 @@ async function customerHasStoredOrder(
 
   while (!listComplete) {
     const options = {
-      prefix: ORDER_KEY_PREFIX,
+      prefix:
+        ORDER_KEY_PREFIX,
+
       limit: 1000,
     };
 
     if (cursor) {
-      options.cursor = cursor;
+      options.cursor =
+        cursor;
     }
 
-    const page = await env.DOCUMENTS_KV.list(
-      options
-    );
+    const page =
+      await env.DOCUMENTS_KV.list(
+        options
+      );
 
-    const keys = Array.isArray(page.keys)
-      ? page.keys.map((key) => key.name)
-      : [];
+    const keys =
+      Array.isArray(
+        page.keys
+      )
+        ? page.keys.map(
+            (key) =>
+              key.name
+          )
+        : [];
 
     for (
       let index = 0;
       index < keys.length;
       index += 100
     ) {
-      const batch = keys.slice(
-        index,
-        index + 100
-      );
+      const batch =
+        keys.slice(
+          index,
+          index + 100
+        );
 
-      const records = await env.DOCUMENTS_KV.get(
-        batch,
-        {
-          type: "json",
-        }
-      );
+      const records =
+        await env.DOCUMENTS_KV.get(
+          batch,
+          {
+            type: "json",
+          }
+        );
 
-      for (const key of batch) {
-        const order = records.get(key);
+      for (
+        const key of batch
+      ) {
+        const order =
+          records.get(
+            key
+          );
 
         if (
           cleanText(
             order?.customerAccountId,
             150
-          ) === accountId
+          ) ===
+          accountId
         ) {
           return true;
         }
@@ -761,9 +2119,11 @@ async function customerHasStoredOrder(
     }
 
     listComplete =
-      page.list_complete === true;
+      page.list_complete ===
+      true;
 
-    cursor = page.cursor || "";
+    cursor =
+      page.cursor || "";
 
     if (
       !listComplete &&
@@ -779,15 +2139,20 @@ async function customerHasStoredOrder(
   return false;
 }
 
-function validatePartnerCode(value) {
-  const code = cleanText(
-    value,
-    MAX_PARTNER_CODE_LENGTH
-  ).toUpperCase();
+function validatePartnerCode(
+  value
+) {
+  const code =
+    cleanText(
+      value,
+      MAX_PARTNER_CODE_LENGTH
+    ).toUpperCase();
 
   if (
-    code.length < MIN_PARTNER_CODE_LENGTH ||
-    code.length > MAX_PARTNER_CODE_LENGTH
+    code.length <
+      MIN_PARTNER_CODE_LENGTH ||
+    code.length >
+      MAX_PARTNER_CODE_LENGTH
   ) {
     throw new ApiRequestError(
       `Partner codes must contain ${MIN_PARTNER_CODE_LENGTH}–${MAX_PARTNER_CODE_LENGTH} characters.`,
@@ -806,7 +2171,11 @@ function validatePartnerCode(value) {
     );
   }
 
-  if (!/[A-Z]/.test(code)) {
+  if (
+    !/[A-Z]/.test(
+      code
+    )
+  ) {
     throw new ApiRequestError(
       "Partner codes must contain at least one letter.",
       400
@@ -814,11 +2183,15 @@ function validatePartnerCode(value) {
   }
 
   if (
-    RESERVED_PARTNER_CODES.has(code) ||
+    RESERVED_PARTNER_CODES.has(
+      code
+    ) ||
     /^(ADMIN|SUPPORT|STAFF|OFFICIAL)(-|$)/.test(
       code
     ) ||
-    code.includes("304PEPTIDES")
+    code.includes(
+      "304PEPTIDES"
+    )
   ) {
     throw new ApiRequestError(
       "That partner code is reserved. Choose a different code.",
@@ -833,10 +2206,11 @@ function validateOptionalHttpUrl(
   value,
   maximumLength
 ) {
-  const cleaned = cleanText(
-    value,
-    maximumLength
-  );
+  const cleaned =
+    cleanText(
+      value,
+      maximumLength
+    );
 
   if (!cleaned) {
     return "";
@@ -845,7 +2219,10 @@ function validateOptionalHttpUrl(
   let parsed;
 
   try {
-    parsed = new URL(cleaned);
+    parsed =
+      new URL(
+        cleaned
+      );
   } catch {
     throw new ApiRequestError(
       "Enter a complete profile URL beginning with http:// or https://.",
@@ -857,7 +2234,9 @@ function validateOptionalHttpUrl(
     ![
       "http:",
       "https:",
-    ].includes(parsed.protocol)
+    ].includes(
+      parsed.protocol
+    )
   ) {
     throw new ApiRequestError(
       "The profile URL must use http:// or https://.",
@@ -895,78 +2274,109 @@ function toCustomerPartnerApplication(
 ) {
   if (
     !application ||
-    typeof application !== "object"
+    typeof application !==
+      "object"
   ) {
     return null;
   }
 
   return {
-    accountId: cleanText(
-      application.accountId,
-      150
-    ),
+    accountId:
+      cleanText(
+        application.accountId,
+        150
+      ),
 
-    code: cleanText(
-      application.code,
-      MAX_PARTNER_CODE_LENGTH
-    ),
+    code:
+      cleanText(
+        application.code,
+        MAX_PARTNER_CODE_LENGTH
+      ),
 
-    status: cleanText(
-      application.status || "pending",
-      30
-    ),
+    status:
+      cleanText(
+        application.status ||
+          "pending",
+        30
+      ),
 
-    primaryPlatform: cleanText(
-      application.primaryPlatform,
-      MAX_PARTNER_PLATFORM_LENGTH
-    ),
+    primaryPlatform:
+      cleanText(
+        application.primaryPlatform,
+        MAX_PARTNER_PLATFORM_LENGTH
+      ),
 
-    profileUrl: cleanText(
-      application.profileUrl,
-      MAX_PARTNER_PROFILE_URL_LENGTH
-    ),
+    profileUrl:
+      cleanText(
+        application.profileUrl,
+        MAX_PARTNER_PROFILE_URL_LENGTH
+      ),
 
-    audienceSize: cleanText(
-      application.audienceSize,
-      MAX_PARTNER_AUDIENCE_LENGTH
-    ),
+    audienceSize:
+      cleanText(
+        application.audienceSize,
+        MAX_PARTNER_AUDIENCE_LENGTH
+      ),
 
-    promotionPlan: cleanMultilineText(
-      application.promotionPlan,
-      MAX_PARTNER_PROMOTION_PLAN_LENGTH
-    ),
+    promotionPlan:
+      cleanMultilineText(
+        application.promotionPlan,
+        MAX_PARTNER_PROMOTION_PLAN_LENGTH
+      ),
 
-    experience: cleanMultilineText(
-      application.experience,
-      MAX_PARTNER_EXPERIENCE_LENGTH
-    ),
+    experience:
+      cleanMultilineText(
+        application.experience,
+        MAX_PARTNER_EXPERIENCE_LENGTH
+      ),
 
     submittedAt:
-      application.submittedAt || "",
+      application.submittedAt ||
+      "",
 
     updatedAt:
-      application.updatedAt || "",
+      application.updatedAt ||
+      "",
 
     reviewedAt:
-      application.reviewedAt || "",
+      application.reviewedAt ||
+      "",
 
-    customerMessage: cleanMultilineText(
-      application.customerMessage,
-      MAX_PARTNER_CUSTOMER_MESSAGE_LENGTH
-    ),
+    customerMessage:
+      cleanMultilineText(
+        application.customerMessage,
+        MAX_PARTNER_CUSTOMER_MESSAGE_LENGTH
+      ),
 
     deniedAt:
-      application.deniedAt || "",
+      application.deniedAt ||
+      "",
 
     suspendedAt:
-      application.suspendedAt || "",
+      application.suspendedAt ||
+      "",
 
     reactivatedAt:
-      application.reactivatedAt || "",
+      application.reactivatedAt ||
+      "",
 
-    applicationNumber: Number(
-      application.applicationNumber || 1
-    ),
+    applicationNumber:
+      Number(
+        application.applicationNumber ||
+          1
+      ),
+
+    agreementVersion:
+      cleanText(
+        application.agreementVersion,
+        50
+      ),
+
+    commissionRateBps:
+      Number(
+        application.commissionRateBps ||
+          0
+      ),
   };
 }
 
@@ -975,7 +2385,8 @@ function toAdminPartnerApplication(
 ) {
   if (
     !application ||
-    typeof application !== "object"
+    typeof application !==
+      "object"
   ) {
     return null;
   }
@@ -985,36 +2396,55 @@ function toAdminPartnerApplication(
       application
     ),
 
-    email: cleanText(
-      application.email,
-      254
-    ).toLowerCase(),
+    email:
+      cleanText(
+        application.email,
+        254
+      ).toLowerCase(),
 
-    firstName: cleanText(
-      application.firstName,
-      100
-    ),
+    firstName:
+      cleanText(
+        application.firstName,
+        100
+      ),
 
-    lastName: cleanText(
-      application.lastName,
-      100
-    ),
+    lastName:
+      cleanText(
+        application.lastName,
+        100
+      ),
 
     agreementAcceptedAt:
-      application.agreementAcceptedAt || "",
+      application.agreementAcceptedAt ||
+      "",
 
-    reviewedBy: cleanText(
-      application.reviewedBy,
-      254
-    ),
+    agreementVersion:
+      cleanText(
+        application.agreementVersion,
+        50
+      ),
 
-    adminNotes: cleanMultilineText(
-      application.adminNotes,
-      MAX_PARTNER_ADMIN_NOTES_LENGTH
-    ),
+    commissionRateBps:
+      Number(
+        application.commissionRateBps ||
+          0
+      ),
+
+    reviewedBy:
+      cleanText(
+        application.reviewedBy,
+        254
+      ),
+
+    adminNotes:
+      cleanMultilineText(
+        application.adminNotes,
+        MAX_PARTNER_ADMIN_NOTES_LENGTH
+      ),
 
     lastStatusChangeAt:
-      application.lastStatusChangeAt || "",
+      application.lastStatusChangeAt ||
+      "",
   };
 }
 
@@ -1040,13 +2470,17 @@ async function handleAdminAccountDirectoryRequest(
     );
 
     const records =
-      await listCustomerAccounts(env);
+      await listCustomerAccounts(
+        env
+      );
 
     return jsonResponse({
       success: true,
       records,
       accounts: records,
-      count: records.length,
+
+      count:
+        records.length,
     });
   } catch (error) {
     console.error(
@@ -1058,37 +2492,50 @@ async function handleAdminAccountDirectoryRequest(
   }
 }
 
-async function listCustomerAccounts(env) {
+async function listCustomerAccounts(
+  env
+) {
   const accountKeys = [];
   let cursor = "";
   let listComplete = false;
 
   while (!listComplete) {
     const options = {
-      prefix: ACCOUNT_KEY_PREFIX,
+      prefix:
+        ACCOUNT_KEY_PREFIX,
+
       limit: 1000,
     };
 
     if (cursor) {
-      options.cursor = cursor;
+      options.cursor =
+        cursor;
     }
 
-    const page = await env.DOCUMENTS_KV.list(
-      options
-    );
+    const page =
+      await env.DOCUMENTS_KV.list(
+        options
+      );
 
     accountKeys.push(
-      ...(Array.isArray(page.keys)
-        ? page.keys.map(
-            (key) => key.name
-          )
-        : [])
+      ...(
+        Array.isArray(
+          page.keys
+        )
+          ? page.keys.map(
+              (key) =>
+                key.name
+            )
+          : []
+      )
     );
 
     listComplete =
-      page.list_complete === true;
+      page.list_complete ===
+      true;
 
-    cursor = page.cursor || "";
+    cursor =
+      page.cursor || "";
 
     if (
       !listComplete &&
@@ -1105,15 +2552,20 @@ async function listCustomerAccounts(env) {
 
   for (
     let index = 0;
-    index < accountKeys.length;
+    index <
+    accountKeys.length;
     index += 100
   ) {
-    const batch = accountKeys.slice(
-      index,
-      index + 100
-    );
+    const batch =
+      accountKeys.slice(
+        index,
+        index + 100
+      );
 
-    if (batch.length === 0) {
+    if (
+      batch.length ===
+      0
+    ) {
       continue;
     }
 
@@ -1125,34 +2577,46 @@ async function listCustomerAccounts(env) {
         }
       );
 
-    for (const key of batch) {
+    for (
+      const key of batch
+    ) {
       const account =
-        values.get(key);
+        values.get(
+          key
+        );
 
       if (
         account &&
-        typeof account === "object"
+        typeof account ===
+          "object"
       ) {
         accounts.push(
-          toAdminAccountSummary(account)
+          toAdminAccountSummary(
+            account
+          )
         );
       }
     }
   }
 
   return accounts.sort(
-    (left, right) => {
-      const leftDate = String(
-        left.createdAt ||
-          left.updatedAt ||
-          ""
-      );
+    (
+      left,
+      right
+    ) => {
+      const leftDate =
+        String(
+          left.createdAt ||
+            left.updatedAt ||
+            ""
+        );
 
-      const rightDate = String(
-        right.createdAt ||
-          right.updatedAt ||
-          ""
-      );
+      const rightDate =
+        String(
+          right.createdAt ||
+            right.updatedAt ||
+            ""
+        );
 
       return rightDate.localeCompare(
         leftDate
@@ -1189,24 +2653,28 @@ async function handleAdminAccountControlRequest(
       "admin-account-control"
     );
 
-    const body = await readJsonRequest(
-      request,
-      MAX_AUTH_REQUEST_LENGTH
-    );
+    const body =
+      await readJsonRequest(
+        request,
+        MAX_AUTH_REQUEST_LENGTH
+      );
 
-    const email = normalizeAccountEmail(
-      body.email
-    );
+    const email =
+      normalizeAccountEmail(
+        body.email
+      );
 
-    const action = cleanText(
-      body.action,
-      40
-    ).toLowerCase();
+    const action =
+      cleanText(
+        body.action,
+        40
+      ).toLowerCase();
 
-    const reason = cleanText(
-      body.reason,
-      MAX_ACCOUNT_CONTROL_REASON_LENGTH
-    );
+    const reason =
+      cleanText(
+        body.reason,
+        MAX_ACCOUNT_CONTROL_REASON_LENGTH
+      );
 
     if (
       ![
@@ -1221,18 +2689,21 @@ async function handleAdminAccountControlRequest(
       );
     }
 
-    const accountKey = await getAccountKey(
-      email
-    );
+    const accountKey =
+      await getAccountKey(
+        email
+      );
 
-    const account = await env.DOCUMENTS_KV.get(
-      accountKey,
-      "json"
-    );
+    const account =
+      await env.DOCUMENTS_KV.get(
+        accountKey,
+        "json"
+      );
 
     if (
       !account ||
-      typeof account !== "object"
+      typeof account !==
+        "object"
     ) {
       throw new ApiRequestError(
         "No customer account was found for that email address.",
@@ -1246,7 +2717,10 @@ async function handleAdminAccountControlRequest(
     let updatedAccount;
     let message;
 
-    if (action === "suspend") {
+    if (
+      action ===
+      "suspend"
+    ) {
       if (!reason) {
         throw new ApiRequestError(
           "Enter a private reason before suspending the account.",
@@ -1256,38 +2730,50 @@ async function handleAdminAccountControlRequest(
 
       updatedAccount = {
         ...account,
-        status: "suspended",
-        suspensionReason: reason,
+
+        status:
+          "suspended",
+
+        suspensionReason:
+          reason,
 
         suspendedAt:
-          account.status === "suspended" &&
+          account.status ===
+            "suspended" &&
           account.suspendedAt
             ? account.suspendedAt
             : now,
 
-        accountStatusChangedAt: now,
+        accountStatusChangedAt:
+          now,
 
         sessionVersion:
-          getAccountSessionVersion(account) +
-          1,
+          getAccountSessionVersion(
+            account
+          ) + 1,
 
-        lastSessionRevokedAt: now,
+        lastSessionRevokedAt:
+          now,
 
         lastSessionRevocationReason:
           "Account suspended by administrator.",
 
-        updatedAt: now,
+        updatedAt:
+          now,
       };
 
       message =
-        account.status === "suspended"
+        account.status ===
+        "suspended"
           ? "The suspension reason was updated and all customer sessions were revoked."
           : "The account was suspended and all customer sessions were revoked.";
     } else if (
-      action === "reactivate"
+      action ===
+      "reactivate"
     ) {
       if (
-        account.status !== "suspended"
+        account.status !==
+        "suspended"
       ) {
         throw new ApiRequestError(
           "Only a suspended account can be reactivated.",
@@ -1297,7 +2783,9 @@ async function handleAdminAccountControlRequest(
 
       updatedAccount = {
         ...account,
-        status: "active",
+
+        status:
+          "active",
 
         lastSuspensionReason:
           account.suspensionReason ||
@@ -1309,21 +2797,31 @@ async function handleAdminAccountControlRequest(
           account.lastSuspendedAt ||
           "",
 
-        suspensionReason: "",
-        suspendedAt: "",
-        reactivatedAt: now,
-        accountStatusChangedAt: now,
+        suspensionReason:
+          "",
+
+        suspendedAt:
+          "",
+
+        reactivatedAt:
+          now,
+
+        accountStatusChangedAt:
+          now,
 
         sessionVersion:
-          getAccountSessionVersion(account) +
-          1,
+          getAccountSessionVersion(
+            account
+          ) + 1,
 
-        lastSessionRevokedAt: now,
+        lastSessionRevokedAt:
+          now,
 
         lastSessionRevocationReason:
           "Account reactivated by administrator.",
 
-        updatedAt: now,
+        updatedAt:
+          now,
       };
 
       message =
@@ -1333,16 +2831,19 @@ async function handleAdminAccountControlRequest(
         ...account,
 
         sessionVersion:
-          getAccountSessionVersion(account) +
-          1,
+          getAccountSessionVersion(
+            account
+          ) + 1,
 
-        lastSessionRevokedAt: now,
+        lastSessionRevokedAt:
+          now,
 
         lastSessionRevocationReason:
           reason ||
           "Sessions revoked by administrator.",
 
-        updatedAt: now,
+        updatedAt:
+          now,
       };
 
       message =
@@ -1404,27 +2905,32 @@ async function handleAdminPasswordResetRequest(
       "admin-password-reset"
     );
 
-    const body = await readJsonRequest(
-      request,
-      MAX_AUTH_REQUEST_LENGTH
-    );
+    const body =
+      await readJsonRequest(
+        request,
+        MAX_AUTH_REQUEST_LENGTH
+      );
 
-    const email = normalizeAccountEmail(
-      body.email
-    );
+    const email =
+      normalizeAccountEmail(
+        body.email
+      );
 
-    const accountKey = await getAccountKey(
-      email
-    );
+    const accountKey =
+      await getAccountKey(
+        email
+      );
 
-    const account = await env.DOCUMENTS_KV.get(
-      accountKey,
-      "json"
-    );
+    const account =
+      await env.DOCUMENTS_KV.get(
+        accountKey,
+        "json"
+      );
 
     if (
       !account ||
-      account.status !== "active"
+      account.status !==
+        "active"
     ) {
       throw new ApiRequestError(
         "No active customer account was found for that email address.",
@@ -1433,9 +2939,14 @@ async function handleAdminPasswordResetRequest(
     }
 
     const temporaryPassword =
-      createTemporaryPassword(20);
+      createTemporaryPassword(
+        20
+      );
 
-    const salt = randomBytes(16);
+    const salt =
+      randomBytes(
+        16
+      );
 
     const passwordHash =
       await derivePasswordHash(
@@ -1450,26 +2961,34 @@ async function handleAdminPasswordResetRequest(
       ...account,
 
       passwordHash:
-        bytesToBase64Url(passwordHash),
+        bytesToBase64Url(
+          passwordHash
+        ),
 
       passwordSalt:
-        bytesToBase64Url(salt),
+        bytesToBase64Url(
+          salt
+        ),
 
       passwordIterations:
         PASSWORD_HASH_ITERATIONS,
 
-      mustChangePassword: true,
+      mustChangePassword:
+        true,
 
       temporaryPasswordIssuedAt:
         now,
 
-      passwordChangedAt: now,
+      passwordChangedAt:
+        now,
 
       sessionVersion:
-        getAccountSessionVersion(account) +
-        1,
+        getAccountSessionVersion(
+          account
+        ) + 1,
 
-      updatedAt: now,
+      updatedAt:
+        now,
     };
 
     await putAccountRecord(
@@ -1480,7 +2999,10 @@ async function handleAdminPasswordResetRequest(
 
     return jsonResponse({
       success: true,
-      email: updatedAccount.email,
+
+      email:
+        updatedAccount.email,
+
       temporaryPassword,
       issuedAt: now,
       requiresPasswordChange: true,
@@ -1532,23 +3054,28 @@ async function handleChangePasswordRequest(
         env
       );
 
-    if (!sessionState.session) {
+    if (
+      !sessionState.session
+    ) {
       throw new ApiRequestError(
         "Customer authentication is required.",
         401
       );
     }
 
-    const body = await readJsonRequest(
-      request,
-      MAX_AUTH_REQUEST_LENGTH
-    );
+    const body =
+      await readJsonRequest(
+        request,
+        MAX_AUTH_REQUEST_LENGTH
+      );
 
-    const currentPassword = String(
-      body.currentPassword == null
-        ? ""
-        : body.currentPassword
-    );
+    const currentPassword =
+      String(
+        body.currentPassword ==
+          null
+          ? ""
+          : body.currentPassword
+      );
 
     const newPassword =
       validateAccountPassword(
@@ -1583,7 +3110,8 @@ async function handleChangePasswordRequest(
     }
 
     if (
-      currentPassword === newPassword
+      currentPassword ===
+      newPassword
     ) {
       throw new ApiRequestError(
         "The new password must be different from the current password.",
@@ -1591,7 +3119,10 @@ async function handleChangePasswordRequest(
       );
     }
 
-    const salt = randomBytes(16);
+    const salt =
+      randomBytes(
+        16
+      );
 
     const passwordHash =
       await derivePasswordHash(
@@ -1606,24 +3137,37 @@ async function handleChangePasswordRequest(
       ...account,
 
       passwordHash:
-        bytesToBase64Url(passwordHash),
+        bytesToBase64Url(
+          passwordHash
+        ),
 
       passwordSalt:
-        bytesToBase64Url(salt),
+        bytesToBase64Url(
+          salt
+        ),
 
       passwordIterations:
         PASSWORD_HASH_ITERATIONS,
 
-      passwordChangedAt: now,
-      passwordResetCompletedAt: now,
-      mustChangePassword: false,
-      temporaryPasswordIssuedAt: "",
+      passwordChangedAt:
+        now,
+
+      passwordResetCompletedAt:
+        now,
+
+      mustChangePassword:
+        false,
+
+      temporaryPasswordIssuedAt:
+        "",
 
       sessionVersion:
-        getAccountSessionVersion(account) +
-        1,
+        getAccountSessionVersion(
+          account
+        ) + 1,
 
-      updatedAt: now,
+      updatedAt:
+        now,
     };
 
     await putAccountRecord(
@@ -1668,7 +3212,9 @@ async function upgradeAuthenticationResponse(
 
   try {
     result =
-      await response.clone().json();
+      await response
+        .clone()
+        .json();
   } catch {
     return response;
   }
@@ -1701,7 +3247,8 @@ async function upgradeAuthenticationResponse(
       result.account;
 
     if (
-      account.status !== "active"
+      account.status !==
+      "active"
     ) {
       return jsonResponse(
         {
@@ -1711,7 +3258,8 @@ async function upgradeAuthenticationResponse(
           error:
             "This customer account is currently suspended. Contact support for assistance.",
 
-          accountSuspended: true,
+          accountSuspended:
+            true,
         },
         403,
         {
@@ -1722,7 +3270,9 @@ async function upgradeAuthenticationResponse(
     }
 
     const sessionVersion =
-      getAccountSessionVersion(account);
+      getAccountSessionVersion(
+        account
+      );
 
     if (
       storedAccount &&
@@ -1749,11 +3299,15 @@ async function upgradeAuthenticationResponse(
       );
 
     const headers =
-      new Headers(response.headers);
+      new Headers(
+        response.headers
+      );
 
     headers.set(
       "Set-Cookie",
-      buildSessionCookie(token)
+      buildSessionCookie(
+        token
+      )
     );
 
     headers.set(
@@ -1775,7 +3329,9 @@ async function upgradeAuthenticationResponse(
         ...result,
 
         account:
-          toPublicAccount(account),
+          toPublicAccount(
+            account
+          ),
 
         requiresPasswordChange:
           Boolean(
@@ -1783,9 +3339,12 @@ async function upgradeAuthenticationResponse(
           ),
       }),
       {
-        status: response.status,
+        status:
+          response.status,
+
         statusText:
           response.statusText,
+
         headers,
       }
     );
@@ -1820,7 +3379,9 @@ async function inspectCustomerSession(
     validateEnvironment(env);
 
     const token =
-      getSessionToken(request);
+      getSessionToken(
+        request
+      );
 
     if (!token) {
       return {
@@ -1855,11 +3416,14 @@ async function inspectCustomerSession(
 
     if (
       !account ||
-      account.status !== "active" ||
-      account.id !== payload.sub ||
+      account.status !==
+        "active" ||
+      account.id !==
+        payload.sub ||
       normalizeAccountEmail(
         account.email
-      ) !== payload.email ||
+      ) !==
+        payload.email ||
       getAccountSessionVersion(
         account
       ) !==
@@ -1889,19 +3453,26 @@ async function inspectCustomerSession(
     );
 
     return {
-      hasToken: Boolean(
-        getSessionToken(request)
-      ),
+      hasToken:
+        Boolean(
+          getSessionToken(
+            request
+          )
+        ),
 
       session: null,
     };
   }
 }
 
-function validatePartnerEnvironment(env) {
+function validatePartnerEnvironment(
+  env
+) {
   validateEnvironment(env);
 
-  if (!env.PARTNER_REGISTRY) {
+  if (
+    !env.PARTNER_REGISTRY
+  ) {
     throw new ApiRequestError(
       "The Partner Program registry has not been configured.",
       500
@@ -1909,7 +3480,9 @@ function validatePartnerEnvironment(env) {
   }
 }
 
-function validateEnvironment(env) {
+function validateEnvironment(
+  env
+) {
   if (
     !env.DOCUMENTS_KV ||
     !env.DOCUMENT_ADMIN_SECRET
@@ -1920,7 +3493,9 @@ function validateEnvironment(env) {
     );
   }
 
-  if (!env.ORDER_RATE_LIMITER) {
+  if (
+    !env.ORDER_RATE_LIMITER
+  ) {
     throw new ApiRequestError(
       "Authentication rate limiting has not been configured.",
       500
@@ -1935,14 +3510,29 @@ async function putAccountRecord(
 ) {
   await env.DOCUMENTS_KV.put(
     accountKey,
-    JSON.stringify(account),
+
+    JSON.stringify(
+      account
+    ),
+
     {
       metadata: {
-        accountId: account.id,
-        firstName: account.firstName || "",
-        lastName: account.lastName || "",
-        email: account.email,
-        status: account.status,
+        accountId:
+          account.id,
+
+        firstName:
+          account.firstName ||
+          "",
+
+        lastName:
+          account.lastName ||
+          "",
+
+        email:
+          account.email,
+
+        status:
+          account.status,
 
         mustChangePassword:
           Boolean(
@@ -1954,23 +3544,28 @@ async function putAccountRecord(
           "",
 
         suspendedAt:
-          account.suspendedAt || "",
+          account.suspendedAt ||
+          "",
 
         lastSuspendedAt:
-          account.lastSuspendedAt || "",
+          account.lastSuspendedAt ||
+          "",
 
         reactivatedAt:
-          account.reactivatedAt || "",
+          account.reactivatedAt ||
+          "",
 
         lastSessionRevokedAt:
           account.lastSessionRevokedAt ||
           "",
 
         createdAt:
-          account.createdAt || "",
+          account.createdAt ||
+          "",
 
         updatedAt:
-          account.updatedAt || "",
+          account.updatedAt ||
+          "",
       },
     }
   );
@@ -1982,7 +3577,9 @@ async function enforceAuthenticationRateLimit(
   action
 ) {
   const clientIdentifier =
-    getClientIdentifier(request);
+    getClientIdentifier(
+      request
+    );
 
   let result;
 
@@ -2004,7 +3601,9 @@ async function enforceAuthenticationRateLimit(
     );
   }
 
-  if (!result.success) {
+  if (
+    !result.success
+  ) {
     throw new ApiRequestError(
       "Too many account attempts were received. Please wait one minute and try again.",
       429
@@ -2026,22 +3625,26 @@ async function requireAdminAuthorization(
       /^Bearer\s+(.+)$/i
     );
 
-  const suppliedSecret = match
-    ? match[1].trim()
-    : "";
+  const suppliedSecret =
+    match
+      ? match[1].trim()
+      : "";
 
-  const expectedSecret = String(
-    env.DOCUMENT_ADMIN_SECRET ||
-      ""
-  );
+  const expectedSecret =
+    String(
+      env.DOCUMENT_ADMIN_SECRET ||
+        ""
+    );
 
   if (
     !suppliedSecret ||
     !expectedSecret ||
-    !(await constantTimeStringEqual(
-      suppliedSecret,
-      expectedSecret
-    ))
+    !(
+      await constantTimeStringEqual(
+        suppliedSecret,
+        expectedSecret
+      )
+    )
   ) {
     throw new ApiRequestError(
       "Administrator authorization is required.",
@@ -2060,22 +3663,33 @@ async function constantTimeStringEqual(
   ] = await Promise.all([
     crypto.subtle.digest(
       "SHA-256",
+
       new TextEncoder().encode(
-        String(left)
+        String(
+          left
+        )
       )
     ),
 
     crypto.subtle.digest(
       "SHA-256",
+
       new TextEncoder().encode(
-        String(right)
+        String(
+          right
+        )
       )
     ),
   ]);
 
   return constantTimeBytesEqual(
-    new Uint8Array(leftDigest),
-    new Uint8Array(rightDigest)
+    new Uint8Array(
+      leftDigest
+    ),
+
+    new Uint8Array(
+      rightDigest
+    )
   );
 }
 
@@ -2154,18 +3768,32 @@ function createTemporaryPassword(
       );
 
     [
-      characters[index],
-      characters[swapIndex],
+      characters[
+        index
+      ],
+
+      characters[
+        swapIndex
+      ],
     ] = [
-      characters[swapIndex],
-      characters[index],
+      characters[
+        swapIndex
+      ],
+
+      characters[
+        index
+      ],
     ];
   }
 
-  return characters.join("");
+  return characters.join(
+    ""
+  );
 }
 
-function randomIndex(maximum) {
+function randomIndex(
+  maximum
+) {
   if (
     !Number.isSafeInteger(
       maximum
@@ -2184,14 +3812,17 @@ function randomIndex(maximum) {
     ) * maximum;
 
   const values =
-    new Uint32Array(1);
+    new Uint32Array(
+      1
+    );
 
   do {
     crypto.getRandomValues(
       values
     );
   } while (
-    values[0] >= limit
+    values[0] >=
+    limit
   );
 
   return (
@@ -2200,7 +3831,9 @@ function randomIndex(maximum) {
   );
 }
 
-function getClientIdentifier(request) {
+function getClientIdentifier(
+  request
+) {
   const cloudflareIp =
     request.headers.get(
       "CF-Connecting-IP"
@@ -2220,7 +3853,8 @@ function getClientIdentifier(request) {
 
   if (forwardedFor) {
     return cleanText(
-      forwardedFor.split(",")[0],
+      forwardedFor
+        .split(",")[0],
       100
     );
   }
@@ -2228,9 +3862,13 @@ function getClientIdentifier(request) {
   return "unknown-client";
 }
 
-function requireSameOrigin(request) {
+function requireSameOrigin(
+  request
+) {
   const requestUrl =
-    new URL(request.url);
+    new URL(
+      request.url
+    );
 
   const origin =
     request.headers.get(
@@ -2244,7 +3882,8 @@ function requireSameOrigin(request) {
 
   if (
     origin &&
-    origin !== requestUrl.origin
+    origin !==
+      requestUrl.origin
   ) {
     throw new ApiRequestError(
       "Cross-site requests are not allowed.",
@@ -2258,7 +3897,9 @@ function requireSameOrigin(request) {
       "same-origin",
       "same-site",
       "none",
-    ].includes(fetchSite)
+    ].includes(
+      fetchSite
+    )
   ) {
     throw new ApiRequestError(
       "Cross-site requests are not allowed.",
@@ -2267,7 +3908,9 @@ function requireSameOrigin(request) {
   }
 }
 
-function validateJsonContentType(request) {
+function validateJsonContentType(
+  request
+) {
   const contentType =
     request.headers.get(
       "Content-Type"
@@ -2291,11 +3934,12 @@ async function readJsonRequest(
   request,
   maximumLength
 ) {
-  const declaredLength = Number(
-    request.headers.get(
-      "Content-Length"
-    ) || 0
-  );
+  const declaredLength =
+    Number(
+      request.headers.get(
+        "Content-Length"
+      ) || 0
+    );
 
   if (
     Number.isFinite(
@@ -2325,12 +3969,17 @@ async function readJsonRequest(
 
   try {
     const body =
-      JSON.parse(text);
+      JSON.parse(
+        text
+      );
 
     if (
       !body ||
-      typeof body !== "object" ||
-      Array.isArray(body)
+      typeof body !==
+        "object" ||
+      Array.isArray(
+        body
+      )
     ) {
       throw new Error(
         "Invalid JSON object."
@@ -2346,12 +3995,15 @@ async function readJsonRequest(
   }
 }
 
-function validateAccountPassword(value) {
-  const password = String(
-    value == null
-      ? ""
-      : value
-  );
+function validateAccountPassword(
+  value
+) {
+  const password =
+    String(
+      value == null
+        ? ""
+        : value
+    );
 
   if (
     password.length <
@@ -2376,11 +4028,14 @@ function validateAccountPassword(value) {
   return password;
 }
 
-function normalizeAccountEmail(value) {
-  const email = cleanText(
-    value,
-    MAX_ACCOUNT_EMAIL_LENGTH
-  ).toLowerCase();
+function normalizeAccountEmail(
+  value
+) {
+  const email =
+    cleanText(
+      value,
+      MAX_ACCOUNT_EMAIL_LENGTH
+    ).toLowerCase();
 
   if (
     !email ||
@@ -2397,10 +4052,14 @@ function normalizeAccountEmail(value) {
   return email;
 }
 
-async function getAccountKey(email) {
+async function getAccountKey(
+  email
+) {
   const emailHash =
     await sha256Hex(
-      normalizeAccountEmail(email)
+      normalizeAccountEmail(
+        email
+      )
     );
 
   return `${ACCOUNT_KEY_PREFIX}${emailHash}`;
@@ -2415,22 +4074,31 @@ async function derivePasswordHash(
   const keyMaterial =
     await crypto.subtle.importKey(
       "raw",
+
       new TextEncoder().encode(
         password
       ),
+
       "PBKDF2",
       false,
-      ["deriveBits"]
+      [
+        "deriveBits",
+      ]
     );
 
   const derivedBits =
     await crypto.subtle.deriveBits(
       {
-        name: "PBKDF2",
+        name:
+          "PBKDF2",
+
         salt,
         iterations,
-        hash: "SHA-256",
+
+        hash:
+          "SHA-256",
       },
+
       keyMaterial,
       256
     );
@@ -2511,20 +4179,33 @@ function constantTimeBytesEqual(
 
   for (
     let index = 0;
-    index < maximumLength;
+    index <
+    maximumLength;
     index += 1
   ) {
     difference |=
-      (left[index] || 0) ^
-      (right[index] || 0);
+      (
+        left[index] ||
+        0
+      ) ^
+      (
+        right[index] ||
+        0
+      );
   }
 
-  return difference === 0;
+  return (
+    difference === 0
+  );
 }
 
-function randomBytes(length) {
+function randomBytes(
+  length
+) {
   const bytes =
-    new Uint8Array(length);
+    new Uint8Array(
+      length
+    );
 
   crypto.getRandomValues(
     bytes
@@ -2533,24 +4214,39 @@ function randomBytes(length) {
   return bytes;
 }
 
-async function sha256Hex(value) {
+async function sha256Hex(
+  value
+) {
   const digest =
     await crypto.subtle.digest(
       "SHA-256",
+
       new TextEncoder().encode(
-        String(value)
+        String(
+          value
+        )
       )
     );
 
   return Array.from(
-    new Uint8Array(digest)
-  )
-    .map((byte) =>
-      byte
-        .toString(16)
-        .padStart(2, "0")
+    new Uint8Array(
+      digest
     )
-    .join("");
+  )
+    .map(
+      (byte) =>
+        byte
+          .toString(
+            16
+          )
+          .padStart(
+            2,
+            "0"
+          )
+    )
+    .join(
+      ""
+    );
 }
 
 function getAccountSessionVersion(
@@ -2575,7 +4271,9 @@ function getPayloadSessionVersion(
   payload
 ) {
   const sessionVersion =
-    Number(payload?.sv);
+    Number(
+      payload?.sv
+    );
 
   return (
     Number.isSafeInteger(
@@ -2593,12 +4291,15 @@ async function createCustomerSessionToken(
 ) {
   const issuedAt =
     Math.floor(
-      Date.now() / 1000
+      Date.now() /
+        1000
     );
 
   const payload = {
     v: 1,
-    sub: account.id,
+
+    sub:
+      account.id,
 
     email:
       normalizeAccountEmail(
@@ -2606,27 +4307,32 @@ async function createCustomerSessionToken(
       ),
 
     firstName:
-      account.firstName || "",
+      account.firstName ||
+      "",
 
     lastName:
-      account.lastName || "",
+      account.lastName ||
+      "",
 
     researchAgreementAcceptedAt:
       account.researchAgreementAcceptedAt ||
       "",
 
     accountCreatedAt:
-      account.createdAt || "",
+      account.createdAt ||
+      "",
 
     accountUpdatedAt:
-      account.updatedAt || "",
+      account.updatedAt ||
+      "",
 
     sv:
       getAccountSessionVersion(
         account
       ),
 
-    iat: issuedAt,
+    iat:
+      issuedAt,
 
     exp:
       issuedAt +
@@ -2636,7 +4342,9 @@ async function createCustomerSessionToken(
   const encodedPayload =
     bytesToBase64Url(
       new TextEncoder().encode(
-        JSON.stringify(payload)
+        JSON.stringify(
+          payload
+        )
       )
     );
 
@@ -2655,9 +4363,12 @@ async function verifyCustomerSessionToken(
   token,
   env
 ) {
-  const parts = String(
-    token || ""
-  ).split(".");
+  const parts =
+    String(
+      token || ""
+    ).split(
+      "."
+    );
 
   if (
     parts.length !== 2 ||
@@ -2671,13 +4382,14 @@ async function verifyCustomerSessionToken(
   let signature;
 
   try {
-    payload = JSON.parse(
-      new TextDecoder().decode(
-        base64UrlToBytes(
-          parts[0]
+    payload =
+      JSON.parse(
+        new TextDecoder().decode(
+          base64UrlToBytes(
+            parts[0]
+          )
         )
-      )
-    );
+      );
 
     signature =
       base64UrlToBytes(
@@ -2697,18 +4409,22 @@ async function verifyCustomerSessionToken(
       "HMAC",
       key,
       signature,
+
       new TextEncoder().encode(
         parts[0]
       )
     );
 
-  if (!signatureValid) {
+  if (
+    !signatureValid
+  ) {
     return null;
   }
 
   const now =
     Math.floor(
-      Date.now() / 1000
+      Date.now() /
+        1000
     );
 
   if (
@@ -2716,13 +4432,21 @@ async function verifyCustomerSessionToken(
     !payload.sub ||
     !payload.email ||
     !Number.isFinite(
-      Number(payload.iat)
+      Number(
+        payload.iat
+      )
     ) ||
     !Number.isFinite(
-      Number(payload.exp)
+      Number(
+        payload.exp
+      )
     ) ||
-    Number(payload.exp) <= now ||
-    Number(payload.iat) >
+    Number(
+      payload.exp
+    ) <= now ||
+    Number(
+      payload.iat
+    ) >
       now + 300
   ) {
     return null;
@@ -2753,6 +4477,7 @@ async function signCustomerSessionPayload(
     await crypto.subtle.sign(
       "HMAC",
       key,
+
       new TextEncoder().encode(
         encodedPayload
       )
@@ -2769,6 +4494,7 @@ async function getCustomerSessionSigningKey(
   const secretMaterial =
     await crypto.subtle.digest(
       "SHA-256",
+
       new TextEncoder().encode(
         `304-customer-session-v1:${String(
           env.DOCUMENT_ADMIN_SECRET
@@ -2780,8 +4506,11 @@ async function getCustomerSessionSigningKey(
     "raw",
     secretMaterial,
     {
-      name: "HMAC",
-      hash: "SHA-256",
+      name:
+        "HMAC",
+
+      hash:
+        "SHA-256",
     },
     false,
     [
@@ -2791,7 +4520,9 @@ async function getCustomerSessionSigningKey(
   );
 }
 
-function getSessionToken(request) {
+function getSessionToken(
+  request
+) {
   const cookieHeader =
     request.headers.get(
       "Cookie"
@@ -2803,26 +4534,32 @@ function getSessionToken(request) {
     )
   ) {
     const separatorIndex =
-      cookie.indexOf("=");
+      cookie.indexOf(
+        "="
+      );
 
     if (
-      separatorIndex < 0
+      separatorIndex <
+      0
     ) {
       continue;
     }
 
-    const name = cookie
-      .slice(
-        0,
-        separatorIndex
-      )
-      .trim();
+    const name =
+      cookie
+        .slice(
+          0,
+          separatorIndex
+        )
+        .trim();
 
-    const value = cookie
-      .slice(
-        separatorIndex + 1
-      )
-      .trim();
+    const value =
+      cookie
+        .slice(
+          separatorIndex +
+            1
+        )
+        .trim();
 
     if (
       name ===
@@ -2835,15 +4572,21 @@ function getSessionToken(request) {
   return "";
 }
 
-function buildSessionCookie(token) {
+function buildSessionCookie(
+  token
+) {
   return [
     `${SESSION_COOKIE_NAME}=${token}`,
     "Path=/",
+
     `Max-Age=${SESSION_TTL_SECONDS}`,
+
     "HttpOnly",
     "Secure",
     "SameSite=Lax",
-  ].join("; ");
+  ].join(
+    "; "
+  );
 }
 
 function buildClearedSessionCookie() {
@@ -2851,46 +4594,84 @@ function buildClearedSessionCookie() {
     `${SESSION_COOKIE_NAME}=`,
     "Path=/",
     "Max-Age=0",
+
     "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+
     "HttpOnly",
     "Secure",
     "SameSite=Lax",
-  ].join("; ");
+  ].join(
+    "; "
+  );
 }
 
-function bytesToBase64Url(bytes) {
+function bytesToBase64Url(
+  bytes
+) {
   let binary = "";
 
-  for (const byte of bytes) {
+  for (
+    const byte of bytes
+  ) {
     binary +=
-      String.fromCharCode(byte);
+      String.fromCharCode(
+        byte
+      );
   }
 
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
+  return btoa(
+    binary
+  )
+    .replace(
+      /\+/g,
+      "-"
+    )
+    .replace(
+      /\//g,
+      "_"
+    )
+    .replace(
+      /=+$/g,
+      ""
+    );
 }
 
-function base64UrlToBytes(value) {
-  const normalized = String(
-    value || ""
-  )
-    .replace(/-/g, "+")
-    .replace(/_/g, "/");
+function base64UrlToBytes(
+  value
+) {
+  const normalized =
+    String(
+      value || ""
+    )
+      .replace(
+        /-/g,
+        "+"
+      )
+      .replace(
+        /_/g,
+        "/"
+      );
 
   const padded =
     normalized.padEnd(
       normalized.length +
-        ((4 -
-          (normalized.length %
-            4)) %
-          4),
+        (
+          (
+            4 -
+            (
+              normalized.length %
+              4
+            )
+          ) %
+          4
+        ),
       "="
     );
 
   const binary =
-    atob(padded);
+    atob(
+      padded
+    );
 
   const bytes =
     new Uint8Array(
@@ -2899,19 +4680,25 @@ function base64UrlToBytes(value) {
 
   for (
     let index = 0;
-    index < binary.length;
+    index <
+    binary.length;
     index += 1
   ) {
     bytes[index] =
-      binary.charCodeAt(index);
+      binary.charCodeAt(
+        index
+      );
   }
 
   return bytes;
 }
 
-function toPublicAccount(account) {
+function toPublicAccount(
+  account
+) {
   return {
-    id: account.id,
+    id:
+      account.id,
 
     firstName:
       account.firstName,
@@ -2947,7 +4734,8 @@ function toAdminAccountSummary(
   return {
     id:
       String(
-        account.id || ""
+        account.id ||
+          ""
       ),
 
     firstName:
@@ -2970,7 +4758,8 @@ function toAdminAccountSummary(
 
     status:
       cleanText(
-        account.status || "active",
+        account.status ||
+          "active",
         50
       ),
 
@@ -2979,10 +4768,12 @@ function toAdminAccountSummary(
       "",
 
     createdAt:
-      account.createdAt || "",
+      account.createdAt ||
+      "",
 
     updatedAt:
-      account.updatedAt || "",
+      account.updatedAt ||
+      "",
 
     mustChangePassword:
       Boolean(
@@ -2994,7 +4785,8 @@ function toAdminAccountSummary(
       "",
 
     passwordChangedAt:
-      account.passwordChangedAt || "",
+      account.passwordChangedAt ||
+      "",
 
     passwordResetCompletedAt:
       account.passwordResetCompletedAt ||
@@ -3007,7 +4799,8 @@ function toAdminAccountSummary(
       ),
 
     suspendedAt:
-      account.suspendedAt || "",
+      account.suspendedAt ||
+      "",
 
     lastSuspensionReason:
       cleanText(
@@ -3016,10 +4809,12 @@ function toAdminAccountSummary(
       ),
 
     lastSuspendedAt:
-      account.lastSuspendedAt || "",
+      account.lastSuspendedAt ||
+      "",
 
     reactivatedAt:
-      account.reactivatedAt || "",
+      account.reactivatedAt ||
+      "",
 
     accountStatusChangedAt:
       account.accountStatusChangedAt ||
@@ -3102,7 +4897,9 @@ function jsonResponse(
     });
 
   return new Response(
-    JSON.stringify(body),
+    JSON.stringify(
+      body
+    ),
     {
       status,
       headers,
@@ -3110,7 +4907,9 @@ function jsonResponse(
   );
 }
 
-function handleApiError(error) {
+function handleApiError(
+  error
+) {
   const status =
     error instanceof
     ApiRequestError
@@ -3146,7 +4945,9 @@ class ApiRequestError extends Error {
     message,
     status = 400
   ) {
-    super(message);
+    super(
+      message
+    );
 
     this.name =
       "ApiRequestError";
