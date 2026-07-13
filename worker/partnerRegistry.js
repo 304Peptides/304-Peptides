@@ -81,6 +81,27 @@ const MAX_REWARD_AMOUNT_CENTS = 1_000_000;
 const MAX_LEADERBOARD_ENTRIES = 100;
 const MAX_REWARD_HISTORY = 100;
 
+const CAMPAIGN_STATUSES = new Set([
+  "draft",
+  "published",
+  "archived",
+]);
+
+const DEFAULT_CAMPAIGN_DISCLAIMER =
+  "For laboratory research use only. Not for human consumption.";
+const MAX_CAMPAIGN_HISTORY = 100;
+const MAX_CAMPAIGN_SLUG_LENGTH = 60;
+const MAX_CAMPAIGN_TITLE_LENGTH = 150;
+const MAX_CAMPAIGN_SUMMARY_LENGTH = 500;
+const MAX_CAMPAIGN_HEADLINE_LENGTH = 200;
+const MAX_CAMPAIGN_COPY_LENGTH = 3000;
+const MAX_CAMPAIGN_SMS_LENGTH = 500;
+const MAX_CAMPAIGN_EMAIL_SUBJECT_LENGTH = 200;
+const MAX_CAMPAIGN_URL_LENGTH = 1000;
+const MAX_CAMPAIGN_DISCLAIMER_LENGTH = 1000;
+const MAX_CAMPAIGN_CTA_LENGTH = 80;
+const MAX_CAMPAIGN_DESTINATION_LENGTH = 200;
+
 export class PartnerRegistry extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -259,7 +280,46 @@ export class PartnerRegistry extends DurableObject {
 
       CREATE INDEX IF NOT EXISTS partner_rewards_status_index
         ON partner_rewards(status, awarded_at DESC);
+
+      CREATE TABLE IF NOT EXISTS partner_campaigns (
+        campaign_id TEXT PRIMARY KEY,
+        slug TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '',
+        headline TEXT NOT NULL DEFAULT '',
+        facebook_copy TEXT NOT NULL DEFAULT '',
+        instagram_copy TEXT NOT NULL DEFAULT '',
+        tiktok_copy TEXT NOT NULL DEFAULT '',
+        sms_copy TEXT NOT NULL DEFAULT '',
+        email_subject TEXT NOT NULL DEFAULT '',
+        email_copy TEXT NOT NULL DEFAULT '',
+        image_url TEXT NOT NULL DEFAULT '',
+        download_url TEXT NOT NULL DEFAULT '',
+        disclaimer TEXT NOT NULL DEFAULT '',
+        cta_label TEXT NOT NULL DEFAULT '',
+        destination_path TEXT NOT NULL DEFAULT '/checkout',
+        starts_at TEXT NOT NULL DEFAULT '',
+        ends_at TEXT NOT NULL DEFAULT '',
+        display_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        updated_by TEXT NOT NULL,
+        published_at TEXT NOT NULL DEFAULT '',
+        published_by TEXT NOT NULL DEFAULT '',
+        archived_at TEXT NOT NULL DEFAULT '',
+        archived_by TEXT NOT NULL DEFAULT ''
+      );
+
+      CREATE INDEX IF NOT EXISTS partner_campaigns_status_index
+        ON partner_campaigns(status, display_order ASC, updated_at DESC);
+
+      CREATE INDEX IF NOT EXISTS partner_campaigns_slug_index
+        ON partner_campaigns(slug);
     `);
+
+    this.ensureReferralCampaignColumns();
   }
 
   ensureCommissionRateColumn() {
@@ -276,6 +336,26 @@ export class PartnerRegistry extends DurableObject {
         `ALTER TABLE partner_applications
          ADD COLUMN commission_rate_bps INTEGER NOT NULL DEFAULT ${DEFAULT_COMMISSION_RATE_BPS}`
       );
+    }
+  }
+
+  ensureReferralCampaignColumns() {
+    const columns = this.sql
+      .exec("PRAGMA table_info(partner_referrals)")
+      .toArray();
+
+    const names = new Set(columns.map((column) => column.name));
+
+    for (const [name, definition] of [
+      ["campaign_id", "TEXT NOT NULL DEFAULT ''"],
+      ["campaign_slug", "TEXT NOT NULL DEFAULT ''"],
+      ["campaign_title", "TEXT NOT NULL DEFAULT ''"],
+    ]) {
+      if (!names.has(name)) {
+        this.sql.exec(
+          `ALTER TABLE partner_referrals ADD COLUMN ${name} ${definition}`
+        );
+      }
     }
   }
 
@@ -388,6 +468,26 @@ export class PartnerRegistry extends DurableObject {
 
       if (url.pathname === "/admin/rewards/issue" && request.method === "POST") {
         return this.issueReward(request);
+      }
+
+      if (url.pathname === "/partner/campaigns" && request.method === "GET") {
+        return this.getPartnerCampaigns(url);
+      }
+
+      if (url.pathname === "/campaign/validate" && request.method === "GET") {
+        return this.validateCampaign(url);
+      }
+
+      if (url.pathname === "/admin/campaigns" && request.method === "GET") {
+        return this.listAdminCampaigns();
+      }
+
+      if (url.pathname === "/admin/campaigns/save" && request.method === "POST") {
+        return this.saveCampaign(request);
+      }
+
+      if (url.pathname === "/admin/campaigns/status" && request.method === "POST") {
+        return this.updateCampaignStatus(request);
       }
 
       throw new RegistryError("Partner registry route not found.", 404);
@@ -596,6 +696,9 @@ export class PartnerRegistry extends DurableObject {
       url.searchParams.get("customerAccountId"),
       150
     );
+    const submittedCampaignSlug = normalizeOptionalCampaignSlug(
+      url.searchParams.get("campaign")
+    );
 
     if (!code) {
       throw new RegistryError("A referral code is required.", 400);
@@ -627,6 +730,10 @@ export class PartnerRegistry extends DurableObject {
       });
     }
 
+    const campaign = submittedCampaignSlug
+      ? this.findActiveCampaignBySlug(submittedCampaignSlug)
+      : null;
+
     return jsonResponse({
       success: true,
       valid: true,
@@ -634,6 +741,9 @@ export class PartnerRegistry extends DurableObject {
       reason: "active",
       message: "Referral code applied. The order subtotal is unchanged.",
       commissionRateBps: partner.commissionRateBps,
+      campaignRequested: Boolean(submittedCampaignSlug),
+      campaignValid: Boolean(campaign),
+      campaign: campaign ? toCustomerCampaign(campaign) : null,
     });
   }
 
@@ -648,6 +758,7 @@ export class PartnerRegistry extends DurableObject {
       100
     );
     const orderSubtotalCents = normalizeMoneyToCents(payload.orderSubtotal);
+    const campaignSlug = normalizeOptionalCampaignSlug(payload.campaignSlug);
 
     if (!orderId || !code || !customerAccountId) {
       throw new RegistryError(
@@ -668,6 +779,10 @@ export class PartnerRegistry extends DurableObject {
         409
       );
     }
+
+    const campaign = campaignSlug
+      ? this.findActiveCampaignBySlug(campaignSlug)
+      : null;
 
     const now = new Date().toISOString();
     const referralStatus = classifyReferralStatus(orderStatus);
@@ -734,8 +849,11 @@ export class PartnerRegistry extends DurableObject {
             created_at,
             updated_at,
             earned_at,
-            voided_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            voided_at,
+            campaign_id,
+            campaign_slug,
+            campaign_title
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           orderId,
           partner.accountId,
           partner.code,
@@ -749,7 +867,10 @@ export class PartnerRegistry extends DurableObject {
           now,
           now,
           timestamps.earnedAt,
-          timestamps.voidedAt
+          timestamps.voidedAt,
+          campaign?.campaignId || "",
+          campaign?.slug || "",
+          campaign?.title || ""
         );
       }
 
@@ -1739,6 +1860,372 @@ export class PartnerRegistry extends DurableObject {
     });
   }
 
+  getPartnerCampaigns(url) {
+    const accountId = cleanText(url.searchParams.get("accountId"), 150);
+
+    if (!accountId) {
+      throw new RegistryError("A partner account ID is required.", 400);
+    }
+
+    const application = this.findApplication(accountId);
+
+    if (!application || application.status !== "approved") {
+      return jsonResponse({
+        success: true,
+        application,
+        campaigns: [],
+      });
+    }
+
+    const campaigns = this.listCampaignRows({ activeOnly: true }).map(
+      toCustomerCampaign
+    );
+
+    return jsonResponse({
+      success: true,
+      application,
+      campaigns,
+    });
+  }
+
+  validateCampaign(url) {
+    const slug = normalizeOptionalCampaignSlug(url.searchParams.get("slug"));
+
+    if (!slug) {
+      throw new RegistryError("A campaign slug is required.", 400);
+    }
+
+    const campaign = this.findActiveCampaignBySlug(slug);
+
+    return jsonResponse({
+      success: true,
+      valid: Boolean(campaign),
+      campaign: campaign ? toCustomerCampaign(campaign) : null,
+      message: campaign
+        ? "The marketing campaign is active."
+        : "That marketing campaign is no longer active.",
+    });
+  }
+
+  listAdminCampaigns() {
+    const campaigns = this.listCampaignRows({ activeOnly: false });
+
+    return jsonResponse({
+      success: true,
+      campaigns,
+      records: campaigns,
+      count: campaigns.length,
+    });
+  }
+
+  async saveCampaign(request) {
+    const payload = await readJson(request);
+    const campaignId = cleanText(payload.campaignId, 120);
+    const existing = campaignId ? this.findCampaign(campaignId) : null;
+
+    if (campaignId && !existing) {
+      throw new RegistryError("Marketing campaign not found.", 404);
+    }
+
+    const campaign = normalizeCampaign(payload, existing);
+    const updatedBy = cleanText(
+      payload.updatedBy || "authorized administrator",
+      254
+    );
+    const now = new Date().toISOString();
+
+    try {
+      this.ctx.storage.transactionSync(() => {
+        if (existing) {
+          this.sql.exec(
+            `UPDATE partner_campaigns
+             SET slug = ?,
+                 title = ?,
+                 summary = ?,
+                 headline = ?,
+                 facebook_copy = ?,
+                 instagram_copy = ?,
+                 tiktok_copy = ?,
+                 sms_copy = ?,
+                 email_subject = ?,
+                 email_copy = ?,
+                 image_url = ?,
+                 download_url = ?,
+                 disclaimer = ?,
+                 cta_label = ?,
+                 destination_path = ?,
+                 starts_at = ?,
+                 ends_at = ?,
+                 display_order = ?,
+                 updated_at = ?,
+                 updated_by = ?
+             WHERE campaign_id = ?`,
+            campaign.slug,
+            campaign.title,
+            campaign.summary,
+            campaign.headline,
+            campaign.facebookCopy,
+            campaign.instagramCopy,
+            campaign.tiktokCopy,
+            campaign.smsCopy,
+            campaign.emailSubject,
+            campaign.emailCopy,
+            campaign.imageUrl,
+            campaign.downloadUrl,
+            campaign.disclaimer,
+            campaign.ctaLabel,
+            campaign.destinationPath,
+            campaign.startsAt,
+            campaign.endsAt,
+            campaign.displayOrder,
+            now,
+            updatedBy,
+            existing.campaignId
+          );
+        } else {
+          const newCampaignId = createCampaignId();
+
+          this.sql.exec(
+            `INSERT INTO partner_campaigns (
+               campaign_id,
+               slug,
+               title,
+               status,
+               summary,
+               headline,
+               facebook_copy,
+               instagram_copy,
+               tiktok_copy,
+               sms_copy,
+               email_subject,
+               email_copy,
+               image_url,
+               download_url,
+               disclaimer,
+               cta_label,
+               destination_path,
+               starts_at,
+               ends_at,
+               display_order,
+               created_at,
+               created_by,
+               updated_at,
+               updated_by
+             ) VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            newCampaignId,
+            campaign.slug,
+            campaign.title,
+            campaign.summary,
+            campaign.headline,
+            campaign.facebookCopy,
+            campaign.instagramCopy,
+            campaign.tiktokCopy,
+            campaign.smsCopy,
+            campaign.emailSubject,
+            campaign.emailCopy,
+            campaign.imageUrl,
+            campaign.downloadUrl,
+            campaign.disclaimer,
+            campaign.ctaLabel,
+            campaign.destinationPath,
+            campaign.startsAt,
+            campaign.endsAt,
+            campaign.displayOrder,
+            now,
+            updatedBy,
+            now,
+            updatedBy
+          );
+        }
+      });
+    } catch (error) {
+      if (/unique constraint failed/i.test(String(error?.message || error))) {
+        throw new RegistryError(
+          "That campaign slug is already in use. Choose another slug.",
+          409
+        );
+      }
+
+      throw error;
+    }
+
+    const saved = existing
+      ? this.findCampaign(existing.campaignId)
+      : this.findCampaignBySlug(campaign.slug);
+
+    return jsonResponse(
+      {
+        success: true,
+        campaign: saved,
+        message: existing
+          ? "The marketing campaign draft was updated."
+          : "The marketing campaign draft was created.",
+      },
+      existing ? 200 : 201
+    );
+  }
+
+  async updateCampaignStatus(request) {
+    const payload = await readJson(request);
+    const campaignId = cleanText(payload.campaignId, 120);
+    const status = normalizeCampaignStatus(payload.status);
+    const changedBy = cleanText(
+      payload.changedBy || "authorized administrator",
+      254
+    );
+
+    if (!campaignId) {
+      throw new RegistryError("A campaign ID is required.", 400);
+    }
+
+    const campaign = this.findCampaign(campaignId);
+
+    if (!campaign) {
+      throw new RegistryError("Marketing campaign not found.", 404);
+    }
+
+    if (status === "published") {
+      validateCampaignForPublishing(campaign);
+    }
+
+    const now = new Date().toISOString();
+    const publishedAt =
+      status === "published" ? campaign.publishedAt || now : campaign.publishedAt;
+    const publishedBy =
+      status === "published" ? changedBy : campaign.publishedBy;
+    const archivedAt = status === "archived" ? now : "";
+    const archivedBy = status === "archived" ? changedBy : "";
+
+    this.sql.exec(
+      `UPDATE partner_campaigns
+       SET status = ?,
+           updated_at = ?,
+           updated_by = ?,
+           published_at = ?,
+           published_by = ?,
+           archived_at = ?,
+           archived_by = ?
+       WHERE campaign_id = ?`,
+      status,
+      now,
+      changedBy,
+      publishedAt,
+      publishedBy,
+      archivedAt,
+      archivedBy,
+      campaignId
+    );
+
+    return jsonResponse({
+      success: true,
+      campaign: this.findCampaign(campaignId),
+      message:
+        status === "published"
+          ? "The marketing campaign is now published to approved partners."
+          : status === "archived"
+          ? "The marketing campaign was removed from the Partner Marketing Center."
+          : "The marketing campaign was returned to draft status.",
+    });
+  }
+
+  listCampaignRows({ activeOnly = false } = {}) {
+    const now = new Date().toISOString();
+    const rows = activeOnly
+      ? this.sql
+          .exec(
+            `SELECT c.*,
+                    COUNT(r.order_id) AS referral_count,
+                    SUM(CASE WHEN r.referral_status = 'earned' THEN 1 ELSE 0 END) AS earned_referral_count,
+                    SUM(CASE WHEN r.referral_status = 'earned' THEN r.order_subtotal_cents ELSE 0 END) AS earned_revenue_cents,
+                    SUM(CASE WHEN r.referral_status = 'earned' THEN r.commission_amount_cents ELSE 0 END) AS earned_commission_cents
+             FROM partner_campaigns c
+             LEFT JOIN partner_referrals r
+               ON r.campaign_id = c.campaign_id
+             WHERE c.status = 'published'
+               AND (c.starts_at = '' OR c.starts_at <= ?)
+               AND (c.ends_at = '' OR c.ends_at > ?)
+             GROUP BY c.campaign_id
+             ORDER BY c.display_order ASC, c.published_at DESC, c.updated_at DESC
+             LIMIT ?`,
+            now,
+            now,
+            MAX_CAMPAIGN_HISTORY
+          )
+          .toArray()
+      : this.sql
+          .exec(
+            `SELECT c.*,
+                    COUNT(r.order_id) AS referral_count,
+                    SUM(CASE WHEN r.referral_status = 'earned' THEN 1 ELSE 0 END) AS earned_referral_count,
+                    SUM(CASE WHEN r.referral_status = 'earned' THEN r.order_subtotal_cents ELSE 0 END) AS earned_revenue_cents,
+                    SUM(CASE WHEN r.referral_status = 'earned' THEN r.commission_amount_cents ELSE 0 END) AS earned_commission_cents
+             FROM partner_campaigns c
+             LEFT JOIN partner_referrals r
+               ON r.campaign_id = c.campaign_id
+             GROUP BY c.campaign_id
+             ORDER BY
+               CASE c.status
+                 WHEN 'published' THEN 0
+                 WHEN 'draft' THEN 1
+                 ELSE 2
+               END,
+               c.display_order ASC,
+               c.updated_at DESC
+             LIMIT ?`,
+            MAX_CAMPAIGN_HISTORY
+          )
+          .toArray();
+
+    return rows.map(mapCampaignRow);
+  }
+
+  findCampaign(campaignId) {
+    const rows = this.sql
+      .exec(
+        `SELECT c.*,
+                COUNT(r.order_id) AS referral_count,
+                SUM(CASE WHEN r.referral_status = 'earned' THEN 1 ELSE 0 END) AS earned_referral_count,
+                SUM(CASE WHEN r.referral_status = 'earned' THEN r.order_subtotal_cents ELSE 0 END) AS earned_revenue_cents,
+                SUM(CASE WHEN r.referral_status = 'earned' THEN r.commission_amount_cents ELSE 0 END) AS earned_commission_cents
+         FROM partner_campaigns c
+         LEFT JOIN partner_referrals r
+           ON r.campaign_id = c.campaign_id
+         WHERE c.campaign_id = ?
+         GROUP BY c.campaign_id
+         LIMIT 1`,
+        campaignId
+      )
+      .toArray();
+
+    return rows.length ? mapCampaignRow(rows[0]) : null;
+  }
+
+  findCampaignBySlug(slug) {
+    const rows = this.sql
+      .exec(
+        `SELECT c.*,
+                COUNT(r.order_id) AS referral_count,
+                SUM(CASE WHEN r.referral_status = 'earned' THEN 1 ELSE 0 END) AS earned_referral_count,
+                SUM(CASE WHEN r.referral_status = 'earned' THEN r.order_subtotal_cents ELSE 0 END) AS earned_revenue_cents,
+                SUM(CASE WHEN r.referral_status = 'earned' THEN r.commission_amount_cents ELSE 0 END) AS earned_commission_cents
+         FROM partner_campaigns c
+         LEFT JOIN partner_referrals r
+           ON r.campaign_id = c.campaign_id
+         WHERE c.slug = ? COLLATE NOCASE
+         GROUP BY c.campaign_id
+         LIMIT 1`,
+        slug
+      )
+      .toArray();
+
+    return rows.length ? mapCampaignRow(rows[0]) : null;
+  }
+
+  findActiveCampaignBySlug(slug) {
+    const campaign = this.findCampaignBySlug(slug);
+    return campaign && isCampaignActive(campaign) ? campaign : null;
+  }
+
   buildLeaderboard(periodType, periodKey, metric) {
     const period = periodBounds(periodType, periodKey);
     const settings = this.readLeaderboardSettings();
@@ -2548,6 +3035,285 @@ function createRewardId(periodType, periodKey) {
     .toUpperCase()}`;
 }
 
+function normalizeCampaign(payload, existing = null) {
+  const startsAt = normalizeOptionalCampaignDate(
+    payload.startsAt ?? existing?.startsAt
+  );
+  const endsAt = normalizeOptionalCampaignDate(
+    payload.endsAt ?? existing?.endsAt
+  );
+
+  if (startsAt && endsAt && endsAt <= startsAt) {
+    throw new RegistryError(
+      "The campaign end date must be later than the start date.",
+      400
+    );
+  }
+
+  const campaign = {
+    slug: normalizeCampaignSlug(payload.slug || existing?.slug),
+    title: cleanText(payload.title ?? existing?.title, MAX_CAMPAIGN_TITLE_LENGTH),
+    summary: cleanMultilineText(
+      payload.summary ?? existing?.summary,
+      MAX_CAMPAIGN_SUMMARY_LENGTH
+    ),
+    headline: cleanText(
+      payload.headline ?? existing?.headline,
+      MAX_CAMPAIGN_HEADLINE_LENGTH
+    ),
+    facebookCopy: cleanMultilineText(
+      payload.facebookCopy ?? existing?.facebookCopy,
+      MAX_CAMPAIGN_COPY_LENGTH
+    ),
+    instagramCopy: cleanMultilineText(
+      payload.instagramCopy ?? existing?.instagramCopy,
+      MAX_CAMPAIGN_COPY_LENGTH
+    ),
+    tiktokCopy: cleanMultilineText(
+      payload.tiktokCopy ?? existing?.tiktokCopy,
+      MAX_CAMPAIGN_COPY_LENGTH
+    ),
+    smsCopy: cleanMultilineText(
+      payload.smsCopy ?? existing?.smsCopy,
+      MAX_CAMPAIGN_SMS_LENGTH
+    ),
+    emailSubject: cleanText(
+      payload.emailSubject ?? existing?.emailSubject,
+      MAX_CAMPAIGN_EMAIL_SUBJECT_LENGTH
+    ),
+    emailCopy: cleanMultilineText(
+      payload.emailCopy ?? existing?.emailCopy,
+      MAX_CAMPAIGN_COPY_LENGTH
+    ),
+    imageUrl: normalizeOptionalHttpUrl(
+      payload.imageUrl ?? existing?.imageUrl,
+      MAX_CAMPAIGN_URL_LENGTH,
+      "campaign image"
+    ),
+    downloadUrl: normalizeOptionalHttpUrl(
+      payload.downloadUrl ?? existing?.downloadUrl,
+      MAX_CAMPAIGN_URL_LENGTH,
+      "campaign download"
+    ),
+    disclaimer: cleanMultilineText(
+      payload.disclaimer ?? existing?.disclaimer ?? DEFAULT_CAMPAIGN_DISCLAIMER,
+      MAX_CAMPAIGN_DISCLAIMER_LENGTH
+    ),
+    ctaLabel: cleanText(
+      payload.ctaLabel ?? existing?.ctaLabel ?? "Research Catalog",
+      MAX_CAMPAIGN_CTA_LENGTH
+    ),
+    destinationPath: normalizeCampaignDestination(
+      payload.destinationPath ?? existing?.destinationPath ?? "/checkout"
+    ),
+    startsAt,
+    endsAt,
+    displayOrder: normalizeCampaignDisplayOrder(
+      payload.displayOrder ?? existing?.displayOrder ?? 0
+    ),
+  };
+
+  if (!campaign.slug || !campaign.title) {
+    throw new RegistryError(
+      "A campaign slug and title are required.",
+      400
+    );
+  }
+
+  return campaign;
+}
+
+function normalizeCampaignSlug(value) {
+  const slug = cleanText(value, MAX_CAMPAIGN_SLUG_LENGTH).toLowerCase();
+
+  if (
+    slug.length < 3 ||
+    !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)
+  ) {
+    throw new RegistryError(
+      "Campaign slugs must contain 3–60 lowercase letters, numbers, or single hyphens.",
+      400
+    );
+  }
+
+  return slug;
+}
+
+function normalizeOptionalCampaignSlug(value) {
+  const cleaned = cleanText(value, MAX_CAMPAIGN_SLUG_LENGTH).toLowerCase();
+  return cleaned ? normalizeCampaignSlug(cleaned) : "";
+}
+
+function normalizeCampaignStatus(value) {
+  const status = cleanText(value, 30).toLowerCase();
+
+  if (!CAMPAIGN_STATUSES.has(status)) {
+    throw new RegistryError("Choose draft, published, or archived.", 400);
+  }
+
+  return status;
+}
+
+function normalizeOptionalCampaignDate(value) {
+  if (!value) return "";
+  const parsed = new Date(String(value));
+
+  if (Number.isNaN(parsed.getTime())) {
+    throw new RegistryError("A campaign date is invalid.", 400);
+  }
+
+  return parsed.toISOString();
+}
+
+function normalizeOptionalHttpUrl(value, maximumLength, label) {
+  const cleaned = cleanText(value, maximumLength);
+  if (!cleaned) return "";
+
+  let parsed;
+  try {
+    parsed = new URL(cleaned);
+  } catch {
+    throw new RegistryError(`Enter a complete ${label} URL.`, 400);
+  }
+
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new RegistryError(`The ${label} URL must use HTTP or HTTPS.`, 400);
+  }
+
+  return parsed.toString().slice(0, maximumLength);
+}
+
+function normalizeCampaignDestination(value) {
+  const destination = cleanText(value, MAX_CAMPAIGN_DESTINATION_LENGTH);
+
+  if (!destination.startsWith('/') || destination.startsWith('//')) {
+    throw new RegistryError(
+      "The campaign destination must be an internal path beginning with one slash.",
+      400
+    );
+  }
+
+  return destination;
+}
+
+function normalizeCampaignDisplayOrder(value) {
+  const order = Number(value);
+  if (!Number.isInteger(order) || order < -1000 || order > 1000) {
+    throw new RegistryError(
+      "Campaign display order must be a whole number from -1000 to 1000.",
+      400
+    );
+  }
+  return order;
+}
+
+function validateCampaignForPublishing(campaign) {
+  if (!campaign.title || !campaign.headline || !campaign.disclaimer) {
+    throw new RegistryError(
+      "Add a title, headline, and research-use disclaimer before publishing.",
+      400
+    );
+  }
+
+  if (
+    !campaign.facebookCopy &&
+    !campaign.instagramCopy &&
+    !campaign.tiktokCopy &&
+    !campaign.smsCopy &&
+    !campaign.emailCopy
+  ) {
+    throw new RegistryError(
+      "Add copy for at least one marketing channel before publishing.",
+      400
+    );
+  }
+}
+
+function isCampaignActive(campaign, now = new Date()) {
+  if (!campaign || campaign.status !== "published") return false;
+  const time = now.getTime();
+  const starts = campaign.startsAt ? new Date(campaign.startsAt).getTime() : -Infinity;
+  const ends = campaign.endsAt ? new Date(campaign.endsAt).getTime() : Infinity;
+  return time >= starts && time < ends;
+}
+
+function createCampaignId() {
+  return `CAMPAIGN-${Date.now()}-${crypto
+    .randomUUID()
+    .split("-")[0]
+    .toUpperCase()}`;
+}
+
+function mapCampaignRow(row) {
+  const status = cleanText(row.status, 30).toLowerCase();
+  const campaign = {
+    campaignId: row.campaign_id,
+    slug: row.slug,
+    title: row.title,
+    status: CAMPAIGN_STATUSES.has(status) ? status : "draft",
+    summary: row.summary || "",
+    headline: row.headline || "",
+    facebookCopy: row.facebook_copy || "",
+    instagramCopy: row.instagram_copy || "",
+    tiktokCopy: row.tiktok_copy || "",
+    smsCopy: row.sms_copy || "",
+    emailSubject: row.email_subject || "",
+    emailCopy: row.email_copy || "",
+    imageUrl: row.image_url || "",
+    downloadUrl: row.download_url || "",
+    disclaimer: row.disclaimer || "",
+    ctaLabel: row.cta_label || "",
+    destinationPath: row.destination_path || "/checkout",
+    startsAt: row.starts_at || "",
+    endsAt: row.ends_at || "",
+    displayOrder: Number(row.display_order || 0),
+    createdAt: row.created_at || "",
+    createdBy: row.created_by || "",
+    updatedAt: row.updated_at || "",
+    updatedBy: row.updated_by || "",
+    publishedAt: row.published_at || "",
+    publishedBy: row.published_by || "",
+    archivedAt: row.archived_at || "",
+    archivedBy: row.archived_by || "",
+    referralCount: Number(row.referral_count || 0),
+    earnedReferralCount: Number(row.earned_referral_count || 0),
+    earnedRevenueCents: Number(row.earned_revenue_cents || 0),
+    earnedCommissionCents: Number(row.earned_commission_cents || 0),
+  };
+
+  return {
+    ...campaign,
+    active: isCampaignActive(campaign),
+  };
+}
+
+function toCustomerCampaign(campaign) {
+  if (!campaign) return null;
+
+  return {
+    campaignId: campaign.campaignId,
+    slug: campaign.slug,
+    title: campaign.title,
+    summary: campaign.summary,
+    headline: campaign.headline,
+    facebookCopy: campaign.facebookCopy,
+    instagramCopy: campaign.instagramCopy,
+    tiktokCopy: campaign.tiktokCopy,
+    smsCopy: campaign.smsCopy,
+    emailSubject: campaign.emailSubject,
+    emailCopy: campaign.emailCopy,
+    imageUrl: campaign.imageUrl,
+    downloadUrl: campaign.downloadUrl,
+    disclaimer: campaign.disclaimer,
+    ctaLabel: campaign.ctaLabel,
+    destinationPath: campaign.destinationPath,
+    startsAt: campaign.startsAt,
+    endsAt: campaign.endsAt,
+    displayOrder: campaign.displayOrder,
+    active: Boolean(campaign.active),
+  };
+}
+
 function normalizeApplication(payload) {
   const application = {
     accountId: cleanText(payload.accountId, 150),
@@ -2654,6 +3420,9 @@ function mapReferralRow(row) {
     payoutReferenceNumber: cleanText(row.payout_reference_number, 150),
     payoutPaidAt: row.payout_paid_at || "",
     payoutCreatedAt: row.payout_created_at || "",
+    campaignId: cleanText(row.campaign_id, 120),
+    campaignSlug: cleanText(row.campaign_slug, MAX_CAMPAIGN_SLUG_LENGTH),
+    campaignTitle: cleanText(row.campaign_title, MAX_CAMPAIGN_TITLE_LENGTH),
     requiresAdjustment: Boolean(payoutId && referralStatus === "voided"),
   };
 }
@@ -2678,6 +3447,8 @@ function mapCustomerReferralRow(row) {
     payoutType: referral.payoutType,
     payoutMethod: referral.payoutMethod,
     payoutPaidAt: referral.payoutPaidAt,
+    campaignSlug: referral.campaignSlug,
+    campaignTitle: referral.campaignTitle,
     requiresAdjustment: referral.requiresAdjustment,
   };
 }

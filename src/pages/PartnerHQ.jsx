@@ -39,6 +39,35 @@ const EMPTY_LEADERBOARD_SETTINGS = {
   updatedBy: "",
 };
 
+const CAMPAIGN_FILTERS = [
+  ["all", "All Campaigns"],
+  ["draft", "Drafts"],
+  ["published", "Published"],
+  ["archived", "Archived"],
+];
+
+const EMPTY_CAMPAIGN_FORM = {
+  campaignId: "",
+  slug: "",
+  title: "",
+  summary: "",
+  headline: "",
+  facebookCopy: "",
+  instagramCopy: "",
+  tiktokCopy: "",
+  smsCopy: "",
+  emailSubject: "",
+  emailCopy: "",
+  imageUrl: "",
+  downloadUrl: "",
+  disclaimer: "For laboratory research use only. Not for human consumption.",
+  ctaLabel: "Research Catalog",
+  destinationPath: "/checkout",
+  startsAt: "",
+  endsAt: "",
+  displayOrder: "0",
+};
+
 function getStoredSecret() {
   try {
     return window.sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
@@ -205,6 +234,48 @@ function normalizeRewards(records) {
     );
 }
 
+function normalizeCampaigns(records) {
+  const priority = { published: 0, draft: 1, archived: 2 };
+  return (Array.isArray(records) ? records : [])
+    .filter((record) => record && typeof record === "object")
+    .map((record) => ({
+      ...record,
+      slug: String(record.slug || "").toLowerCase(),
+      status: String(record.status || "draft").toLowerCase(),
+      displayOrder: Number(record.displayOrder || 0),
+      referralCount: Number(record.referralCount || 0),
+      earnedReferralCount: Number(record.earnedReferralCount || 0),
+      earnedRevenueCents: Number(record.earnedRevenueCents || 0),
+      earnedCommissionCents: Number(record.earnedCommissionCents || 0),
+      active: Boolean(record.active),
+    }))
+    .sort((left, right) => {
+      const statusDifference =
+        (priority[left.status] ?? 9) - (priority[right.status] ?? 9);
+      if (statusDifference !== 0) return statusDifference;
+      if (left.displayOrder !== right.displayOrder) {
+        return left.displayOrder - right.displayOrder;
+      }
+      return String(right.updatedAt || right.createdAt || "").localeCompare(
+        String(left.updatedAt || left.createdAt || "")
+      );
+    });
+}
+
+function toLocalDateTimeInput(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function campaignStatusLabel(campaign) {
+  if (campaign.status === "published" && campaign.active) return "LIVE";
+  if (campaign.status === "published") return "SCHEDULED";
+  return String(campaign.status || "draft").toUpperCase();
+}
+
 function normalizeLeaderboardSettings(settings) {
   const source = settings && typeof settings === "object" ? settings : {};
   return {
@@ -357,6 +428,13 @@ function PartnerHQ({ onNavigate = () => {} }) {
     adminNotes: "",
   });
   const [isIssuingReward, setIsIssuingReward] = useState(false);
+  const [campaigns, setCampaigns] = useState([]);
+  const [campaignSearch, setCampaignSearch] = useState("");
+  const [campaignStatus, setCampaignStatus] = useState("all");
+  const [campaignForm, setCampaignForm] = useState(EMPTY_CAMPAIGN_FORM);
+  const [isEditingCampaign, setIsEditingCampaign] = useState(false);
+  const [isSavingCampaign, setIsSavingCampaign] = useState(false);
+  const [campaignStatusSavingId, setCampaignStatusSavingId] = useState("");
 
   const loadPartnerData = useCallback(
     async (secret = adminSecret) => {
@@ -377,6 +455,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
           payoutResponse,
           leaderboardResponse,
           rewardResponse,
+          campaignResponse,
         ] = await Promise.all([
           fetch("/api/admin/partner-applications", {
             method: "GET",
@@ -413,6 +492,12 @@ function PartnerHQ({ onNavigate = () => {} }) {
             credentials: "same-origin",
             cache: "no-store",
           }),
+          fetch("/api/admin/partner-campaigns", {
+            method: "GET",
+            headers,
+            credentials: "same-origin",
+            cache: "no-store",
+          }),
         ]);
         const [
           applicationResult,
@@ -420,12 +505,14 @@ function PartnerHQ({ onNavigate = () => {} }) {
           payoutResult,
           leaderboardResult,
           rewardResult,
+          campaignResult,
         ] = await Promise.all([
           readJson(applicationResponse),
           readJson(referralResponse),
           readJson(payoutResponse),
           readJson(leaderboardResponse),
           readJson(rewardResponse),
+          readJson(campaignResponse),
         ]);
         const nextApplications = normalizeApplications(
           applicationResult.applications || applicationResult.records || []
@@ -457,6 +544,11 @@ function PartnerHQ({ onNavigate = () => {} }) {
         setRewards(
           normalizeRewards(rewardResult.rewards || rewardResult.records || [])
         );
+        setCampaigns(
+          normalizeCampaigns(
+            campaignResult.campaigns || campaignResult.records || []
+          )
+        );
         setLeaderboardSettings(nextLeaderboardSettings);
         setLeaderboardDraft({
           ...nextLeaderboardSettings,
@@ -484,6 +576,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
         setPayouts([]);
         setLeaderboardEntries([]);
         setRewards([]);
+        setCampaigns([]);
         setLeaderboardReward(null);
         setIsReady(false);
         setLoadError(error.message || "Partner records could not be loaded.");
@@ -697,6 +790,30 @@ function PartnerHQ({ onNavigate = () => {} }) {
     );
   }, [payouts, payoutSearch]);
 
+  const filteredCampaigns = useMemo(() => {
+    const search = campaignSearch.trim().toLowerCase();
+    return campaigns.filter((campaign) => {
+      const matchesStatus =
+        campaignStatus === "all" || campaign.status === campaignStatus;
+      const searchableText = [
+        campaign.title,
+        campaign.slug,
+        campaign.headline,
+        campaign.summary,
+        campaign.facebookCopy,
+        campaign.instagramCopy,
+        campaign.tiktokCopy,
+        campaign.smsCopy,
+        campaign.emailSubject,
+        campaign.emailCopy,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return matchesStatus && (!search || searchableText.includes(search));
+    });
+  }, [campaigns, campaignSearch, campaignStatus]);
+
   const payoutEligibleReferrals = useMemo(() => {
     if (!payoutPartner) return [];
     return referrals.filter(
@@ -740,6 +857,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
     setPayouts([]);
     setLeaderboardEntries([]);
     setRewards([]);
+    setCampaigns([]);
     setLeaderboardReward(null);
     setRewardToIssue(null);
     setIsReady(false);
@@ -1336,6 +1454,177 @@ function PartnerHQ({ onNavigate = () => {} }) {
     } catch (error) {
       setActionError(error.message || "The reward could not be marked as issued.");
       setIsIssuingReward(false);
+    }
+  }
+
+  function startNewCampaign() {
+    setCampaignForm(EMPTY_CAMPAIGN_FORM);
+    setIsEditingCampaign(true);
+    setActionError("");
+    setActionMessage("");
+    window.setTimeout(() => {
+      document.getElementById("partner-campaign-editor")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 0);
+  }
+
+  function editCampaign(campaign) {
+    setCampaignForm({
+      campaignId: campaign.campaignId || "",
+      slug: campaign.slug || "",
+      title: campaign.title || "",
+      summary: campaign.summary || "",
+      headline: campaign.headline || "",
+      facebookCopy: campaign.facebookCopy || "",
+      instagramCopy: campaign.instagramCopy || "",
+      tiktokCopy: campaign.tiktokCopy || "",
+      smsCopy: campaign.smsCopy || "",
+      emailSubject: campaign.emailSubject || "",
+      emailCopy: campaign.emailCopy || "",
+      imageUrl: campaign.imageUrl || "",
+      downloadUrl: campaign.downloadUrl || "",
+      disclaimer:
+        campaign.disclaimer ||
+        "For laboratory research use only. Not for human consumption.",
+      ctaLabel: campaign.ctaLabel || "Research Catalog",
+      destinationPath: campaign.destinationPath || "/checkout",
+      startsAt: toLocalDateTimeInput(campaign.startsAt),
+      endsAt: toLocalDateTimeInput(campaign.endsAt),
+      displayOrder: String(campaign.displayOrder || 0),
+    });
+    setIsEditingCampaign(true);
+    setActionError("");
+    setActionMessage("");
+    window.setTimeout(() => {
+      document.getElementById("partner-campaign-editor")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 0);
+  }
+
+  function closeCampaignEditor() {
+    setCampaignForm(EMPTY_CAMPAIGN_FORM);
+    setIsEditingCampaign(false);
+    setIsSavingCampaign(false);
+  }
+
+  function updateCampaignForm(field, value) {
+    setCampaignForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function saveCampaign(event) {
+    event.preventDefault();
+    if (isSavingCampaign) return;
+
+    const slug = campaignForm.slug.trim().toLowerCase();
+    const title = campaignForm.title.trim();
+    const destinationPath = campaignForm.destinationPath.trim();
+
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) || slug.length < 3) {
+      setActionError(
+        "Campaign slugs must contain at least 3 lowercase letters, numbers, or single hyphens."
+      );
+      return;
+    }
+    if (!title) {
+      setActionError("Enter a campaign title.");
+      return;
+    }
+    if (!destinationPath.startsWith("/") || destinationPath.startsWith("//")) {
+      setActionError("The campaign destination must begin with one slash.");
+      return;
+    }
+
+    setIsSavingCampaign(true);
+    setActionError("");
+    setActionMessage("");
+
+    try {
+      const response = await fetch("/api/admin/partner-campaigns/save", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${adminSecret}`,
+        },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          ...campaignForm,
+          slug,
+          title,
+          destinationPath,
+          displayOrder: Number(campaignForm.displayOrder || 0),
+          startsAt: campaignForm.startsAt
+            ? new Date(campaignForm.startsAt).toISOString()
+            : "",
+          endsAt: campaignForm.endsAt
+            ? new Date(campaignForm.endsAt).toISOString()
+            : "",
+        }),
+      });
+      const result = await readJson(response);
+      const savedCampaign = result.campaign;
+      setCampaigns((current) =>
+        normalizeCampaigns([
+          savedCampaign,
+          ...current.filter(
+            (campaign) => campaign.campaignId !== savedCampaign.campaignId
+          ),
+        ])
+      );
+      setActionMessage(result.message || "The marketing campaign draft was saved.");
+      closeCampaignEditor();
+    } catch (error) {
+      setActionError(error.message || "The marketing campaign could not be saved.");
+      setIsSavingCampaign(false);
+    }
+  }
+
+  async function changeCampaignStatus(campaign, status) {
+    if (!campaign || campaignStatusSavingId) return;
+    const actionText =
+      status === "published"
+        ? "publish this campaign to approved partners"
+        : status === "archived"
+        ? "archive and remove this campaign from the Partner Marketing Center"
+        : "return this campaign to draft status";
+
+    if (!window.confirm(`Are you sure you want to ${actionText}?`)) return;
+
+    setCampaignStatusSavingId(campaign.campaignId);
+    setActionError("");
+    setActionMessage("");
+
+    try {
+      const response = await fetch("/api/admin/partner-campaigns/status", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${adminSecret}`,
+        },
+        credentials: "same-origin",
+        body: JSON.stringify({ campaignId: campaign.campaignId, status }),
+      });
+      const result = await readJson(response);
+      const updatedCampaign = result.campaign;
+      setCampaigns((current) =>
+        normalizeCampaigns(
+          current.map((record) =>
+            record.campaignId === updatedCampaign.campaignId
+              ? updatedCampaign
+              : record
+          )
+        )
+      );
+      setActionMessage(result.message || "The marketing campaign status was updated.");
+    } catch (error) {
+      setActionError(error.message || "The campaign status could not be updated.");
+    } finally {
+      setCampaignStatusSavingId("");
     }
   }
 
@@ -2348,6 +2637,259 @@ function PartnerHQ({ onNavigate = () => {} }) {
             )}
           </section>
 
+          {isEditingCampaign && (
+            <form
+              id="partner-campaign-editor"
+              className="partner-hq-panel partner-hq-campaign-editor"
+              onSubmit={saveCampaign}
+            >
+              <div className="partner-hq-section-heading">
+                <div>
+                  <p className="eyebrow">CAMPAIGN EDITOR</p>
+                  <h2>{campaignForm.campaignId ? "Edit Marketing Campaign" : "Create Marketing Campaign"}</h2>
+                  <p>
+                    Save the campaign as a draft first. Publish it only after the copy,
+                    links, dates, and research-use disclaimer are ready.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="partner-hq-link-button"
+                  disabled={isSavingCampaign}
+                  onClick={closeCampaignEditor}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="partner-hq-campaign-form-grid">
+                <label className="partner-hq-field">
+                  <span>Campaign Slug</span>
+                  <input
+                    type="text"
+                    maxLength="60"
+                    value={campaignForm.slug}
+                    disabled={isSavingCampaign}
+                    placeholder="summer-research"
+                    onChange={(event) =>
+                      updateCampaignForm(
+                        "slug",
+                        event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "")
+                      )
+                    }
+                  />
+                  <small>Used in tracked partner links. Lowercase letters, numbers, and single hyphens.</small>
+                </label>
+                <label className="partner-hq-field">
+                  <span>Campaign Title</span>
+                  <input
+                    type="text"
+                    maxLength="150"
+                    value={campaignForm.title}
+                    disabled={isSavingCampaign}
+                    placeholder="Summer Research Spotlight"
+                    onChange={(event) => updateCampaignForm("title", event.target.value)}
+                  />
+                </label>
+                <label className="partner-hq-field partner-hq-campaign-wide">
+                  <span>Summary</span>
+                  <textarea
+                    rows="3"
+                    maxLength="500"
+                    value={campaignForm.summary}
+                    disabled={isSavingCampaign}
+                    placeholder="Short internal and partner-facing summary of the campaign."
+                    onChange={(event) => updateCampaignForm("summary", event.target.value)}
+                  />
+                </label>
+                <label className="partner-hq-field partner-hq-campaign-wide">
+                  <span>Headline</span>
+                  <input
+                    type="text"
+                    maxLength="200"
+                    value={campaignForm.headline}
+                    disabled={isSavingCampaign}
+                    placeholder="Explore the latest 304 Peptides research catalog"
+                    onChange={(event) => updateCampaignForm("headline", event.target.value)}
+                  />
+                </label>
+
+                <label className="partner-hq-field">
+                  <span>Facebook Copy</span>
+                  <textarea rows="7" maxLength="3000" value={campaignForm.facebookCopy} disabled={isSavingCampaign} onChange={(event) => updateCampaignForm("facebookCopy", event.target.value)} />
+                </label>
+                <label className="partner-hq-field">
+                  <span>Instagram Copy</span>
+                  <textarea rows="7" maxLength="3000" value={campaignForm.instagramCopy} disabled={isSavingCampaign} onChange={(event) => updateCampaignForm("instagramCopy", event.target.value)} />
+                </label>
+                <label className="partner-hq-field">
+                  <span>TikTok Copy</span>
+                  <textarea rows="7" maxLength="3000" value={campaignForm.tiktokCopy} disabled={isSavingCampaign} onChange={(event) => updateCampaignForm("tiktokCopy", event.target.value)} />
+                </label>
+                <label className="partner-hq-field">
+                  <span>Text Message Copy</span>
+                  <textarea rows="7" maxLength="500" value={campaignForm.smsCopy} disabled={isSavingCampaign} onChange={(event) => updateCampaignForm("smsCopy", event.target.value)} />
+                </label>
+                <label className="partner-hq-field">
+                  <span>Email Subject</span>
+                  <input type="text" maxLength="200" value={campaignForm.emailSubject} disabled={isSavingCampaign} onChange={(event) => updateCampaignForm("emailSubject", event.target.value)} />
+                </label>
+                <label className="partner-hq-field partner-hq-campaign-wide">
+                  <span>Email Copy</span>
+                  <textarea rows="8" maxLength="3000" value={campaignForm.emailCopy} disabled={isSavingCampaign} onChange={(event) => updateCampaignForm("emailCopy", event.target.value)} />
+                </label>
+
+                <label className="partner-hq-field">
+                  <span>Campaign Image URL — Optional</span>
+                  <input type="url" maxLength="1000" value={campaignForm.imageUrl} disabled={isSavingCampaign} placeholder="https://..." onChange={(event) => updateCampaignForm("imageUrl", event.target.value)} />
+                </label>
+                <label className="partner-hq-field">
+                  <span>Downloadable Graphic URL — Optional</span>
+                  <input type="url" maxLength="1000" value={campaignForm.downloadUrl} disabled={isSavingCampaign} placeholder="https://..." onChange={(event) => updateCampaignForm("downloadUrl", event.target.value)} />
+                </label>
+                <label className="partner-hq-field">
+                  <span>Button Label</span>
+                  <input type="text" maxLength="80" value={campaignForm.ctaLabel} disabled={isSavingCampaign} onChange={(event) => updateCampaignForm("ctaLabel", event.target.value)} />
+                </label>
+                <label className="partner-hq-field">
+                  <span>Internal Destination Path</span>
+                  <input type="text" maxLength="200" value={campaignForm.destinationPath} disabled={isSavingCampaign} placeholder="/checkout" onChange={(event) => updateCampaignForm("destinationPath", event.target.value)} />
+                </label>
+                <label className="partner-hq-field">
+                  <span>Starts — Optional</span>
+                  <input type="datetime-local" value={campaignForm.startsAt} disabled={isSavingCampaign} onChange={(event) => updateCampaignForm("startsAt", event.target.value)} />
+                </label>
+                <label className="partner-hq-field">
+                  <span>Ends — Optional</span>
+                  <input type="datetime-local" value={campaignForm.endsAt} disabled={isSavingCampaign} onChange={(event) => updateCampaignForm("endsAt", event.target.value)} />
+                </label>
+                <label className="partner-hq-field">
+                  <span>Display Order</span>
+                  <input type="number" min="-1000" max="1000" step="1" value={campaignForm.displayOrder} disabled={isSavingCampaign} onChange={(event) => updateCampaignForm("displayOrder", event.target.value)} />
+                </label>
+                <label className="partner-hq-field partner-hq-campaign-wide">
+                  <span>Required Research-Use Disclaimer</span>
+                  <textarea rows="4" maxLength="1000" value={campaignForm.disclaimer} disabled={isSavingCampaign} onChange={(event) => updateCampaignForm("disclaimer", event.target.value)} />
+                </label>
+              </div>
+
+              <div className="partner-hq-button-row">
+                <button type="submit" className="primary-btn" disabled={isSavingCampaign}>
+                  {isSavingCampaign ? "Saving Campaign..." : "Save Campaign Draft"}
+                </button>
+                <button type="button" className="secondary-btn" disabled={isSavingCampaign} onClick={closeCampaignEditor}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+
+          <section className="partner-hq-panel">
+            <div className="partner-hq-section-heading">
+              <div>
+                <p className="eyebrow">PARTNER MARKETING CENTER</p>
+                <h2>Campaigns And Approved Creative</h2>
+                <p>
+                  Publish copy and assets to approved partners. Every shared campaign link
+                  keeps the partner code and campaign attribution attached to the order.
+                </p>
+              </div>
+              <button type="button" className="primary-btn" onClick={startNewCampaign}>
+                Create Campaign
+              </button>
+            </div>
+
+            <section className="partner-hq-referral-stats">
+              <StatCard label="Campaigns" value={campaigns.length} detail="All campaign records" />
+              <StatCard label="Published" value={campaigns.filter((campaign) => campaign.status === "published").length} detail="Visible when active" />
+              <StatCard label="Campaign Referrals" value={campaigns.reduce((total, campaign) => total + campaign.referralCount, 0)} detail="Attributed orders" />
+              <StatCard label="Earned Revenue" value={formatMoneyFromCents(campaigns.reduce((total, campaign) => total + campaign.earnedRevenueCents, 0))} detail="Campaign-attributed earned revenue" />
+            </section>
+
+            <div className="partner-hq-filters">
+              <label className="partner-hq-field">
+                <span>Search Campaigns</span>
+                <input type="search" value={campaignSearch} onChange={(event) => setCampaignSearch(event.target.value)} placeholder="Title, slug, headline, or copy" />
+              </label>
+              <label className="partner-hq-field">
+                <span>Status</span>
+                <select value={campaignStatus} onChange={(event) => setCampaignStatus(event.target.value)}>
+                  {CAMPAIGN_FILTERS.map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {filteredCampaigns.length === 0 ? (
+              <EmptyState title="No Marketing Campaigns" text="Create a draft campaign, add approved copy and assets, then publish it to partners." />
+            ) : (
+              <div className="partner-hq-stack">
+                {filteredCampaigns.map((campaign) => (
+                  <article key={campaign.campaignId} className={`partner-hq-campaign-card partner-hq-campaign-${campaign.status}`}>
+                    <div className="partner-hq-card-title-row">
+                      <div>
+                        <p className="eyebrow">{campaign.slug}</p>
+                        <h3>{campaign.title}</h3>
+                        <p className="partner-hq-muted">{campaign.headline || campaign.summary || "No campaign headline yet."}</p>
+                      </div>
+                      <span className={`partner-hq-status partner-hq-status-${campaign.status}`}>
+                        {campaignStatusLabel(campaign)}
+                      </span>
+                    </div>
+
+                    <div className="partner-hq-referral-grid">
+                      <QuickDetail label="Attributed Orders" value={campaign.referralCount} />
+                      <QuickDetail label="Earned Referrals" value={campaign.earnedReferralCount} />
+                      <QuickDetail label="Earned Revenue" value={formatMoneyFromCents(campaign.earnedRevenueCents)} />
+                      <QuickDetail label="Earned Commission" value={formatMoneyFromCents(campaign.earnedCommissionCents)} />
+                      <QuickDetail label="Starts" value={formatDate(campaign.startsAt)} />
+                      <QuickDetail label="Ends" value={formatDate(campaign.endsAt)} />
+                      <QuickDetail label="Destination" value={campaign.destinationPath || "/checkout"} />
+                      <QuickDetail label="Updated" value={formatDate(campaign.updatedAt)} />
+                    </div>
+
+                    {campaign.summary && <DetailBlock title="Campaign Summary" text={campaign.summary} />}
+                    <div className="partner-hq-campaign-channel-grid">
+                      {campaign.facebookCopy && <DetailBlock title="Facebook Copy" text={campaign.facebookCopy} />}
+                      {campaign.instagramCopy && <DetailBlock title="Instagram Copy" text={campaign.instagramCopy} />}
+                      {campaign.tiktokCopy && <DetailBlock title="TikTok Copy" text={campaign.tiktokCopy} />}
+                      {campaign.smsCopy && <DetailBlock title="Text Message Copy" text={campaign.smsCopy} />}
+                      {campaign.emailCopy && <DetailBlock title={`Email Copy${campaign.emailSubject ? ` — ${campaign.emailSubject}` : ""}`} text={campaign.emailCopy} />}
+                    </div>
+                    {campaign.disclaimer && <DetailBlock title="Required Disclaimer" text={campaign.disclaimer} highlighted />}
+
+                    <div className="partner-hq-campaign-links">
+                      {campaign.imageUrl && <a href={campaign.imageUrl} target="_blank" rel="noreferrer">Open Campaign Image</a>}
+                      {campaign.downloadUrl && <a href={campaign.downloadUrl} target="_blank" rel="noreferrer">Open Downloadable Asset</a>}
+                    </div>
+
+                    <div className="partner-hq-button-row">
+                      <button type="button" className="secondary-btn" onClick={() => editCampaign(campaign)}>
+                        Edit Campaign
+                      </button>
+                      {campaign.status !== "published" && (
+                        <button type="button" className="primary-btn" disabled={campaignStatusSavingId === campaign.campaignId} onClick={() => changeCampaignStatus(campaign, "published")}>
+                          {campaignStatusSavingId === campaign.campaignId ? "Saving..." : "Publish"}
+                        </button>
+                      )}
+                      {campaign.status === "published" && (
+                        <button type="button" className="secondary-btn" disabled={campaignStatusSavingId === campaign.campaignId} onClick={() => changeCampaignStatus(campaign, "draft")}>
+                          Return To Draft
+                        </button>
+                      )}
+                      {campaign.status !== "archived" && (
+                        <button type="button" className="partner-hq-danger-button" disabled={campaignStatusSavingId === campaign.campaignId} onClick={() => changeCampaignStatus(campaign, "archived")}>
+                          Archive
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
           <section className="partner-hq-panel">
             <div className="partner-hq-section-heading">
               <div>
@@ -2622,11 +3164,11 @@ function PartnerHQ({ onNavigate = () => {} }) {
 
           <section className="partner-hq-panel partner-hq-security-note">
             <p className="eyebrow">PROGRAM SECURITY</p>
-            <h2>Payouts And Winner Records Are Protected</h2>
+            <h2>Financial Records And Campaign Attribution Are Protected</h2>
             <p>
-              Each referral can enter only one payout, and each leaderboard period can have
-              only one recorded winner. Rule changes apply to future calculations and do not
-              rewrite existing payouts or reward history.
+              Each referral can enter only one payout, each leaderboard period can have one
+              recorded winner, and archived campaign records remain available for historical
+              attribution without being shown as active partner creative.
             </p>
           </section>
         </section>
@@ -2857,6 +3399,19 @@ const partnerHqCss = `
 .partner-hq-reward-issue-panel { border-color: rgba(185,130,255,.32); }
 .partner-hq-status-awarded { border: 1px solid rgba(255,190,80,.35); background: rgba(255,170,50,.1); color: #ffe0a8; }
 .partner-hq-status-issued { border: 1px solid rgba(72,214,151,.35); background: rgba(72,214,151,.1); color: #b8f3d8; }
+.partner-hq-campaign-editor { border-color: rgba(61,165,255,.32); }
+.partner-hq-campaign-form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; margin-top: 18px; }
+.partner-hq-campaign-wide { grid-column: 1 / -1; }
+.partner-hq-campaign-card { padding: 20px; border: 1px solid rgba(255,255,255,.1); border-radius: 18px; background: rgba(0,0,0,.17); }
+.partner-hq-campaign-draft { border-color: rgba(255,190,80,.24); }
+.partner-hq-campaign-published { border-color: rgba(72,214,151,.27); }
+.partner-hq-campaign-archived { border-color: rgba(255,95,95,.23); opacity: .88; }
+.partner-hq-campaign-channel-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 14px; }
+.partner-hq-campaign-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
+.partner-hq-campaign-links a { display: inline-flex; padding: 10px 13px; border: 1px solid rgba(61,165,255,.28); border-radius: 10px; color: #9ed8ff; text-decoration: none; font-weight: 800; }
+.partner-hq-status-draft { border: 1px solid rgba(255,190,80,.35); background: rgba(255,170,50,.1); color: #ffe0a8; }
+.partner-hq-status-published { border: 1px solid rgba(72,214,151,.35); background: rgba(72,214,151,.1); color: #b8f3d8; }
+.partner-hq-status-archived { border: 1px solid rgba(255,95,95,.38); background: rgba(255,70,70,.11); color: #ffcaca; }
 button:disabled { opacity: .5; cursor: not-allowed; }
 @media (max-width: 1080px) {
   .partner-hq-stats { grid-template-columns: repeat(3,minmax(0,1fr)); }
@@ -2885,7 +3440,10 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   .partner-hq-settings-panel,
   .partner-hq-threshold-form,
   .partner-hq-period-form,
-  .partner-hq-leaderboard-summary { grid-template-columns: minmax(0,1fr); }
+  .partner-hq-leaderboard-summary,
+  .partner-hq-campaign-form-grid,
+  .partner-hq-campaign-channel-grid { grid-template-columns: minmax(0,1fr); }
+  .partner-hq-campaign-wide { grid-column: auto; }
   .partner-hq-card-buttons { flex: 1 1 100%; }
   .partner-hq-hero > button,
   .partner-hq-button-row button,

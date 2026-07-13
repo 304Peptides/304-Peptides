@@ -40,10 +40,24 @@ const MAX_REWARD_PARTNER_NOTE_LENGTH = 1_000;
 const MAX_REWARD_ADMIN_NOTES_LENGTH = 2_000;
 const MAX_REWARD_ID_LENGTH = 120;
 const MAX_LEADERBOARD_MINIMUM_REFERRALS = 1_000;
+const MAX_CAMPAIGN_REQUEST_LENGTH = 40_000;
+const MAX_CAMPAIGN_ID_LENGTH = 120;
+const MAX_CAMPAIGN_SLUG_LENGTH = 60;
+const MAX_CAMPAIGN_TITLE_LENGTH = 150;
+const MAX_CAMPAIGN_SUMMARY_LENGTH = 500;
+const MAX_CAMPAIGN_HEADLINE_LENGTH = 200;
+const MAX_CAMPAIGN_COPY_LENGTH = 3_000;
+const MAX_CAMPAIGN_SMS_LENGTH = 500;
+const MAX_CAMPAIGN_EMAIL_SUBJECT_LENGTH = 200;
+const MAX_CAMPAIGN_URL_LENGTH = 1_000;
+const MAX_CAMPAIGN_DISCLAIMER_LENGTH = 1_000;
+const MAX_CAMPAIGN_CTA_LENGTH = 80;
+const MAX_CAMPAIGN_DESTINATION_LENGTH = 200;
 
 const LEADERBOARD_PERIOD_TYPES = new Set(["monthly", "quarterly"]);
 const LEADERBOARD_METRICS = new Set(["commission", "revenue", "referrals"]);
 const REWARD_TYPES = new Set(["cash", "store_credit", "swag"]);
+const CAMPAIGN_STATUSES = new Set(["draft", "published", "archived"]);
 
 const RESERVED_PARTNER_CODES = new Set([
   "304",
@@ -98,6 +112,14 @@ export default {
       return handlePartnerLeaderboardRequest(request, env, url);
     }
 
+    if (url.pathname === "/api/partner/campaigns") {
+      return handlePartnerCampaignsRequest(request, env);
+    }
+
+    if (url.pathname === "/api/campaign/validate") {
+      return handleCampaignValidationRequest(request, env, url);
+    }
+
     if (url.pathname === "/api/admin/partner-applications") {
       return handleAdminPartnerApplicationsRequest(request, env);
     }
@@ -144,6 +166,18 @@ export default {
 
     if (url.pathname === "/api/admin/partner-rewards/issue") {
       return handleAdminIssueRewardRequest(request, env);
+    }
+
+    if (url.pathname === "/api/admin/partner-campaigns") {
+      return handleAdminPartnerCampaignsRequest(request, env);
+    }
+
+    if (url.pathname === "/api/admin/partner-campaigns/save") {
+      return handleAdminSaveCampaignRequest(request, env);
+    }
+
+    if (url.pathname === "/api/admin/partner-campaigns/status") {
+      return handleAdminCampaignStatusRequest(request, env);
     }
 
     if (url.pathname === "/api/admin/accounts") {
@@ -552,14 +586,21 @@ async function handleReferralValidationRequest(request, env, url) {
 
     const sessionState = await requireEligibleCustomerSession(request, env);
     const code = validatePartnerCode(url.searchParams.get("code"));
+    const campaignSlug = normalizeOptionalCampaignSlug(
+      url.searchParams.get("campaign")
+    );
+    const search = new URLSearchParams({
+      code,
+      customerAccountId: sessionState.session.account.id,
+    });
+
+    if (campaignSlug) {
+      search.set("campaign", campaignSlug);
+    }
 
     const registryResponse = await partnerRegistryFetch(
       env,
-      `/referral/validate?code=${encodeURIComponent(
-        code
-      )}&customerAccountId=${encodeURIComponent(
-        sessionState.session.account.id
-      )}`,
+      `/referral/validate?${search.toString()}`,
       { method: "GET" }
     );
 
@@ -577,6 +618,9 @@ async function handleReferralValidationRequest(request, env, url) {
           : "That referral code is not active."),
       discountAmount: 0,
       changesOrderTotal: false,
+      campaignRequested: Boolean(result.campaignRequested),
+      campaignValid: Boolean(result.campaignValid),
+      campaign: toCustomerCampaignRecord(result.campaign),
     });
   } catch (error) {
     console.error("Referral validation request error:", error);
@@ -711,6 +755,72 @@ async function handlePartnerLeaderboardRequest(request, env, url) {
     });
   } catch (error) {
     console.error("Partner leaderboard request error:", error);
+    return handleApiError(error);
+  }
+}
+
+async function handlePartnerCampaignsRequest(request, env) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "GET") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    requireSameOrigin(request);
+
+    const sessionState = await requireEligibleCustomerSession(request, env);
+    const registryResponse = await partnerRegistryFetch(
+      env,
+      `/partner/campaigns?accountId=${encodeURIComponent(
+        sessionState.session.account.id
+      )}`,
+      { method: "GET" }
+    );
+    const result = await readInternalJsonResponse(registryResponse);
+
+    return jsonResponse({
+      success: true,
+      application: toCustomerPartnerApplication(result.application),
+      campaigns: Array.isArray(result.campaigns)
+        ? result.campaigns.map(toCustomerCampaignRecord).filter(Boolean)
+        : [],
+    });
+  } catch (error) {
+    console.error("Partner campaigns request error:", error);
+    return handleApiError(error);
+  }
+}
+
+async function handleCampaignValidationRequest(request, env, url) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "GET") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    requireSameOrigin(request);
+    const slug = validateCampaignSlug(url.searchParams.get("slug"));
+    const registryResponse = await partnerRegistryFetch(
+      env,
+      `/campaign/validate?slug=${encodeURIComponent(slug)}`,
+      { method: "GET" }
+    );
+    const result = await readInternalJsonResponse(registryResponse);
+
+    return jsonResponse({
+      success: true,
+      valid: Boolean(result.valid),
+      campaign: toCustomerCampaignRecord(result.campaign),
+      message:
+        result.message ||
+        (result.valid
+          ? "The marketing campaign is active."
+          : "That marketing campaign is no longer active."),
+    });
+  } catch (error) {
+    console.error("Campaign validation request error:", error);
     return handleApiError(error);
   }
 }
@@ -1307,9 +1417,11 @@ async function handleOrderWithReferral(request, env, context) {
       );
     }
 
-    const submittedReferralCode = await extractReferralCodeFromOrderRequest(
+    const submittedReferral = await extractReferralContextFromOrderRequest(
       request
     );
+    const submittedReferralCode = submittedReferral.code;
+    const submittedCampaignSlug = submittedReferral.campaignSlug;
 
     let validatedReferral = null;
 
@@ -1325,13 +1437,18 @@ async function handleOrderWithReferral(request, env, context) {
 
       const code = validatePartnerCode(submittedReferralCode);
 
+      const referralSearch = new URLSearchParams({
+        code,
+        customerAccountId: sessionState.session.account.id,
+      });
+
+      if (submittedCampaignSlug) {
+        referralSearch.set("campaign", submittedCampaignSlug);
+      }
+
       const registryResponse = await partnerRegistryFetch(
         env,
-        `/referral/validate?code=${encodeURIComponent(
-          code
-        )}&customerAccountId=${encodeURIComponent(
-          sessionState.session.account.id
-        )}`,
+        `/referral/validate?${referralSearch.toString()}`,
         { method: "GET" }
       );
 
@@ -1346,6 +1463,10 @@ async function handleOrderWithReferral(request, env, context) {
 
       validatedReferral = {
         code: cleanText(result.code || code, MAX_REFERRAL_CODE_LENGTH),
+        campaign:
+          result.campaignValid && result.campaign
+            ? toCustomerCampaignRecord(result.campaign)
+            : null,
       };
     }
 
@@ -1419,6 +1540,7 @@ async function handleOrderWithReferral(request, env, context) {
             orderSubtotal: Number(storedOrder.subtotal || 0),
             orderStatus:
               storedOrder.status || "Order Request Received",
+            campaignSlug: validatedReferral.campaign?.slug || "",
           }),
         }
       );
@@ -1442,6 +1564,12 @@ async function handleOrderWithReferral(request, env, context) {
             "Referral code recorded. The order subtotal was not changed.",
           changesOrderTotal: false,
           discountAmount: 0,
+          campaign: referral.campaignSlug
+            ? {
+                slug: referral.campaignSlug,
+                title: referral.campaignTitle,
+              }
+            : null,
         },
       });
     } catch (referralError) {
@@ -1551,23 +1679,31 @@ async function handleAdminOrderMutationWithReferralSync(
   }
 }
 
-async function extractReferralCodeFromOrderRequest(request) {
+async function extractReferralContextFromOrderRequest(request) {
   const contentType = request.headers.get("Content-Type") || "";
 
   if (!contentType.toLowerCase().includes("application/json")) {
-    return "";
+    return { code: "", campaignSlug: "" };
   }
 
   try {
     const payload = await request.clone().json();
     const submittedOrder = payload?.order || payload;
 
-    return cleanText(
-      submittedOrder?.referralCode || payload?.referralCode,
-      MAX_REFERRAL_CODE_LENGTH
-    ).toUpperCase();
+    return {
+      code: cleanText(
+        submittedOrder?.referralCode || payload?.referralCode,
+        MAX_REFERRAL_CODE_LENGTH
+      ).toUpperCase(),
+      campaignSlug: normalizeOptionalCampaignSlug(
+        submittedOrder?.campaignSlug ||
+          submittedOrder?.referralCampaign ||
+          payload?.campaignSlug ||
+          payload?.referralCampaign
+      ),
+    };
   } catch {
-    return "";
+    return { code: "", campaignSlug: "" };
   }
 }
 
@@ -1587,6 +1723,8 @@ async function attachReferralToStoredOrder(env, order, referral) {
     referralStatus: referral.referralStatus,
     referralCommissionRateBps: referral.commissionRateBps,
     referralCommissionAmountCents: referral.commissionAmountCents,
+    referralCampaignSlug: referral.campaignSlug || "",
+    referralCampaignTitle: referral.campaignTitle || "",
     referralAttachedAt: referral.createdAt || now,
     updatedAt: order.updatedAt || now,
   };
@@ -1606,6 +1744,7 @@ async function attachReferralToStoredOrder(env, order, referral) {
         updatedAt: updatedOrder.updatedAt || "",
         referralCode: referral.partnerCode,
         referralStatus: referral.referralStatus,
+        referralCampaignSlug: referral.campaignSlug || "",
       },
     }
   );
@@ -1706,6 +1845,14 @@ function toCustomerReferralRecord(referral) {
     payoutType: cleanText(referral.payoutType, 40),
     payoutMethod: cleanText(referral.payoutMethod, MAX_PAYOUT_METHOD_LENGTH),
     payoutPaidAt: referral.payoutPaidAt || "",
+    campaignSlug: cleanText(
+      referral.campaignSlug,
+      MAX_CAMPAIGN_SLUG_LENGTH
+    ).toLowerCase(),
+    campaignTitle: cleanText(
+      referral.campaignTitle,
+      MAX_CAMPAIGN_TITLE_LENGTH
+    ),
     requiresAdjustment: Boolean(referral.requiresAdjustment),
   };
 }
@@ -1734,6 +1881,7 @@ function toAdminReferralRecord(referral) {
       MAX_PAYOUT_REFERENCE_LENGTH
     ),
     payoutCreatedAt: referral.payoutCreatedAt || "",
+    campaignId: cleanText(referral.campaignId, MAX_CAMPAIGN_ID_LENGTH),
   };
 }
 
@@ -1821,6 +1969,79 @@ function toAdminPayoutRecord(payout) {
       MAX_PAYOUT_ADMIN_NOTES_LENGTH
     ),
     createdBy: cleanText(payout.createdBy, 254),
+  };
+}
+
+function toCustomerCampaignRecord(campaign) {
+  if (!campaign || typeof campaign !== "object") {
+    return null;
+  }
+
+  return {
+    campaignId: cleanText(campaign.campaignId, MAX_CAMPAIGN_ID_LENGTH),
+    slug: normalizeOptionalCampaignSlug(campaign.slug),
+    title: cleanText(campaign.title, MAX_CAMPAIGN_TITLE_LENGTH),
+    summary: cleanMultilineText(campaign.summary, MAX_CAMPAIGN_SUMMARY_LENGTH),
+    headline: cleanText(campaign.headline, MAX_CAMPAIGN_HEADLINE_LENGTH),
+    facebookCopy: cleanMultilineText(
+      campaign.facebookCopy,
+      MAX_CAMPAIGN_COPY_LENGTH
+    ),
+    instagramCopy: cleanMultilineText(
+      campaign.instagramCopy,
+      MAX_CAMPAIGN_COPY_LENGTH
+    ),
+    tiktokCopy: cleanMultilineText(
+      campaign.tiktokCopy,
+      MAX_CAMPAIGN_COPY_LENGTH
+    ),
+    smsCopy: cleanMultilineText(campaign.smsCopy, MAX_CAMPAIGN_SMS_LENGTH),
+    emailSubject: cleanText(
+      campaign.emailSubject,
+      MAX_CAMPAIGN_EMAIL_SUBJECT_LENGTH
+    ),
+    emailCopy: cleanMultilineText(
+      campaign.emailCopy,
+      MAX_CAMPAIGN_COPY_LENGTH
+    ),
+    imageUrl: safeOptionalHttpUrl(campaign.imageUrl, MAX_CAMPAIGN_URL_LENGTH),
+    downloadUrl: safeOptionalHttpUrl(
+      campaign.downloadUrl,
+      MAX_CAMPAIGN_URL_LENGTH
+    ),
+    disclaimer: cleanMultilineText(
+      campaign.disclaimer,
+      MAX_CAMPAIGN_DISCLAIMER_LENGTH
+    ),
+    ctaLabel: cleanText(campaign.ctaLabel, MAX_CAMPAIGN_CTA_LENGTH),
+    destinationPath: safeCampaignDestination(campaign.destinationPath),
+    startsAt: campaign.startsAt || "",
+    endsAt: campaign.endsAt || "",
+    displayOrder: Number(campaign.displayOrder || 0),
+    active: Boolean(campaign.active),
+  };
+}
+
+function toAdminCampaignRecord(campaign) {
+  if (!campaign || typeof campaign !== "object") {
+    return null;
+  }
+
+  return {
+    ...toCustomerCampaignRecord(campaign),
+    status: safeCampaignStatus(campaign.status),
+    createdAt: campaign.createdAt || "",
+    createdBy: cleanText(campaign.createdBy, 254),
+    updatedAt: campaign.updatedAt || "",
+    updatedBy: cleanText(campaign.updatedBy, 254),
+    publishedAt: campaign.publishedAt || "",
+    publishedBy: cleanText(campaign.publishedBy, 254),
+    archivedAt: campaign.archivedAt || "",
+    archivedBy: cleanText(campaign.archivedBy, 254),
+    referralCount: Number(campaign.referralCount || 0),
+    earnedReferralCount: Number(campaign.earnedReferralCount || 0),
+    earnedRevenueCents: Number(campaign.earnedRevenueCents || 0),
+    earnedCommissionCents: Number(campaign.earnedCommissionCents || 0),
   };
 }
 
@@ -1987,6 +2208,198 @@ function toAdminRewardRecord(reward) {
       MAX_REWARD_ADMIN_NOTES_LENGTH
     ),
   };
+}
+
+function normalizeCampaignSaveRequest(body) {
+  const campaignId = cleanText(body.campaignId, MAX_CAMPAIGN_ID_LENGTH);
+  const startsAt = normalizeOptionalCampaignDate(body.startsAt);
+  const endsAt = normalizeOptionalCampaignDate(body.endsAt);
+
+  if (startsAt && endsAt && new Date(endsAt).getTime() <= new Date(startsAt).getTime()) {
+    throw new ApiRequestError(
+      "The campaign end date must be later than the start date.",
+      400
+    );
+  }
+
+  return {
+    campaignId,
+    slug: validateCampaignSlug(body.slug),
+    title: requireCampaignText(
+      body.title,
+      MAX_CAMPAIGN_TITLE_LENGTH,
+      "A campaign title is required."
+    ),
+    summary: cleanMultilineText(body.summary, MAX_CAMPAIGN_SUMMARY_LENGTH),
+    headline: cleanText(body.headline, MAX_CAMPAIGN_HEADLINE_LENGTH),
+    facebookCopy: cleanMultilineText(
+      body.facebookCopy,
+      MAX_CAMPAIGN_COPY_LENGTH
+    ),
+    instagramCopy: cleanMultilineText(
+      body.instagramCopy,
+      MAX_CAMPAIGN_COPY_LENGTH
+    ),
+    tiktokCopy: cleanMultilineText(body.tiktokCopy, MAX_CAMPAIGN_COPY_LENGTH),
+    smsCopy: cleanMultilineText(body.smsCopy, MAX_CAMPAIGN_SMS_LENGTH),
+    emailSubject: cleanText(
+      body.emailSubject,
+      MAX_CAMPAIGN_EMAIL_SUBJECT_LENGTH
+    ),
+    emailCopy: cleanMultilineText(body.emailCopy, MAX_CAMPAIGN_COPY_LENGTH),
+    imageUrl: normalizeOptionalCampaignHttpUrl(body.imageUrl, "campaign image"),
+    downloadUrl: normalizeOptionalCampaignHttpUrl(
+      body.downloadUrl,
+      "campaign download"
+    ),
+    disclaimer: cleanMultilineText(
+      body.disclaimer,
+      MAX_CAMPAIGN_DISCLAIMER_LENGTH
+    ),
+    ctaLabel: cleanText(body.ctaLabel, MAX_CAMPAIGN_CTA_LENGTH),
+    destinationPath: normalizeCampaignDestination(body.destinationPath),
+    startsAt,
+    endsAt,
+    displayOrder: normalizeCampaignDisplayOrder(body.displayOrder),
+  };
+}
+
+function validateCampaignSlug(value) {
+  const slug = cleanText(value, MAX_CAMPAIGN_SLUG_LENGTH).toLowerCase();
+
+  if (slug.length < 3 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+    throw new ApiRequestError(
+      "Campaign slugs must contain 3–60 lowercase letters, numbers, or single hyphens.",
+      400
+    );
+  }
+
+  return slug;
+}
+
+function normalizeOptionalCampaignSlug(value) {
+  const cleaned = cleanText(value, MAX_CAMPAIGN_SLUG_LENGTH).toLowerCase();
+  return cleaned ? validateCampaignSlug(cleaned) : "";
+}
+
+function normalizeCampaignStatus(value) {
+  const status = cleanText(value, 30).toLowerCase();
+
+  if (!CAMPAIGN_STATUSES.has(status)) {
+    throw new ApiRequestError("Choose draft, published, or archived.", 400);
+  }
+
+  return status;
+}
+
+function safeCampaignStatus(value) {
+  const status = cleanText(value, 30).toLowerCase();
+  return CAMPAIGN_STATUSES.has(status) ? status : "draft";
+}
+
+function normalizeOptionalCampaignDate(value) {
+  if (!value) {
+    return "";
+  }
+
+  const parsed = new Date(String(value));
+
+  if (Number.isNaN(parsed.getTime())) {
+    throw new ApiRequestError("A campaign date is invalid.", 400);
+  }
+
+  return parsed.toISOString();
+}
+
+function normalizeOptionalCampaignHttpUrl(value, label) {
+  const cleaned = cleanText(value, MAX_CAMPAIGN_URL_LENGTH);
+
+  if (!cleaned) {
+    return "";
+  }
+
+  let parsed;
+
+  try {
+    parsed = new URL(cleaned);
+  } catch {
+    throw new ApiRequestError(`Enter a complete ${label} URL.`, 400);
+  }
+
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new ApiRequestError(
+      `The ${label} URL must use HTTP or HTTPS.`,
+      400
+    );
+  }
+
+  return parsed.toString().slice(0, MAX_CAMPAIGN_URL_LENGTH);
+}
+
+function safeOptionalHttpUrl(value, maximumLength) {
+  const cleaned = cleanText(value, maximumLength);
+
+  if (!cleaned) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(cleaned);
+    return ["http:", "https:"].includes(parsed.protocol)
+      ? parsed.toString().slice(0, maximumLength)
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+function normalizeCampaignDestination(value) {
+  const destination = cleanText(
+    value || "/checkout",
+    MAX_CAMPAIGN_DESTINATION_LENGTH
+  );
+
+  if (!destination.startsWith("/") || destination.startsWith("//")) {
+    throw new ApiRequestError(
+      "The campaign destination must be an internal path beginning with one slash.",
+      400
+    );
+  }
+
+  return destination;
+}
+
+function safeCampaignDestination(value) {
+  const destination = cleanText(
+    value || "/checkout",
+    MAX_CAMPAIGN_DESTINATION_LENGTH
+  );
+  return destination.startsWith("/") && !destination.startsWith("//")
+    ? destination
+    : "/checkout";
+}
+
+function normalizeCampaignDisplayOrder(value) {
+  const order = Number(value ?? 0);
+
+  if (!Number.isInteger(order) || order < -1000 || order > 1000) {
+    throw new ApiRequestError(
+      "Campaign display order must be a whole number from -1000 to 1000.",
+      400
+    );
+  }
+
+  return order;
+}
+
+function requireCampaignText(value, maximumLength, message) {
+  const cleaned = cleanText(value, maximumLength);
+
+  if (!cleaned) {
+    throw new ApiRequestError(message, 400);
+  }
+
+  return cleaned;
 }
 
 function normalizeLeaderboardSettingsRequest(body) {
@@ -2494,6 +2907,129 @@ function toAdminPartnerApplication(application) {
     ),
     lastStatusChangeAt: application.lastStatusChangeAt || "",
   };
+}
+
+async function handleAdminPartnerCampaignsRequest(request, env) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "GET") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    requireSameOrigin(request);
+    await requireAdminAuthorization(request, env);
+
+    const registryResponse = await partnerRegistryFetch(
+      env,
+      "/admin/campaigns",
+      { method: "GET" }
+    );
+    const result = await readInternalJsonResponse(registryResponse);
+    const campaigns = Array.isArray(result.campaigns)
+      ? result.campaigns.map(toAdminCampaignRecord).filter(Boolean)
+      : [];
+
+    return jsonResponse({
+      success: true,
+      campaigns,
+      records: campaigns,
+      count: campaigns.length,
+    });
+  } catch (error) {
+    console.error("Admin partner campaigns request error:", error);
+    return handleApiError(error);
+  }
+}
+
+async function handleAdminSaveCampaignRequest(request, env) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "POST") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    requireSameOrigin(request);
+    validateJsonContentType(request);
+    await requireAdminAuthorization(request, env);
+    await enforceAuthenticationRateLimit(request, env, "partner-campaign-save");
+
+    const body = await readJsonRequest(request, MAX_CAMPAIGN_REQUEST_LENGTH);
+    const payload = normalizeCampaignSaveRequest(body);
+    payload.updatedBy = getAdminIdentity(request);
+
+    const registryResponse = await partnerRegistryFetch(
+      env,
+      "/admin/campaigns/save",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }
+    );
+    const result = await readInternalJsonResponse(registryResponse);
+
+    return jsonResponse(
+      {
+        success: true,
+        campaign: toAdminCampaignRecord(result.campaign),
+        message:
+          result.message || "The marketing campaign draft was saved.",
+      },
+      result.campaign?.createdAt === result.campaign?.updatedAt ? 201 : 200
+    );
+  } catch (error) {
+    console.error("Admin save campaign request error:", error);
+    return handleApiError(error);
+  }
+}
+
+async function handleAdminCampaignStatusRequest(request, env) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "POST") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    requireSameOrigin(request);
+    validateJsonContentType(request);
+    await requireAdminAuthorization(request, env);
+    await enforceAuthenticationRateLimit(request, env, "partner-campaign-status");
+
+    const body = await readJsonRequest(request, MAX_AUTH_REQUEST_LENGTH);
+    const campaignId = cleanText(body.campaignId, MAX_CAMPAIGN_ID_LENGTH);
+    const status = normalizeCampaignStatus(body.status);
+
+    if (!campaignId) {
+      throw new ApiRequestError("A campaign ID is required.", 400);
+    }
+
+    const registryResponse = await partnerRegistryFetch(
+      env,
+      "/admin/campaigns/status",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          campaignId,
+          status,
+          changedBy: getAdminIdentity(request),
+        }),
+      }
+    );
+    const result = await readInternalJsonResponse(registryResponse);
+
+    return jsonResponse({
+      success: true,
+      campaign: toAdminCampaignRecord(result.campaign),
+      message: result.message || "The marketing campaign status was updated.",
+    });
+  } catch (error) {
+    console.error("Admin campaign status request error:", error);
+    return handleApiError(error);
+  }
 }
 
 async function handleAdminAccountDirectoryRequest(request, env) {

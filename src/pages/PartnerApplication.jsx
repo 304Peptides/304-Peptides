@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import QRCode from "qrcode";
 
 const platformOptions = [
   "Facebook",
@@ -77,6 +78,15 @@ const emptyLeaderboardData = {
   reward: null,
   rewards: [],
 };
+
+
+const CAMPAIGN_CHANNELS = [
+  ["facebookCopy", "Facebook"],
+  ["instagramCopy", "Instagram"],
+  ["tiktokCopy", "TikTok"],
+  ["smsCopy", "Text Message"],
+  ["emailCopy", "Email"],
+];
 
 function normalizeCode(value) {
   return String(value || "")
@@ -234,6 +244,58 @@ function buildReferralLink(code) {
   return `${window.location.origin}/checkout?ref=${encodeURIComponent(code)}`;
 }
 
+
+function buildCampaignReferralLink(code, campaign) {
+  if (!code || !campaign?.slug || typeof window === "undefined") return "";
+
+  const destination = campaign.destinationPath || "/checkout";
+  const url = new URL(destination, window.location.origin);
+  url.searchParams.set("ref", code);
+  url.searchParams.set("campaign", campaign.slug);
+  return url.toString();
+}
+
+function personalizeCampaignCopy(campaign, field, referralLink, partnerCode) {
+  const source = String(campaign?.[field] || "").trim();
+  if (!source) return "";
+
+  const disclaimer = String(campaign?.disclaimer || "").trim();
+  let result = source
+    .replace(/\{\{?REFERRAL_LINK\}?\}|\[REFERRAL_LINK\]/gi, referralLink)
+    .replace(/\{\{?PARTNER_CODE\}?\}|\[PARTNER_CODE\]/gi, partnerCode)
+    .replace(/\{\{?DISCLAIMER\}?\}|\[DISCLAIMER\]/gi, disclaimer);
+
+  if (referralLink && !result.includes(referralLink)) {
+    result = `${result}
+
+${referralLink}`;
+  }
+
+  if (disclaimer && !result.toLowerCase().includes(disclaimer.toLowerCase())) {
+    result = `${result}
+
+${disclaimer}`;
+  }
+
+  if (field === "emailCopy" && campaign.emailSubject) {
+    result = `Subject: ${campaign.emailSubject}
+
+${result}`;
+  }
+
+  return result.trim();
+}
+
+function formatCampaignAvailability(campaign) {
+  if (campaign?.startsAt && campaign?.endsAt) {
+    return `${formatDate(campaign.startsAt)} through ${formatDate(campaign.endsAt)}`;
+  }
+
+  if (campaign?.startsAt) return `Starts ${formatDate(campaign.startsAt)}`;
+  if (campaign?.endsAt) return `Available through ${formatDate(campaign.endsAt)}`;
+  return "Available while published";
+}
+
 async function copyText(value) {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);
@@ -266,6 +328,9 @@ function PartnerApplication({
   const [leaderboardData, setLeaderboardData] = useState(emptyLeaderboardData);
   const [isLeaderboardLoading, setIsLeaderboardLoading] = useState(false);
   const [leaderboardError, setLeaderboardError] = useState("");
+  const [campaigns, setCampaigns] = useState([]);
+  const [isCampaignsLoading, setIsCampaignsLoading] = useState(false);
+  const [campaignError, setCampaignError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -339,6 +404,34 @@ function PartnerApplication({
       );
     } finally {
       setIsLeaderboardLoading(false);
+    }
+  }
+
+  async function loadCampaigns() {
+    if (!isApproved) {
+      setCampaigns([]);
+      return;
+    }
+
+    setIsCampaignsLoading(true);
+    setCampaignError("");
+
+    try {
+      const response = await fetch("/api/partner/campaigns", {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+
+      const result = await readApiJson(response);
+      setCampaigns(Array.isArray(result.campaigns) ? result.campaigns : []);
+    } catch (error) {
+      setCampaignError(
+        error.message || "Partner marketing campaigns could not be loaded."
+      );
+    } finally {
+      setIsCampaignsLoading(false);
     }
   }
 
@@ -473,6 +566,16 @@ function PartnerApplication({
 
     loadLeaderboard(leaderboardPeriodType);
   }, [isApproved, isSuspended, leaderboardPeriodType]);
+
+
+  useEffect(() => {
+    if (!isApproved) {
+      setCampaigns([]);
+      return;
+    }
+
+    loadCampaigns();
+  }, [isApproved]);
 
   useEffect(() => {
     if (lockedApplication) return undefined;
@@ -836,6 +939,65 @@ function PartnerApplication({
             </div>
           </section>
 
+          <section className="partner-marketing-panel">
+            <div className="partner-section-heading">
+              <div>
+                <p className="eyebrow">PARTNER MARKETING CENTER</p>
+                <h2>Approved Campaigns And Creative</h2>
+                <p className="partner-marketing-intro">
+                  Use campaign-specific referral links, approved platform copy,
+                  downloadable graphics, and personalized QR codes. Campaign links
+                  keep your affiliate code attached and identify which creative
+                  generated the referral.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={loadCampaigns}
+                disabled={!isApproved || isCampaignsLoading}
+              >
+                {isCampaignsLoading ? "Refreshing..." : "Refresh Campaigns"}
+              </button>
+            </div>
+
+            {isSuspended ? (
+              <div className="partner-marketing-restricted">
+                <strong>Marketing Center access is paused</strong>
+                <p>
+                  Your existing referral and reward history remains available, but
+                  published campaign assets are unavailable while partner access is
+                  suspended.
+                </p>
+              </div>
+            ) : campaignError ? (
+              <div className="partner-error" role="alert">
+                {campaignError}
+              </div>
+            ) : isCampaignsLoading && campaigns.length === 0 ? (
+              <EmptyState
+                title="Loading Marketing Campaigns"
+                text="Retrieving approved campaign assets and personalized links."
+              />
+            ) : campaigns.length === 0 ? (
+              <EmptyState
+                title="No Published Campaigns"
+                text="Approved campaigns will appear here after 304 Peptides publishes them."
+              />
+            ) : (
+              <div className="partner-campaign-stack">
+                {campaigns.map((campaign) => (
+                  <CampaignCard
+                    key={campaign.campaignId || campaign.slug}
+                    campaign={campaign}
+                    partnerCode={application.code}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+
           <section className="partner-leaderboard-panel">
             <div className="partner-section-heading">
               <div>
@@ -1178,6 +1340,16 @@ function PartnerApplication({
                         <RecordBox
                           label="Order Status"
                           value={referral.orderStatus}
+                        />
+
+
+                        <RecordBox
+                          label="Campaign"
+                          value={
+                            referral.campaignTitle ||
+                            referral.campaignSlug ||
+                            "Direct referral"
+                          }
                         />
 
                         <RecordBox
@@ -1633,6 +1805,228 @@ function PartnerApplication({
         )}
       </section>
     </PageShell>
+  );
+}
+
+function CampaignCard({ campaign, partnerCode }) {
+  const availableChannels = CAMPAIGN_CHANNELS.filter(
+    ([field]) => String(campaign?.[field] || "").trim()
+  );
+  const [selectedField, setSelectedField] = useState(
+    availableChannels[0]?.[0] || ""
+  );
+  const [copyMessage, setCopyMessage] = useState("");
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const referralLink = useMemo(
+    () => buildCampaignReferralLink(partnerCode, campaign),
+    [partnerCode, campaign]
+  );
+  const personalizedCopy = useMemo(
+    () =>
+      selectedField
+        ? personalizeCampaignCopy(
+            campaign,
+            selectedField,
+            referralLink,
+            partnerCode
+          )
+        : "",
+    [campaign, selectedField, referralLink, partnerCode]
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    if (!referralLink) {
+      setQrDataUrl("");
+      return undefined;
+    }
+
+    QRCode.toDataURL(referralLink, {
+      width: 320,
+      margin: 2,
+      errorCorrectionLevel: "M",
+    })
+      .then((value) => {
+        if (active) setQrDataUrl(value);
+      })
+      .catch(() => {
+        if (active) setQrDataUrl("");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [referralLink]);
+
+  async function handleCopy(value, successText) {
+    setCopyMessage("");
+
+    try {
+      await copyText(value);
+      setCopyMessage(successText);
+    } catch {
+      setCopyMessage("Copy failed. Select the text and copy it manually.");
+    }
+  }
+
+  function downloadQrCode() {
+    if (!qrDataUrl) return;
+
+    const link = document.createElement("a");
+    link.href = qrDataUrl;
+    link.download = `${campaign.slug}-${partnerCode}-qr.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  const assetUrl = campaign.downloadUrl || campaign.imageUrl;
+
+  return (
+    <article className="partner-campaign-card">
+      <div className="partner-campaign-header">
+        <div>
+          <p className="eyebrow">{campaign.slug}</p>
+          <h3>{campaign.title}</h3>
+          <p>{campaign.summary || campaign.headline}</p>
+          <small>{formatCampaignAvailability(campaign)}</small>
+        </div>
+
+        <span className="partner-campaign-active-pill">Approved</span>
+      </div>
+
+      <div className="partner-campaign-content-grid">
+        <div className="partner-campaign-creative">
+          {campaign.imageUrl ? (
+            <img
+              src={campaign.imageUrl}
+              alt={campaign.title || "Partner campaign creative"}
+              loading="lazy"
+            />
+          ) : (
+            <div className="partner-campaign-image-placeholder">
+              <strong>{campaign.headline || campaign.title}</strong>
+              <span>Approved campaign creative</span>
+            </div>
+          )}
+
+          <div className="partner-campaign-button-row">
+            {assetUrl && (
+              <a
+                className="secondary-btn partner-anchor-button"
+                href={assetUrl}
+                target="_blank"
+                rel="noreferrer"
+                download
+              >
+                Download Graphic
+              </a>
+            )}
+
+            <a
+              className="secondary-btn partner-anchor-button"
+              href={referralLink}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open Campaign Link
+            </a>
+          </div>
+        </div>
+
+        <div className="partner-campaign-link-panel">
+          <p className="eyebrow">PERSONALIZED CAMPAIGN LINK</p>
+          <div className="partner-link-row">
+            <input
+              type="text"
+              value={referralLink}
+              readOnly
+              aria-label={`${campaign.title} referral link`}
+            />
+            <button
+              type="button"
+              className="primary-btn"
+              onClick={() => handleCopy(referralLink, "Campaign link copied.")}
+            >
+              Copy Link
+            </button>
+          </div>
+
+          <div className="partner-campaign-qr-row">
+            {qrDataUrl ? (
+              <img
+                src={qrDataUrl}
+                alt={`QR code for ${campaign.title}`}
+                className="partner-campaign-qr"
+              />
+            ) : (
+              <div className="partner-campaign-qr-placeholder">QR</div>
+            )}
+
+            <div>
+              <strong>Campaign QR Code</strong>
+              <p>
+                This QR code opens your personalized campaign link with both your
+                partner code and campaign attribution attached.
+              </p>
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={downloadQrCode}
+                disabled={!qrDataUrl}
+              >
+                Download QR
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {availableChannels.length > 0 && (
+        <section className="partner-campaign-copy-panel">
+          <div className="partner-campaign-channel-tabs" role="tablist">
+            {availableChannels.map(([field, label]) => (
+              <button
+                key={field}
+                type="button"
+                className={selectedField === field ? "active" : ""}
+                onClick={() => {
+                  setSelectedField(field);
+                  setCopyMessage("");
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <label className="partner-field">
+            <span>Approved Copy</span>
+            <textarea value={personalizedCopy} rows="8" readOnly />
+          </label>
+
+          <button
+            type="button"
+            className="primary-btn"
+            onClick={() => handleCopy(personalizedCopy, "Approved copy copied.")}
+          >
+            Copy Approved Copy
+          </button>
+        </section>
+      )}
+
+      <div className="partner-campaign-disclaimer">
+        <strong>Required research-use disclaimer</strong>
+        <p>{campaign.disclaimer}</p>
+      </div>
+
+      {copyMessage && (
+        <div className="partner-success" aria-live="polite">
+          {copyMessage}
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -2503,7 +2897,231 @@ button:disabled {
   cursor: not-allowed;
 }
 
+
+.partner-marketing-panel {
+  margin-top: 22px;
+  padding: 28px;
+  border: 1px solid rgba(61, 165, 255, .22);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(61, 165, 255, .11), transparent 36%),
+    rgba(255, 255, 255, .035);
+}
+
+.partner-marketing-intro {
+  max-width: 820px;
+  color: #aeb8c0;
+  line-height: 1.65;
+}
+
+.partner-marketing-restricted {
+  margin-top: 20px;
+  padding: 20px;
+  border: 1px solid rgba(255, 190, 80, .3);
+  border-radius: 16px;
+  background: rgba(255, 170, 50, .08);
+  color: #ffe0a8;
+}
+
+.partner-marketing-restricted p {
+  margin-top: 8px;
+  line-height: 1.6;
+}
+
+.partner-campaign-stack {
+  display: grid;
+  gap: 18px;
+  margin-top: 22px;
+}
+
+.partner-campaign-card {
+  padding: 22px;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 20px;
+  background: rgba(0, 0, 0, .18);
+}
+
+.partner-campaign-header,
+.partner-campaign-button-row,
+.partner-campaign-qr-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.partner-campaign-header {
+  align-items: flex-start;
+}
+
+.partner-campaign-header > div {
+  max-width: 850px;
+}
+
+.partner-campaign-header h3 {
+  margin: 5px 0 8px;
+  font-size: clamp(25px, 4vw, 34px);
+}
+
+.partner-campaign-header p {
+  color: #b4bec6;
+  line-height: 1.6;
+}
+
+.partner-campaign-header small {
+  display: inline-block;
+  margin-top: 8px;
+  color: #8f9aa2;
+}
+
+.partner-campaign-active-pill {
+  padding: 8px 12px;
+  border: 1px solid rgba(72, 214, 151, .35);
+  border-radius: 999px;
+  background: rgba(72, 214, 151, .1);
+  color: #b8f3d8;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+}
+
+.partner-campaign-content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, .9fr);
+  gap: 18px;
+  margin-top: 20px;
+}
+
+.partner-campaign-creative,
+.partner-campaign-link-panel,
+.partner-campaign-copy-panel,
+.partner-campaign-disclaimer {
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .025);
+}
+
+.partner-campaign-creative img,
+.partner-campaign-image-placeholder {
+  width: 100%;
+  min-height: 220px;
+  max-height: 430px;
+  border-radius: 14px;
+  object-fit: contain;
+  background: rgba(0, 0, 0, .28);
+}
+
+.partner-campaign-image-placeholder {
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  padding: 28px;
+  text-align: center;
+  color: #a8d9fb;
+}
+
+.partner-campaign-button-row {
+  justify-content: flex-start;
+  margin-top: 14px;
+}
+
+.partner-anchor-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.partner-campaign-link-panel .partner-link-row {
+  margin-top: 10px;
+}
+
+.partner-campaign-qr-row {
+  justify-content: flex-start;
+  align-items: flex-start;
+  margin-top: 18px;
+}
+
+.partner-campaign-qr,
+.partner-campaign-qr-placeholder {
+  width: 144px;
+  height: 144px;
+  flex: 0 0 144px;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.partner-campaign-qr-placeholder {
+  display: grid;
+  place-content: center;
+  color: #111;
+  font-weight: 900;
+}
+
+.partner-campaign-qr-row > div {
+  flex: 1 1 240px;
+}
+
+.partner-campaign-qr-row p {
+  margin: 7px 0 12px;
+  color: #aab5bd;
+  line-height: 1.55;
+}
+
+.partner-campaign-copy-panel {
+  margin-top: 18px;
+}
+
+.partner-campaign-channel-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.partner-campaign-channel-tabs button {
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .035);
+  color: #c4cdd4;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.partner-campaign-channel-tabs button.active {
+  border-color: rgba(61, 165, 255, .5);
+  background: rgba(61, 165, 255, .13);
+  color: #cfeeff;
+}
+
+.partner-campaign-copy-panel textarea {
+  min-height: 190px;
+  resize: vertical;
+}
+
+.partner-campaign-disclaimer {
+  margin-top: 18px;
+  border-color: rgba(255, 190, 80, .28);
+  background: rgba(255, 170, 50, .07);
+}
+
+.partner-campaign-disclaimer p {
+  margin-top: 8px;
+  color: #d4c59f;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 960px) {
+  .partner-campaign-content-grid {
+    grid-template-columns: 1fr;
+  }
+
   .partner-layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2525,6 +3143,18 @@ button:disabled {
 }
 
 @media (max-width: 680px) {
+  .partner-marketing-panel,
+  .partner-campaign-card {
+    padding: 18px;
+  }
+
+  .partner-campaign-qr,
+  .partner-campaign-qr-placeholder {
+    width: 118px;
+    height: 118px;
+    flex-basis: 118px;
+  }
+
   .partner-application-page {
     padding: 48px 12px;
   }
