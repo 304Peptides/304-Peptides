@@ -56,6 +56,28 @@ const emptyPayoutSettings = {
   updatedAt: "",
 };
 
+const emptyLeaderboardSettings = {
+  leaderboardMetric: "commission",
+  monthlyRewardEnabled: true,
+  monthlyRewardType: "store_credit",
+  monthlyRewardAmountCents: 5000,
+  monthlyMinimumReferrals: 1,
+  quarterlyRewardEnabled: true,
+  quarterlyRewardType: "swag",
+  quarterlyRewardAmountCents: 0,
+  quarterlyRewardDescription: "304 Peptides swag package",
+  quarterlyMinimumReferrals: 3,
+};
+
+const emptyLeaderboardData = {
+  period: null,
+  settings: emptyLeaderboardSettings,
+  entries: [],
+  currentPartner: null,
+  reward: null,
+  rewards: [],
+};
+
 function normalizeCode(value) {
   return String(value || "")
     .toUpperCase()
@@ -111,6 +133,76 @@ function formatPayoutType(value) {
   return String(value || "cash").toLowerCase() === "store_credit"
     ? "Store Credit"
     : "Cash Payment";
+}
+
+function formatRewardType(value) {
+  const normalized = String(value || "store_credit").toLowerCase();
+
+  if (normalized === "cash") return "Cash Reward";
+  if (normalized === "swag") return "Swag Reward";
+  return "Store Credit";
+}
+
+function formatMetricLabel(value) {
+  const normalized = String(value || "commission").toLowerCase();
+
+  if (normalized === "revenue") return "Earned Referral Revenue";
+  if (normalized === "referrals") return "Earned Referrals";
+  return "Earned Commission";
+}
+
+function formatLeaderboardScore(entry) {
+  if (!entry) return "No earned referrals yet";
+
+  if (entry.metric === "referrals") {
+    return `${Number(entry.referralCount || 0)} earned referral(s)`;
+  }
+
+  if (entry.metric === "revenue") {
+    return formatMoneyFromCents(entry.revenueCents);
+  }
+
+  return formatMoneyFromCents(entry.commissionCents);
+}
+
+function formatPeriodLabel(period) {
+  if (!period?.periodKey) return "Current period";
+
+  if (period.periodType === "quarterly") {
+    const match = /^(\d{4})-Q([1-4])$/.exec(period.periodKey);
+    return match ? `Q${match[2]} ${match[1]}` : period.periodKey;
+  }
+
+  const match = /^(\d{4})-(\d{2})$/.exec(period.periodKey);
+
+  if (!match) return period.periodKey;
+
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, 1);
+
+  return date.toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function describeReward(settings, periodType) {
+  const isQuarterly = periodType === "quarterly";
+  const enabled = isQuarterly
+    ? settings.quarterlyRewardEnabled
+    : settings.monthlyRewardEnabled;
+  const rewardType = isQuarterly
+    ? settings.quarterlyRewardType
+    : settings.monthlyRewardType;
+  const rewardAmountCents = isQuarterly
+    ? settings.quarterlyRewardAmountCents
+    : settings.monthlyRewardAmountCents;
+  const rewardDescription = isQuarterly
+    ? settings.quarterlyRewardDescription
+    : "";
+
+  if (!enabled) return "Reward currently disabled";
+  if (rewardType === "swag") return rewardDescription || "304 Peptides swag reward";
+  return `${formatMoneyFromCents(rewardAmountCents)} ${formatRewardType(rewardType).toLowerCase()}`;
 }
 
 async function readApiJson(response) {
@@ -170,6 +262,10 @@ function PartnerApplication({
   const [referrals, setReferrals] = useState([]);
   const [payouts, setPayouts] = useState([]);
   const [payoutSettings, setPayoutSettings] = useState(emptyPayoutSettings);
+  const [leaderboardPeriodType, setLeaderboardPeriodType] = useState("monthly");
+  const [leaderboardData, setLeaderboardData] = useState(emptyLeaderboardData);
+  const [isLeaderboardLoading, setIsLeaderboardLoading] = useState(false);
+  const [leaderboardError, setLeaderboardError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -209,6 +305,42 @@ function PartnerApplication({
       formData.promotionPlan.trim() &&
       formData.agreementAccepted
   );
+
+  async function loadLeaderboard(periodType = leaderboardPeriodType) {
+    setIsLeaderboardLoading(true);
+    setLeaderboardError("");
+
+    try {
+      const response = await fetch(
+        `/api/partner/leaderboard?periodType=${encodeURIComponent(periodType)}`,
+        {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          credentials: "same-origin",
+          cache: "no-store",
+        }
+      );
+
+      const result = await readApiJson(response);
+
+      setLeaderboardData({
+        ...emptyLeaderboardData,
+        ...result,
+        settings: {
+          ...emptyLeaderboardSettings,
+          ...(result.settings || {}),
+        },
+        entries: Array.isArray(result.entries) ? result.entries : [],
+        rewards: Array.isArray(result.rewards) ? result.rewards : [],
+      });
+    } catch (error) {
+      setLeaderboardError(
+        error.message || "Partner leaderboard data could not be loaded."
+      );
+    } finally {
+      setIsLeaderboardLoading(false);
+    }
+  }
 
   async function loadPartnerSummary() {
     setIsSummaryLoading(true);
@@ -335,6 +467,12 @@ function PartnerApplication({
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isApproved && !isSuspended) return;
+
+    loadLeaderboard(leaderboardPeriodType);
+  }, [isApproved, isSuspended, leaderboardPeriodType]);
 
   useEffect(() => {
     if (lockedApplication) return undefined;
@@ -520,6 +658,12 @@ function PartnerApplication({
     );
   }
 
+  function changeLeaderboardPeriod(periodType) {
+    if (periodType === leaderboardPeriodType || isLeaderboardLoading) return;
+
+    setLeaderboardPeriodType(periodType);
+  }
+
   if (isApproved || isSuspended) {
     return (
       <PageShell>
@@ -690,6 +834,288 @@ function PartnerApplication({
                 attribution credits the partner only and leaves the customer subtotal unchanged.
               </span>
             </div>
+          </section>
+
+          <section className="partner-leaderboard-panel">
+            <div className="partner-section-heading">
+              <div>
+                <p className="eyebrow">PARTNER LEADERBOARD</p>
+                <h2>{formatPeriodLabel(leaderboardData.period)}</h2>
+                <p className="partner-leaderboard-intro">
+                  Rankings use {formatMetricLabel(
+                    leaderboardData.settings.leaderboardMetric
+                  ).toLowerCase()}. Public rankings show partner codes and earned
+                  referral counts only. Your private totals appear in your own card.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => loadLeaderboard(leaderboardPeriodType)}
+                disabled={isLeaderboardLoading}
+              >
+                {isLeaderboardLoading ? "Refreshing..." : "Refresh Rankings"}
+              </button>
+            </div>
+
+            <div className="partner-period-tabs" role="tablist" aria-label="Leaderboard period">
+              <button
+                type="button"
+                className={leaderboardPeriodType === "monthly" ? "active" : ""}
+                onClick={() => changeLeaderboardPeriod("monthly")}
+                disabled={isLeaderboardLoading}
+              >
+                Monthly
+              </button>
+
+              <button
+                type="button"
+                className={leaderboardPeriodType === "quarterly" ? "active" : ""}
+                onClick={() => changeLeaderboardPeriod("quarterly")}
+                disabled={isLeaderboardLoading}
+              >
+                Quarterly
+              </button>
+            </div>
+
+            {leaderboardError && (
+              <div className="partner-error" role="alert">
+                {leaderboardError}
+              </div>
+            )}
+
+            <section className="partner-leaderboard-rule-card">
+              <div>
+                <span>Current Reward</span>
+                <strong>
+                  {describeReward(
+                    leaderboardData.settings,
+                    leaderboardPeriodType
+                  )}
+                </strong>
+              </div>
+
+              <div>
+                <span>Minimum To Qualify</span>
+                <strong>
+                  {leaderboardPeriodType === "quarterly"
+                    ? leaderboardData.settings.quarterlyMinimumReferrals
+                    : leaderboardData.settings.monthlyMinimumReferrals}{" "}
+                  earned referral(s)
+                </strong>
+              </div>
+
+              <div>
+                <span>Ranking Metric</span>
+                <strong>
+                  {formatMetricLabel(leaderboardData.settings.leaderboardMetric)}
+                </strong>
+              </div>
+            </section>
+
+            <section className="partner-own-rank-card">
+              <div>
+                <p className="eyebrow">YOUR CURRENT POSITION</p>
+                <h3>
+                  {leaderboardData.currentPartner?.rank
+                    ? `Rank #${leaderboardData.currentPartner.rank}`
+                    : "Not Ranked Yet"}
+                </h3>
+                <p>
+                  {leaderboardData.currentPartner
+                    ? formatLeaderboardScore(leaderboardData.currentPartner)
+                    : "Earned referrals within this period will place your code on the leaderboard."}
+                </p>
+              </div>
+
+              <div className="partner-own-rank-metrics">
+                <RecordBox
+                  label="Earned Referrals"
+                  value={String(leaderboardData.currentPartner?.referralCount || 0)}
+                />
+
+                <RecordBox
+                  label="Earned Commission"
+                  value={formatMoneyFromCents(
+                    leaderboardData.currentPartner?.commissionCents || 0
+                  )}
+                />
+
+                <RecordBox
+                  label="Referral Revenue"
+                  value={formatMoneyFromCents(
+                    leaderboardData.currentPartner?.revenueCents || 0
+                  )}
+                />
+
+                <RecordBox
+                  label="Qualification"
+                  value={
+                    leaderboardData.currentPartner?.eligible
+                      ? "Qualified"
+                      : "Not Yet Qualified"
+                  }
+                />
+              </div>
+            </section>
+
+            {leaderboardData.reward && (
+              <section className="partner-period-winner-card">
+                <div>
+                  <p className="eyebrow">RECORDED WINNER</p>
+                  <h3>#{leaderboardData.reward.rank} {leaderboardData.reward.partnerCode}</h3>
+                  <p>
+                    {formatRewardType(leaderboardData.reward.rewardType)}
+                    {leaderboardData.reward.rewardType !== "swag"
+                      ? ` — ${formatMoneyFromCents(
+                          leaderboardData.reward.rewardAmountCents
+                        )}`
+                      : leaderboardData.reward.rewardDescription
+                      ? ` — ${leaderboardData.reward.rewardDescription}`
+                      : ""}
+                  </p>
+                </div>
+
+                <RewardStatusPill status={leaderboardData.reward.status} />
+              </section>
+            )}
+
+            {isLeaderboardLoading && leaderboardData.entries.length === 0 ? (
+              <EmptyState
+                title="Loading Leaderboard"
+                text="Retrieving current partner rankings."
+              />
+            ) : leaderboardData.entries.length === 0 ? (
+              <EmptyState
+                title="No Ranked Partners Yet"
+                text="The leaderboard will populate after partners earn qualifying referrals during this period."
+              />
+            ) : (
+              <div className="partner-leaderboard-list">
+                {leaderboardData.entries.map((entry) => {
+                  const isCurrentPartner =
+                    entry.partnerCode === application.code;
+
+                  return (
+                    <article
+                      key={`${entry.rank}-${entry.partnerCode}`}
+                      className={`partner-leaderboard-row ${
+                        isCurrentPartner ? "partner-leaderboard-row-current" : ""
+                      }`}
+                    >
+                      <strong className="partner-leaderboard-rank">
+                        #{entry.rank}
+                      </strong>
+
+                      <div>
+                        <span>{entry.partnerCode}</span>
+                        <small>
+                          {entry.referralCount} earned referral(s)
+                          {isCurrentPartner ? " · Your code" : ""}
+                        </small>
+                      </div>
+
+                      <span
+                        className={`partner-qualification-pill ${
+                          entry.eligible ? "qualified" : "building"
+                        }`}
+                      >
+                        {entry.eligible ? "Qualified" : "Building"}
+                      </span>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          <section className="partner-reward-history-panel">
+            <div className="partner-section-heading">
+              <div>
+                <p className="eyebrow">REWARD HISTORY</p>
+                <h2>Your Leaderboard Rewards</h2>
+              </div>
+
+              <span>
+                <strong>{leaderboardData.rewards.length}</strong> reward record(s)
+              </span>
+            </div>
+
+            {leaderboardData.rewards.length === 0 ? (
+              <EmptyState
+                title="No Rewards Recorded"
+                text="Monthly and quarterly leaderboard rewards will appear here after a winner is officially recorded."
+              />
+            ) : (
+              <div className="partner-reward-history-stack">
+                {leaderboardData.rewards.map((reward) => (
+                  <article
+                    key={reward.rewardId}
+                    className="partner-reward-history-card"
+                  >
+                    <div className="partner-referral-heading">
+                      <div>
+                        <p className="eyebrow">
+                          {reward.periodType === "quarterly"
+                            ? "QUARTERLY REWARD"
+                            : "MONTHLY REWARD"}
+                        </p>
+                        <h3>{reward.periodKey}</h3>
+                        <p>Awarded {formatDate(reward.awardedAt)}</p>
+                      </div>
+
+                      <RewardStatusPill status={reward.status} />
+                    </div>
+
+                    <div className="partner-record-grid">
+                      <RecordBox
+                        label="Reward"
+                        value={
+                          reward.rewardType === "swag"
+                            ? reward.rewardDescription || "304 Peptides swag"
+                            : `${formatMoneyFromCents(
+                                reward.rewardAmountCents
+                              )} ${formatRewardType(
+                                reward.rewardType
+                              ).toLowerCase()}`
+                        }
+                      />
+
+                      <RecordBox
+                        label="Winning Rank"
+                        value={`#${reward.rank || 1}`}
+                      />
+
+                      <RecordBox
+                        label="Earned Referrals"
+                        value={String(reward.referralCount || 0)}
+                      />
+
+                      <RecordBox
+                        label="Issued"
+                        value={formatDate(reward.issuedAt)}
+                      />
+                    </div>
+
+                    {reward.deliveryMethod && (
+                      <div className="partner-paid-detail-row">
+                        <span>
+                          Delivery: <strong>{reward.deliveryMethod}</strong>
+                        </span>
+                      </div>
+                    )}
+
+                    {reward.partnerNote && (
+                      <div className="partner-payout-note">
+                        <strong>Note from 304 Peptides</strong>
+                        <p>{reward.partnerNote}</p>
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="partner-referral-panel">
@@ -1262,6 +1688,16 @@ function ReferralStatusPill({ status }) {
   );
 }
 
+function RewardStatusPill({ status }) {
+  const normalized = String(status || "awarded").toLowerCase();
+
+  return (
+    <span className={`partner-reward-status partner-reward-status-${normalized}`}>
+      {normalized === "issued" ? "ISSUED" : "AWARDED"}
+    </span>
+  );
+}
+
 function RecordBox({ label, value }) {
   return (
     <div className="partner-record-box">
@@ -1383,7 +1819,9 @@ const partnerApplicationCss = `
 .partner-share-panel,
 .partner-referral-panel,
 .partner-payout-status-panel,
-.partner-payout-history-panel {
+.partner-payout-history-panel,
+.partner-leaderboard-panel,
+.partner-reward-history-panel {
   border: 1px solid rgba(255, 255, 255, .1);
   border-radius: 24px;
   background:
@@ -1703,7 +2141,9 @@ const partnerApplicationCss = `
 .partner-share-panel,
 .partner-referral-panel,
 .partner-payout-status-panel,
-.partner-payout-history-panel {
+.partner-payout-history-panel,
+.partner-leaderboard-panel,
+.partner-reward-history-panel {
   margin-top: 22px;
 }
 
@@ -1863,6 +2303,178 @@ const partnerApplicationCss = `
   white-space: pre-wrap;
 }
 
+.partner-leaderboard-intro {
+  max-width: 820px;
+  color: #aeb8bf;
+  line-height: 1.65;
+}
+
+.partner-period-tabs {
+  display: inline-flex;
+  gap: 8px;
+  padding: 6px;
+  margin-top: 20px;
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, .18);
+}
+
+.partner-period-tabs button {
+  padding: 10px 18px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: #9faab2;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+}
+
+.partner-period-tabs button.active {
+  border-color: rgba(61, 165, 255, .35);
+  background: rgba(61, 165, 255, .12);
+  color: #d7f1ff;
+}
+
+.partner-leaderboard-rule-card {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.partner-leaderboard-rule-card > div {
+  display: grid;
+  gap: 7px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .03);
+}
+
+.partner-leaderboard-rule-card span {
+  color: #9ed8ff;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+}
+
+.partner-own-rank-card,
+.partner-period-winner-card {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+  margin-top: 18px;
+  border: 1px solid rgba(72, 214, 151, .27);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top left, rgba(72, 214, 151, .11), transparent 45%),
+    rgba(72, 214, 151, .035);
+}
+
+.partner-own-rank-card h3,
+.partner-period-winner-card h3 {
+  margin: 5px 0;
+  font-size: 29px;
+}
+
+.partner-own-rank-card p:not(.eyebrow),
+.partner-period-winner-card p:not(.eyebrow) {
+  color: #aeb8bf;
+}
+
+.partner-own-rank-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.partner-period-winner-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-color: rgba(255, 190, 80, .3);
+  background:
+    radial-gradient(circle at top left, rgba(255, 190, 80, .1), transparent 45%),
+    rgba(255, 190, 80, .03);
+}
+
+.partner-leaderboard-list,
+.partner-reward-history-stack {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.partner-leaderboard-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 15px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .025);
+}
+
+.partner-leaderboard-row-current {
+  border-color: rgba(61, 165, 255, .34);
+  background: rgba(61, 165, 255, .07);
+}
+
+.partner-leaderboard-rank {
+  font-size: 24px;
+  color: #9ed8ff;
+}
+
+.partner-leaderboard-row > div {
+  display: grid;
+  gap: 4px;
+}
+
+.partner-leaderboard-row > div > span {
+  font-weight: 900;
+  letter-spacing: .4px;
+}
+
+.partner-leaderboard-row small {
+  color: #9ca8b0;
+}
+
+.partner-qualification-pill,
+.partner-reward-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 11px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+}
+
+.partner-qualification-pill.qualified,
+.partner-reward-status-issued {
+  border: 1px solid rgba(72, 214, 151, .33);
+  background: rgba(72, 214, 151, .09);
+  color: #b8f3d8;
+}
+
+.partner-qualification-pill.building,
+.partner-reward-status-awarded {
+  border: 1px solid rgba(255, 190, 80, .34);
+  background: rgba(255, 190, 80, .09);
+  color: #ffe0a8;
+}
+
+.partner-reward-history-card {
+  padding: 20px;
+  border: 1px solid rgba(185, 130, 255, .24);
+  border-radius: 18px;
+  background: rgba(185, 130, 255, .045);
+}
+
 .partner-empty-state {
   padding: 42px 18px;
   margin-top: 18px;
@@ -1901,7 +2513,9 @@ button:disabled {
   }
 
   .partner-dashboard-grid,
-  .partner-payout-progress-grid {
+  .partner-payout-progress-grid,
+  .partner-own-rank-metrics,
+  .partner-leaderboard-rule-card {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1922,7 +2536,9 @@ button:disabled {
   .partner-share-panel,
   .partner-referral-panel,
   .partner-payout-status-panel,
-  .partner-payout-history-panel {
+  .partner-payout-history-panel,
+  .partner-leaderboard-panel,
+  .partner-reward-history-panel {
     padding: 20px;
     border-radius: 19px;
   }
@@ -1931,8 +2547,23 @@ button:disabled {
   .partner-record-grid,
   .partner-dashboard-grid,
   .partner-payout-progress-grid,
+  .partner-own-rank-metrics,
+  .partner-leaderboard-rule-card,
   .partner-link-row {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .partner-leaderboard-row,
+  .partner-period-winner-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .partner-period-tabs {
+    width: 100%;
+  }
+
+  .partner-period-tabs button {
+    flex: 1;
   }
 
   .partner-full-field {

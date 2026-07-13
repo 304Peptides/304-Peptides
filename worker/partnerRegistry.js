@@ -44,6 +44,43 @@ const PAYOUT_TYPES = new Set([
   "store_credit",
 ]);
 
+const LEADERBOARD_METRICS = new Set([
+  "commission",
+  "revenue",
+  "referrals",
+]);
+
+const LEADERBOARD_PERIOD_TYPES = new Set([
+  "monthly",
+  "quarterly",
+]);
+
+const REWARD_TYPES = new Set([
+  "cash",
+  "store_credit",
+  "swag",
+]);
+
+const REWARD_STATUSES = new Set([
+  "awarded",
+  "issued",
+]);
+
+const DEFAULT_LEADERBOARD_METRIC = "commission";
+const DEFAULT_MONTHLY_REWARD_ENABLED = true;
+const DEFAULT_MONTHLY_REWARD_TYPE = "store_credit";
+const DEFAULT_MONTHLY_REWARD_AMOUNT_CENTS = 5000;
+const DEFAULT_MONTHLY_MINIMUM_REFERRALS = 1;
+const DEFAULT_QUARTERLY_REWARD_ENABLED = true;
+const DEFAULT_QUARTERLY_REWARD_TYPE = "swag";
+const DEFAULT_QUARTERLY_REWARD_AMOUNT_CENTS = 0;
+const DEFAULT_QUARTERLY_REWARD_DESCRIPTION =
+  "304 Peptides partner swag package";
+const DEFAULT_QUARTERLY_MINIMUM_REFERRALS = 3;
+const MAX_REWARD_AMOUNT_CENTS = 1_000_000;
+const MAX_LEADERBOARD_ENTRIES = 100;
+const MAX_REWARD_HISTORY = 100;
+
 export class PartnerRegistry extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -172,6 +209,56 @@ export class PartnerRegistry extends DurableObject {
 
       CREATE INDEX IF NOT EXISTS partner_payout_items_payout_index
         ON partner_payout_items(payout_id, created_at ASC);
+
+      INSERT OR IGNORE INTO partner_program_settings (
+        setting_key, setting_value, updated_at, updated_by
+      ) VALUES
+        ('leaderboard_metric', '${DEFAULT_LEADERBOARD_METRIC}', '', 'system-default'),
+        ('monthly_reward_enabled', '${DEFAULT_MONTHLY_REWARD_ENABLED ? "1" : "0"}', '', 'system-default'),
+        ('monthly_reward_type', '${DEFAULT_MONTHLY_REWARD_TYPE}', '', 'system-default'),
+        ('monthly_reward_amount_cents', '${DEFAULT_MONTHLY_REWARD_AMOUNT_CENTS}', '', 'system-default'),
+        ('monthly_minimum_referrals', '${DEFAULT_MONTHLY_MINIMUM_REFERRALS}', '', 'system-default'),
+        ('quarterly_reward_enabled', '${DEFAULT_QUARTERLY_REWARD_ENABLED ? "1" : "0"}', '', 'system-default'),
+        ('quarterly_reward_type', '${DEFAULT_QUARTERLY_REWARD_TYPE}', '', 'system-default'),
+        ('quarterly_reward_amount_cents', '${DEFAULT_QUARTERLY_REWARD_AMOUNT_CENTS}', '', 'system-default'),
+        ('quarterly_reward_description', '${DEFAULT_QUARTERLY_REWARD_DESCRIPTION}', '', 'system-default'),
+        ('quarterly_minimum_referrals', '${DEFAULT_QUARTERLY_MINIMUM_REFERRALS}', '', 'system-default');
+
+      CREATE TABLE IF NOT EXISTS partner_rewards (
+        reward_id TEXT PRIMARY KEY,
+        period_type TEXT NOT NULL,
+        period_key TEXT NOT NULL,
+        partner_account_id TEXT NOT NULL,
+        partner_code TEXT NOT NULL COLLATE NOCASE,
+        partner_email TEXT NOT NULL DEFAULT '',
+        leaderboard_metric TEXT NOT NULL,
+        rank INTEGER NOT NULL,
+        referral_count INTEGER NOT NULL,
+        revenue_cents INTEGER NOT NULL,
+        commission_cents INTEGER NOT NULL,
+        reward_type TEXT NOT NULL,
+        reward_amount_cents INTEGER NOT NULL DEFAULT 0,
+        reward_description TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL,
+        awarded_at TEXT NOT NULL,
+        awarded_by TEXT NOT NULL,
+        issued_at TEXT NOT NULL DEFAULT '',
+        issued_by TEXT NOT NULL DEFAULT '',
+        delivery_method TEXT NOT NULL DEFAULT '',
+        reference_number TEXT NOT NULL DEFAULT '',
+        partner_note TEXT NOT NULL DEFAULT '',
+        admin_notes TEXT NOT NULL DEFAULT '',
+        UNIQUE(period_type, period_key)
+      );
+
+      CREATE INDEX IF NOT EXISTS partner_rewards_partner_index
+        ON partner_rewards(partner_account_id, awarded_at DESC);
+
+      CREATE INDEX IF NOT EXISTS partner_rewards_period_index
+        ON partner_rewards(period_type, period_key DESC);
+
+      CREATE INDEX IF NOT EXISTS partner_rewards_status_index
+        ON partner_rewards(status, awarded_at DESC);
     `);
   }
 
@@ -250,10 +337,7 @@ export class PartnerRegistry extends DurableObject {
         return this.listAllReferrals();
       }
 
-      if (
-        url.pathname === "/admin/payout-settings" &&
-        request.method === "GET"
-      ) {
+      if (url.pathname === "/admin/payout-settings" && request.method === "GET") {
         return this.getPayoutSettings();
       }
 
@@ -268,11 +352,42 @@ export class PartnerRegistry extends DurableObject {
         return this.listAllPayouts();
       }
 
+      if (url.pathname === "/admin/payouts/create" && request.method === "POST") {
+        return this.createPayout(request);
+      }
+
+      if (url.pathname === "/partner/leaderboard" && request.method === "GET") {
+        return this.getPartnerLeaderboard(url);
+      }
+
+      if (url.pathname === "/admin/leaderboard" && request.method === "GET") {
+        return this.getAdminLeaderboard(url);
+      }
+
       if (
-        url.pathname === "/admin/payouts/create" &&
+        url.pathname === "/admin/leaderboard-settings" &&
+        request.method === "GET"
+      ) {
+        return this.getLeaderboardSettings();
+      }
+
+      if (
+        url.pathname === "/admin/leaderboard-settings" &&
         request.method === "POST"
       ) {
-        return this.createPayout(request);
+        return this.updateLeaderboardSettings(request);
+      }
+
+      if (url.pathname === "/admin/rewards" && request.method === "GET") {
+        return this.listAllRewards();
+      }
+
+      if (url.pathname === "/admin/rewards/award" && request.method === "POST") {
+        return this.awardPeriodReward(request);
+      }
+
+      if (url.pathname === "/admin/rewards/issue" && request.method === "POST") {
+        return this.issueReward(request);
       }
 
       throw new RegistryError("Partner registry route not found.", 404);
@@ -305,9 +420,7 @@ export class PartnerRegistry extends DurableObject {
 
     const reservation = this.findReservation(code);
     const ownedByAccount = Boolean(
-      reservation &&
-        accountId &&
-        reservation.accountId === accountId
+      reservation && accountId && reservation.accountId === accountId
     );
 
     return jsonResponse({
@@ -343,10 +456,7 @@ export class PartnerRegistry extends DurableObject {
 
         const reservation = this.findReservation(application.code);
 
-        if (
-          reservation &&
-          reservation.accountId !== application.accountId
-        ) {
+        if (reservation && reservation.accountId !== application.accountId) {
           throw new RegistryError(
             "That partner code has already been claimed. Choose another code.",
             409
@@ -360,11 +470,7 @@ export class PartnerRegistry extends DurableObject {
 
         this.sql.exec(
           `INSERT INTO partner_code_reservations (
-            code,
-            account_id,
-            status,
-            reserved_at,
-            updated_at
+            code, account_id, status, reserved_at, updated_at
           ) VALUES (?, ?, 'pending', ?, ?)`,
           application.code,
           application.accountId,
@@ -436,26 +542,7 @@ export class PartnerRegistry extends DurableObject {
               application_number,
               last_status_change_at,
               commission_rate_bps
-            ) VALUES (
-              ?,
-              ?,
-              ?,
-              ?,
-              ?,
-              'pending',
-              ?,
-              ?,
-              ?,
-              ?,
-              ?,
-              ?,
-              ?,
-              ?,
-              ?,
-              1,
-              ?,
-              ?
-            )`,
+            ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
             application.accountId,
             application.email,
             application.firstName,
@@ -556,15 +643,11 @@ export class PartnerRegistry extends DurableObject {
     const code = normalizeCode(payload.code);
     const customerAccountId = cleanText(payload.customerAccountId, 150);
     const customerEmail = cleanText(payload.customerEmail, 254).toLowerCase();
-
     const orderStatus = cleanText(
       payload.orderStatus || "Order Request Received",
       100
     );
-
-    const orderSubtotalCents = normalizeMoneyToCents(
-      payload.orderSubtotal
-    );
+    const orderSubtotalCents = normalizeMoneyToCents(payload.orderSubtotal);
 
     if (!orderId || !code || !customerAccountId) {
       throw new RegistryError(
@@ -588,7 +671,6 @@ export class PartnerRegistry extends DurableObject {
 
     const now = new Date().toISOString();
     const referralStatus = classifyReferralStatus(orderStatus);
-
     const commissionAmountCents = Math.round(
       (orderSubtotalCents * partner.commissionRateBps) / 10000
     );
@@ -653,22 +735,7 @@ export class PartnerRegistry extends DurableObject {
             updated_at,
             earned_at,
             voided_at
-          ) VALUES (
-            ?,
-            ?,
-            ?,
-            ?,
-            ?,
-            ?,
-            ?,
-            ?,
-            ?,
-            ?,
-            ?,
-            ?,
-            ?,
-            ?
-          )`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           orderId,
           partner.accountId,
           partner.code,
@@ -723,7 +790,6 @@ export class PartnerRegistry extends DurableObject {
 
     const now = new Date().toISOString();
     const referralStatus = classifyReferralStatus(orderStatus);
-
     const timestamps = getReferralStatusTimestamps(
       referralStatus,
       existing,
@@ -767,15 +833,12 @@ export class PartnerRegistry extends DurableObject {
       return jsonResponse({
         success: true,
         application: null,
-
         summary: {
           ...emptyReferralSummary(),
           minimumPayoutCents: payoutSettings.minimumPayoutCents,
           payoutEligible: false,
-          amountUntilEligibleCents:
-            payoutSettings.minimumPayoutCents,
+          amountUntilEligibleCents: payoutSettings.minimumPayoutCents,
         },
-
         referrals: [],
         payouts: [],
         payoutSettings,
@@ -786,137 +849,41 @@ export class PartnerRegistry extends DurableObject {
       .exec(
         `SELECT
            COUNT(*) AS total_count,
-
-           SUM(
-             CASE
-               WHEN r.referral_status = 'pending'
-               THEN 1
-               ELSE 0
-             END
-           ) AS pending_count,
-
-           SUM(
-             CASE
-               WHEN r.referral_status = 'earned'
-               THEN 1
-               ELSE 0
-             END
-           ) AS earned_count,
-
-           SUM(
-             CASE
-               WHEN r.referral_status = 'voided'
-               THEN 1
-               ELSE 0
-             END
-           ) AS voided_count,
-
-           SUM(
-             CASE
-               WHEN r.referral_status = 'pending'
-               THEN r.commission_amount_cents
-               ELSE 0
-             END
-           ) AS pending_commission_cents,
-
-           SUM(
-             CASE
-               WHEN r.referral_status = 'earned'
-               THEN r.commission_amount_cents
-               ELSE 0
-             END
-           ) AS earned_commission_cents,
-
-           SUM(
-             CASE
-               WHEN r.referral_status = 'voided'
-               THEN r.commission_amount_cents
-               ELSE 0
-             END
-           ) AS voided_commission_cents,
-
-           SUM(
-             CASE
-               WHEN r.referral_status = 'earned'
-               THEN r.order_subtotal_cents
-               ELSE 0
-             END
-           ) AS earned_revenue_cents,
-
-           SUM(
-             CASE
-               WHEN r.referral_status = 'earned'
-                 AND pi.order_id IS NULL
-               THEN 1
-               ELSE 0
-             END
-           ) AS available_referral_count,
-
-           SUM(
-             CASE
-               WHEN r.referral_status = 'earned'
-                 AND pi.order_id IS NULL
-               THEN r.commission_amount_cents
-               ELSE 0
-             END
-           ) AS available_commission_cents,
-
-           SUM(
-             CASE
-               WHEN pi.order_id IS NOT NULL
-               THEN 1
-               ELSE 0
-             END
-           ) AS paid_referral_count,
-
-           SUM(
-             CASE
-               WHEN pi.order_id IS NOT NULL
-               THEN pi.commission_amount_cents
-               ELSE 0
-             END
-           ) AS paid_commission_cents,
-
-           SUM(
-             CASE
-               WHEN r.referral_status = 'voided'
-                 AND pi.order_id IS NOT NULL
-               THEN 1
-               ELSE 0
-             END
-           ) AS adjustment_required_count
-
+           SUM(CASE WHEN r.referral_status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
+           SUM(CASE WHEN r.referral_status = 'earned' THEN 1 ELSE 0 END) AS earned_count,
+           SUM(CASE WHEN r.referral_status = 'voided' THEN 1 ELSE 0 END) AS voided_count,
+           SUM(CASE WHEN r.referral_status = 'pending' THEN r.commission_amount_cents ELSE 0 END) AS pending_commission_cents,
+           SUM(CASE WHEN r.referral_status = 'earned' THEN r.commission_amount_cents ELSE 0 END) AS earned_commission_cents,
+           SUM(CASE WHEN r.referral_status = 'voided' THEN r.commission_amount_cents ELSE 0 END) AS voided_commission_cents,
+           SUM(CASE WHEN r.referral_status = 'earned' THEN r.order_subtotal_cents ELSE 0 END) AS earned_revenue_cents,
+           SUM(CASE WHEN r.referral_status = 'earned' AND pi.order_id IS NULL THEN 1 ELSE 0 END) AS available_referral_count,
+           SUM(CASE WHEN r.referral_status = 'earned' AND pi.order_id IS NULL THEN r.commission_amount_cents ELSE 0 END) AS available_commission_cents,
+           SUM(CASE WHEN pi.order_id IS NOT NULL THEN 1 ELSE 0 END) AS paid_referral_count,
+           SUM(CASE WHEN pi.order_id IS NOT NULL THEN pi.commission_amount_cents ELSE 0 END) AS paid_commission_cents,
+           SUM(CASE WHEN r.referral_status = 'voided' AND pi.order_id IS NOT NULL THEN 1 ELSE 0 END) AS adjustment_required_count
          FROM partner_referrals r
-
          LEFT JOIN partner_payout_items pi
            ON pi.order_id = r.order_id
-
          WHERE r.partner_account_id = ?`,
         accountId
       )
       .toArray();
 
     const baseSummary = mapSummaryRow(summaryRows[0]);
-
-    const minimumPayoutCents =
-      payoutSettings.minimumPayoutCents;
-
+    const minimumPayoutCents = payoutSettings.minimumPayoutCents;
     const payoutEligible =
       baseSummary.availableReferralCount > 0 &&
-      baseSummary.availableCommissionCents >=
-        minimumPayoutCents;
+      baseSummary.availableCommissionCents >= minimumPayoutCents;
 
     const summary = {
       ...baseSummary,
       minimumPayoutCents,
       payoutEligible,
-
       amountUntilEligibleCents: payoutEligible
         ? 0
         : Math.max(
             0,
-            minimumPayoutCents -
-              baseSummary.availableCommissionCents
+            minimumPayoutCents - baseSummary.availableCommissionCents
           ),
     };
 
@@ -930,19 +897,13 @@ export class PartnerRegistry extends DurableObject {
            p.reference_number AS payout_reference_number,
            p.paid_at AS payout_paid_at,
            p.created_at AS payout_created_at
-
          FROM partner_referrals r
-
          LEFT JOIN partner_payout_items pi
            ON pi.order_id = r.order_id
-
          LEFT JOIN partner_payouts p
            ON p.payout_id = pi.payout_id
-
          WHERE r.partner_account_id = ?
-
          ORDER BY r.created_at DESC
-
          LIMIT ?`,
         accountId,
         MAX_REFERRAL_HISTORY
@@ -973,11 +934,7 @@ export class PartnerRegistry extends DurableObject {
     return jsonResponse({
       success: true,
       application,
-
-      payouts: application
-        ? this.listPayoutRecords(accountId)
-        : [],
-
+      payouts: application ? this.listPayoutRecords(accountId) : [],
       payoutSettings,
     });
   }
@@ -1011,21 +968,12 @@ export class PartnerRegistry extends DurableObject {
     const payload = await readJson(request);
     const action = cleanText(payload.action, 30).toLowerCase();
     const accountId = cleanText(payload.accountId, 150);
-
     const reviewedBy = cleanText(
       payload.reviewedBy || "authorized administrator",
       254
     );
-
-    const customerMessage = cleanMultilineText(
-      payload.customerMessage,
-      1000
-    );
-
-    const adminNotes = cleanMultilineText(
-      payload.adminNotes,
-      2000
-    );
+    const customerMessage = cleanMultilineText(payload.customerMessage, 1000);
+    const adminNotes = cleanMultilineText(payload.adminNotes, 2000);
 
     if (!ADMIN_ACTIONS.has(action)) {
       throw new RegistryError("Choose a valid partner action.", 400);
@@ -1035,10 +983,7 @@ export class PartnerRegistry extends DurableObject {
       throw new RegistryError("A customer account ID is required.", 400);
     }
 
-    if (
-      ["deny", "suspend"].includes(action) &&
-      !customerMessage
-    ) {
+    if (["deny", "suspend"].includes(action) && !customerMessage) {
       throw new RegistryError(
         action === "deny"
           ? "Enter a customer-facing reason before denying the application."
@@ -1087,8 +1032,7 @@ export class PartnerRegistry extends DurableObject {
         this.requireStatus(current, "pending", "denied");
 
         this.sql.exec(
-          `DELETE FROM partner_code_reservations
-           WHERE account_id = ?`,
+          "DELETE FROM partner_code_reservations WHERE account_id = ?",
           accountId
         );
 
@@ -1183,10 +1127,7 @@ export class PartnerRegistry extends DurableObject {
   async updateCommissionRate(request) {
     const payload = await readJson(request);
     const accountId = cleanText(payload.accountId, 150);
-
-    const commissionRateBps = normalizeCommissionRate(
-      payload.commissionRateBps
-    );
+    const commissionRateBps = normalizeCommissionRate(payload.commissionRateBps);
 
     if (!accountId) {
       throw new RegistryError("A partner account ID is required.", 400);
@@ -1232,18 +1173,13 @@ export class PartnerRegistry extends DurableObject {
            p.reference_number AS payout_reference_number,
            p.paid_at AS payout_paid_at,
            p.created_at AS payout_created_at
-
          FROM partner_referrals r
-
          LEFT JOIN partner_applications a
            ON a.account_id = r.partner_account_id
-
          LEFT JOIN partner_payout_items pi
            ON pi.order_id = r.order_id
-
          LEFT JOIN partner_payouts p
            ON p.payout_id = pi.payout_id
-
          ORDER BY r.created_at DESC`
       )
       .toArray()
@@ -1266,16 +1202,13 @@ export class PartnerRegistry extends DurableObject {
 
   async updatePayoutSettings(request) {
     const payload = await readJson(request);
-
     const minimumPayoutCents = normalizePayoutThreshold(
       payload.minimumPayoutCents
     );
-
     const updatedBy = cleanText(
       payload.updatedBy || "authorized administrator",
       254
     );
-
     const now = new Date().toISOString();
 
     this.sql.exec(
@@ -1321,42 +1254,17 @@ export class PartnerRegistry extends DurableObject {
   async createPayout(request) {
     const payload = await readJson(request);
     const accountId = cleanText(payload.accountId, 150);
-
-    const payoutType = cleanText(
-      payload.payoutType,
-      40
-    ).toLowerCase();
-
-    const paymentMethod = cleanText(
-      payload.paymentMethod,
-      100
-    );
-
-    const referenceNumber = cleanText(
-      payload.referenceNumber,
-      150
-    );
-
-    const partnerNote = cleanMultilineText(
-      payload.partnerNote,
-      1000
-    );
-
-    const adminNotes = cleanMultilineText(
-      payload.adminNotes,
-      2000
-    );
-
+    const payoutType = cleanText(payload.payoutType, 40).toLowerCase();
+    const paymentMethod = cleanText(payload.paymentMethod, 100);
+    const referenceNumber = cleanText(payload.referenceNumber, 150);
+    const partnerNote = cleanMultilineText(payload.partnerNote, 1000);
+    const adminNotes = cleanMultilineText(payload.adminNotes, 2000);
     const createdBy = cleanText(
       payload.createdBy || "authorized administrator",
       254
     );
-
     const paidAt = normalizePayoutDate(payload.paidAt);
-
-    const requestedOrderIds = normalizeOptionalOrderIds(
-      payload.orderIds
-    );
+    const requestedOrderIds = normalizeOptionalOrderIds(payload.orderIds);
 
     if (!accountId) {
       throw new RegistryError("A partner account ID is required.", 400);
@@ -1382,16 +1290,12 @@ export class PartnerRegistry extends DurableObject {
     const eligibleRows = this.sql
       .exec(
         `SELECT r.*
-
          FROM partner_referrals r
-
          LEFT JOIN partner_payout_items pi
            ON pi.order_id = r.order_id
-
          WHERE r.partner_account_id = ?
            AND r.referral_status = 'earned'
            AND pi.order_id IS NULL
-
          ORDER BY r.earned_at ASC, r.created_at ASC`,
         accountId
       )
@@ -1423,11 +1327,9 @@ export class PartnerRegistry extends DurableObject {
     }
 
     const amountCents = selectedReferrals.reduce(
-      (total, referral) =>
-        total + referral.commissionAmountCents,
+      (total, referral) => total + referral.commissionAmountCents,
       0
     );
-
     const settings = this.readPayoutSettings();
 
     if (amountCents < settings.minimumPayoutCents) {
@@ -1445,13 +1347,8 @@ export class PartnerRegistry extends DurableObject {
     try {
       this.ctx.storage.transactionSync(() => {
         for (const referral of selectedReferrals) {
-          const currentReferral = this.findReferral(
-            referral.orderId
-          );
-
-          const existingItem = this.findPayoutItem(
-            referral.orderId
-          );
+          const currentReferral = this.findReferral(referral.orderId);
+          const existingItem = this.findPayoutItem(referral.orderId);
 
           if (
             !currentReferral ||
@@ -1482,22 +1379,7 @@ export class PartnerRegistry extends DurableObject {
              paid_at,
              created_at,
              created_by
-           ) VALUES (
-             ?,
-             ?,
-             ?,
-             ?,
-             ?,
-             ?,
-             ?,
-             ?,
-             ?,
-             ?,
-             ?,
-             ?,
-             ?,
-             ?
-           )`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           payoutId,
           accountId,
           application.code,
@@ -1534,11 +1416,7 @@ export class PartnerRegistry extends DurableObject {
         throw error;
       }
 
-      if (
-        /unique constraint failed/i.test(
-          String(error?.message || error)
-        )
-      ) {
+      if (/unique constraint failed/i.test(String(error?.message || error))) {
         throw new RegistryError(
           "One or more selected referrals were already included in a payout.",
           409
@@ -1559,6 +1437,527 @@ export class PartnerRegistry extends DurableObject {
     );
   }
 
+  getPartnerLeaderboard(url) {
+    const accountId = cleanText(url.searchParams.get("accountId"), 150);
+    const periodType = normalizePeriodType(
+      url.searchParams.get("periodType") || "monthly"
+    );
+    const periodKey = normalizePeriodKey(
+      periodType,
+      url.searchParams.get("periodKey") || currentPeriodKey(periodType)
+    );
+
+    if (!accountId) {
+      throw new RegistryError("A partner account ID is required.", 400);
+    }
+
+    const settings = this.readLeaderboardSettings();
+    const leaderboard = this.buildLeaderboard(
+      periodType,
+      periodKey,
+      settings.leaderboardMetric
+    );
+    const currentPartner =
+      leaderboard.entries.find((entry) => entry.accountId === accountId) || null;
+
+    return jsonResponse({
+      success: true,
+      period: leaderboard.period,
+      settings: customerLeaderboardSettings(settings),
+      entries: leaderboard.entries
+        .slice(0, 25)
+        .map(toCustomerLeaderboardEntry),
+      currentPartner: currentPartner
+        ? toCustomerOwnLeaderboardEntry(currentPartner)
+        : null,
+      reward: toCustomerRewardRecord(
+        this.findRewardByPeriod(periodType, periodKey)
+      ),
+      rewards: this.listRewardRecords(accountId).map(toCustomerRewardRecord),
+    });
+  }
+
+  getAdminLeaderboard(url) {
+    const periodType = normalizePeriodType(
+      url.searchParams.get("periodType") || "monthly"
+    );
+    const periodKey = normalizePeriodKey(
+      periodType,
+      url.searchParams.get("periodKey") || currentPeriodKey(periodType)
+    );
+    const settings = this.readLeaderboardSettings();
+    const leaderboard = this.buildLeaderboard(
+      periodType,
+      periodKey,
+      settings.leaderboardMetric
+    );
+
+    return jsonResponse({
+      success: true,
+      period: leaderboard.period,
+      settings,
+      entries: leaderboard.entries,
+      reward: this.findRewardByPeriod(periodType, periodKey),
+    });
+  }
+
+  getLeaderboardSettings() {
+    return jsonResponse({
+      success: true,
+      settings: this.readLeaderboardSettings(),
+    });
+  }
+
+  async updateLeaderboardSettings(request) {
+    const payload = await readJson(request);
+    const settings = normalizeLeaderboardSettings(payload);
+    const updatedBy = cleanText(
+      payload.updatedBy || "authorized administrator",
+      254
+    );
+    const now = new Date().toISOString();
+
+    this.ctx.storage.transactionSync(() => {
+      for (const [key, value] of Object.entries({
+        leaderboard_metric: settings.leaderboardMetric,
+        monthly_reward_enabled: settings.monthlyRewardEnabled ? "1" : "0",
+        monthly_reward_type: settings.monthlyRewardType,
+        monthly_reward_amount_cents: String(settings.monthlyRewardAmountCents),
+        monthly_minimum_referrals: String(settings.monthlyMinimumReferrals),
+        quarterly_reward_enabled: settings.quarterlyRewardEnabled ? "1" : "0",
+        quarterly_reward_type: settings.quarterlyRewardType,
+        quarterly_reward_amount_cents: String(settings.quarterlyRewardAmountCents),
+        quarterly_reward_description: settings.quarterlyRewardDescription,
+        quarterly_minimum_referrals: String(settings.quarterlyMinimumReferrals),
+      })) {
+        this.sql.exec(
+          `INSERT INTO partner_program_settings (
+             setting_key, setting_value, updated_at, updated_by
+           ) VALUES (?, ?, ?, ?)
+           ON CONFLICT(setting_key) DO UPDATE SET
+             setting_value = excluded.setting_value,
+             updated_at = excluded.updated_at,
+             updated_by = excluded.updated_by`,
+          key,
+          value,
+          now,
+          updatedBy
+        );
+      }
+    });
+
+    return jsonResponse({
+      success: true,
+      settings: this.readLeaderboardSettings(),
+      message: "The leaderboard and reward rules were updated.",
+    });
+  }
+
+  listAllRewards() {
+    const rewards = this.listRewardRecords();
+
+    return jsonResponse({
+      success: true,
+      rewards,
+      records: rewards,
+      count: rewards.length,
+      settings: this.readLeaderboardSettings(),
+    });
+  }
+
+  async awardPeriodReward(request) {
+    const payload = await readJson(request);
+    const periodType = normalizePeriodType(payload.periodType);
+    const periodKey = normalizePeriodKey(periodType, payload.periodKey);
+    validateNotFuturePeriod(periodType, periodKey);
+
+    const settings = this.readLeaderboardSettings();
+    const rewardConfig = getRewardConfig(settings, periodType);
+
+    if (!rewardConfig.enabled) {
+      throw new RegistryError(
+        `The ${periodType} reward is currently disabled.`,
+        409
+      );
+    }
+
+    if (this.findRewardByPeriod(periodType, periodKey)) {
+      throw new RegistryError(
+        `A reward has already been recorded for ${periodKey}.`,
+        409
+      );
+    }
+
+    const leaderboard = this.buildLeaderboard(
+      periodType,
+      periodKey,
+      settings.leaderboardMetric
+    );
+    const winner = leaderboard.entries.find((entry) => entry.eligible);
+
+    if (!winner) {
+      throw new RegistryError(
+        `No partner met the ${rewardConfig.minimumReferrals}-referral minimum for ${periodKey}.`,
+        409
+      );
+    }
+
+    const rewardType = normalizeRewardType(
+      payload.rewardType || rewardConfig.type
+    );
+    const rewardAmountCents = normalizeRewardAmount(
+      payload.rewardAmountCents ?? rewardConfig.amountCents
+    );
+    const rewardDescription = cleanText(
+      payload.rewardDescription || rewardConfig.description,
+      500
+    );
+
+    if (rewardType === "swag" && !rewardDescription) {
+      throw new RegistryError(
+        "Enter a description for the swag reward.",
+        400
+      );
+    }
+
+    const awardedBy = cleanText(
+      payload.awardedBy || "authorized administrator",
+      254
+    );
+    const partnerNote = cleanMultilineText(payload.partnerNote, 1000);
+    const adminNotes = cleanMultilineText(payload.adminNotes, 2000);
+    const rewardId = createRewardId(periodType, periodKey);
+    const awardedAt = new Date().toISOString();
+
+    this.sql.exec(
+      `INSERT INTO partner_rewards (
+         reward_id,
+         period_type,
+         period_key,
+         partner_account_id,
+         partner_code,
+         partner_email,
+         leaderboard_metric,
+         rank,
+         referral_count,
+         revenue_cents,
+         commission_cents,
+         reward_type,
+         reward_amount_cents,
+         reward_description,
+         status,
+         awarded_at,
+         awarded_by,
+         partner_note,
+         admin_notes
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'awarded', ?, ?, ?, ?)`,
+      rewardId,
+      periodType,
+      periodKey,
+      winner.accountId,
+      winner.partnerCode,
+      winner.partnerEmail,
+      settings.leaderboardMetric,
+      winner.rank,
+      winner.referralCount,
+      winner.revenueCents,
+      winner.commissionCents,
+      rewardType,
+      rewardAmountCents,
+      rewardDescription,
+      awardedAt,
+      awardedBy,
+      partnerNote,
+      adminNotes
+    );
+
+    return jsonResponse(
+      {
+        success: true,
+        reward: this.findReward(rewardId),
+        message: `${winner.partnerCode} was recorded as the ${periodKey} ${periodType} leaderboard winner.`,
+      },
+      201
+    );
+  }
+
+  async issueReward(request) {
+    const payload = await readJson(request);
+    const rewardId = cleanText(payload.rewardId, 120);
+    const deliveryMethod = cleanText(payload.deliveryMethod, 150);
+    const referenceNumber = cleanText(payload.referenceNumber, 150);
+    const partnerNote = cleanMultilineText(payload.partnerNote, 1000);
+    const adminNotes = cleanMultilineText(payload.adminNotes, 2000);
+    const issuedBy = cleanText(
+      payload.issuedBy || "authorized administrator",
+      254
+    );
+
+    if (!rewardId) {
+      throw new RegistryError("A reward ID is required.", 400);
+    }
+
+    if (!deliveryMethod) {
+      throw new RegistryError("A reward delivery method is required.", 400);
+    }
+
+    const reward = this.findReward(rewardId);
+
+    if (!reward) {
+      throw new RegistryError("Leaderboard reward not found.", 404);
+    }
+
+    if (reward.status === "issued") {
+      throw new RegistryError("This reward has already been issued.", 409);
+    }
+
+    const issuedAt = normalizePayoutDate(payload.issuedAt);
+
+    this.sql.exec(
+      `UPDATE partner_rewards
+       SET status = 'issued',
+           issued_at = ?,
+           issued_by = ?,
+           delivery_method = ?,
+           reference_number = ?,
+           partner_note = ?,
+           admin_notes = ?
+       WHERE reward_id = ?`,
+      issuedAt,
+      issuedBy,
+      deliveryMethod,
+      referenceNumber,
+      partnerNote || reward.partnerNote,
+      adminNotes || reward.adminNotes,
+      rewardId
+    );
+
+    return jsonResponse({
+      success: true,
+      reward: this.findReward(rewardId),
+      message: "The leaderboard reward was marked as issued.",
+    });
+  }
+
+  buildLeaderboard(periodType, periodKey, metric) {
+    const period = periodBounds(periodType, periodKey);
+    const settings = this.readLeaderboardSettings();
+    const minimumReferrals =
+      periodType === "monthly"
+        ? settings.monthlyMinimumReferrals
+        : settings.quarterlyMinimumReferrals;
+
+    const rows = this.sql
+      .exec(
+        `SELECT
+           r.partner_account_id,
+           a.code AS partner_code,
+           a.email AS partner_email,
+           a.first_name AS partner_first_name,
+           a.last_name AS partner_last_name,
+           COUNT(*) AS referral_count,
+           SUM(r.order_subtotal_cents) AS revenue_cents,
+           SUM(r.commission_amount_cents) AS commission_cents,
+           MIN(r.earned_at) AS first_earned_at,
+           MAX(r.earned_at) AS last_earned_at
+         FROM partner_referrals r
+         INNER JOIN partner_applications a
+           ON a.account_id = r.partner_account_id
+         WHERE r.referral_status = 'earned'
+           AND r.earned_at >= ?
+           AND r.earned_at < ?
+           AND a.status = 'approved'
+         GROUP BY
+           r.partner_account_id,
+           a.code,
+           a.email,
+           a.first_name,
+           a.last_name`,
+        period.startAt,
+        period.endAt
+      )
+      .toArray()
+      .map(mapLeaderboardRow);
+
+    rows.sort((left, right) => compareLeaderboardEntries(left, right, metric));
+
+    const entries = rows.slice(0, MAX_LEADERBOARD_ENTRIES).map((entry, index) => ({
+      ...entry,
+      rank: index + 1,
+      eligible: entry.referralCount >= minimumReferrals,
+      metric,
+      score: leaderboardScore(entry, metric),
+    }));
+
+    return {
+      period: {
+        periodType,
+        periodKey,
+        startAt: period.startAt,
+        endAt: period.endAt,
+        minimumReferrals,
+        metric,
+      },
+      entries,
+    };
+  }
+
+  readLeaderboardSettings() {
+    const values = this.readProgramSettings([
+      "leaderboard_metric",
+      "monthly_reward_enabled",
+      "monthly_reward_type",
+      "monthly_reward_amount_cents",
+      "monthly_minimum_referrals",
+      "quarterly_reward_enabled",
+      "quarterly_reward_type",
+      "quarterly_reward_amount_cents",
+      "quarterly_reward_description",
+      "quarterly_minimum_referrals",
+    ]);
+
+    return {
+      leaderboardMetric: LEADERBOARD_METRICS.has(values.leaderboard_metric?.value)
+        ? values.leaderboard_metric.value
+        : DEFAULT_LEADERBOARD_METRIC,
+      monthlyRewardEnabled: parseStoredBoolean(
+        values.monthly_reward_enabled?.value,
+        DEFAULT_MONTHLY_REWARD_ENABLED
+      ),
+      monthlyRewardType: REWARD_TYPES.has(values.monthly_reward_type?.value)
+        ? values.monthly_reward_type.value
+        : DEFAULT_MONTHLY_REWARD_TYPE,
+      monthlyRewardAmountCents: parseStoredInteger(
+        values.monthly_reward_amount_cents?.value,
+        DEFAULT_MONTHLY_REWARD_AMOUNT_CENTS,
+        0,
+        MAX_REWARD_AMOUNT_CENTS
+      ),
+      monthlyMinimumReferrals: parseStoredInteger(
+        values.monthly_minimum_referrals?.value,
+        DEFAULT_MONTHLY_MINIMUM_REFERRALS,
+        1,
+        1000
+      ),
+      quarterlyRewardEnabled: parseStoredBoolean(
+        values.quarterly_reward_enabled?.value,
+        DEFAULT_QUARTERLY_REWARD_ENABLED
+      ),
+      quarterlyRewardType: REWARD_TYPES.has(values.quarterly_reward_type?.value)
+        ? values.quarterly_reward_type.value
+        : DEFAULT_QUARTERLY_REWARD_TYPE,
+      quarterlyRewardAmountCents: parseStoredInteger(
+        values.quarterly_reward_amount_cents?.value,
+        DEFAULT_QUARTERLY_REWARD_AMOUNT_CENTS,
+        0,
+        MAX_REWARD_AMOUNT_CENTS
+      ),
+      quarterlyRewardDescription: cleanText(
+        values.quarterly_reward_description?.value ||
+          DEFAULT_QUARTERLY_REWARD_DESCRIPTION,
+        500
+      ),
+      quarterlyMinimumReferrals: parseStoredInteger(
+        values.quarterly_minimum_referrals?.value,
+        DEFAULT_QUARTERLY_MINIMUM_REFERRALS,
+        1,
+        1000
+      ),
+      updatedAt: mostRecentSettingValue(values, "updatedAt"),
+      updatedBy: mostRecentSettingValue(values, "updatedBy"),
+    };
+  }
+
+  readProgramSettings(keys) {
+    const placeholders = keys.map(() => "?").join(", ");
+    const rows = this.sql
+      .exec(
+        `SELECT setting_key, setting_value, updated_at, updated_by
+         FROM partner_program_settings
+         WHERE setting_key IN (${placeholders})`,
+        ...keys
+      )
+      .toArray();
+
+    return Object.fromEntries(
+      rows.map((row) => [
+        row.setting_key,
+        {
+          value: row.setting_value,
+          updatedAt: row.updated_at || "",
+          updatedBy: row.updated_by || "",
+        },
+      ])
+    );
+  }
+
+  findRewardByPeriod(periodType, periodKey) {
+    const rows = this.sql
+      .exec(
+        `SELECT r.*, a.first_name AS partner_first_name,
+                a.last_name AS partner_last_name
+         FROM partner_rewards r
+         LEFT JOIN partner_applications a
+           ON a.account_id = r.partner_account_id
+         WHERE r.period_type = ? AND r.period_key = ?
+         LIMIT 1`,
+        periodType,
+        periodKey
+      )
+      .toArray();
+
+    return rows.length ? mapRewardRow(rows[0]) : null;
+  }
+
+  findReward(rewardId) {
+    const rows = this.sql
+      .exec(
+        `SELECT r.*, a.first_name AS partner_first_name,
+                a.last_name AS partner_last_name
+         FROM partner_rewards r
+         LEFT JOIN partner_applications a
+           ON a.account_id = r.partner_account_id
+         WHERE r.reward_id = ?
+         LIMIT 1`,
+        rewardId
+      )
+      .toArray();
+
+    return rows.length ? mapRewardRow(rows[0]) : null;
+  }
+
+  listRewardRecords(accountId = "") {
+    const rows = accountId
+      ? this.sql
+          .exec(
+            `SELECT r.*, a.first_name AS partner_first_name,
+                    a.last_name AS partner_last_name
+             FROM partner_rewards r
+             LEFT JOIN partner_applications a
+               ON a.account_id = r.partner_account_id
+             WHERE r.partner_account_id = ?
+             ORDER BY r.awarded_at DESC
+             LIMIT ?`,
+            accountId,
+            MAX_REWARD_HISTORY
+          )
+          .toArray()
+      : this.sql
+          .exec(
+            `SELECT r.*, a.first_name AS partner_first_name,
+                    a.last_name AS partner_last_name
+             FROM partner_rewards r
+             LEFT JOIN partner_applications a
+               ON a.account_id = r.partner_account_id
+             ORDER BY r.awarded_at DESC
+             LIMIT ?`,
+            MAX_REWARD_HISTORY
+          )
+          .toArray();
+
+    return rows.map(mapRewardRow);
+  }
+
   requireStatus(application, expectedStatus, actionLabel) {
     if (application.status !== expectedStatus) {
       throw new RegistryError(
@@ -1571,10 +1970,7 @@ export class PartnerRegistry extends DurableObject {
   requireOwnedReservation(application) {
     const reservation = this.findReservation(application.code);
 
-    if (
-      !reservation ||
-      reservation.accountId !== application.accountId
-    ) {
+    if (!reservation || reservation.accountId !== application.accountId) {
       throw new RegistryError(
         "The selected partner code is no longer reserved for this applicant.",
         409
@@ -1585,8 +1981,7 @@ export class PartnerRegistry extends DurableObject {
   setReservationStatus(accountId, status, updatedAt) {
     this.sql.exec(
       `UPDATE partner_code_reservations
-       SET status = ?,
-           updated_at = ?
+       SET status = ?, updated_at = ?
        WHERE account_id = ?`,
       status,
       updatedAt,
@@ -1597,58 +1992,39 @@ export class PartnerRegistry extends DurableObject {
   findApplication(accountId) {
     const rows = this.sql
       .exec(
-        `SELECT *
-         FROM partner_applications
-         WHERE account_id = ?
-         LIMIT 1`,
+        "SELECT * FROM partner_applications WHERE account_id = ? LIMIT 1",
         accountId
       )
       .toArray();
 
-    return rows.length
-      ? mapApplicationRow(rows[0])
-      : null;
+    return rows.length ? mapApplicationRow(rows[0]) : null;
   }
 
   findActivePartnerByCode(code) {
     const rows = this.sql
       .exec(
         `SELECT a.*
-
          FROM partner_applications a
-
          INNER JOIN partner_code_reservations r
            ON r.account_id = a.account_id
           AND r.code = a.code COLLATE NOCASE
-
          WHERE a.code = ? COLLATE NOCASE
            AND a.status = 'approved'
            AND r.status = 'approved'
-
          LIMIT 1`,
         code
       )
       .toArray();
 
-    return rows.length
-      ? mapApplicationRow(rows[0])
-      : null;
+    return rows.length ? mapApplicationRow(rows[0]) : null;
   }
 
   findReservation(code) {
     const rows = this.sql
       .exec(
-        `SELECT
-           code,
-           account_id,
-           status,
-           reserved_at,
-           updated_at
-
+        `SELECT code, account_id, status, reserved_at, updated_at
          FROM partner_code_reservations
-
          WHERE code = ? COLLATE NOCASE
-
          LIMIT 1`,
         code
       )
@@ -1678,40 +2054,26 @@ export class PartnerRegistry extends DurableObject {
            p.reference_number AS payout_reference_number,
            p.paid_at AS payout_paid_at,
            p.created_at AS payout_created_at
-
          FROM partner_referrals r
-
          LEFT JOIN partner_payout_items pi
            ON pi.order_id = r.order_id
-
          LEFT JOIN partner_payouts p
            ON p.payout_id = pi.payout_id
-
          WHERE r.order_id = ?
-
          LIMIT 1`,
         orderId
       )
       .toArray();
 
-    return rows.length
-      ? mapReferralRow(rows[0])
-      : null;
+    return rows.length ? mapReferralRow(rows[0]) : null;
   }
 
   findPayoutItem(orderId) {
     const rows = this.sql
       .exec(
-        `SELECT
-           order_id,
-           payout_id,
-           commission_amount_cents,
-           created_at
-
+        `SELECT order_id, payout_id, commission_amount_cents, created_at
          FROM partner_payout_items
-
          WHERE order_id = ?
-
          LIMIT 1`,
         orderId
       )
@@ -1724,11 +2086,9 @@ export class PartnerRegistry extends DurableObject {
     return {
       orderId: rows[0].order_id,
       payoutId: rows[0].payout_id,
-
       commissionAmountCents: Number(
         rows[0].commission_amount_cents || 0
       ),
-
       createdAt: rows[0].created_at || "",
     };
   }
@@ -1740,14 +2100,10 @@ export class PartnerRegistry extends DurableObject {
            p.*,
            a.first_name AS partner_first_name,
            a.last_name AS partner_last_name
-
          FROM partner_payouts p
-
          LEFT JOIN partner_applications a
            ON a.account_id = p.partner_account_id
-
          WHERE p.payout_id = ?
-
          LIMIT 1`,
         payoutId
       )
@@ -1757,9 +2113,7 @@ export class PartnerRegistry extends DurableObject {
       return null;
     }
 
-    return this.attachPayoutItems(
-      mapPayoutRow(rows[0])
-    );
+    return this.attachPayoutItems(mapPayoutRow(rows[0]));
   }
 
   listPayoutRecords(accountId = "") {
@@ -1770,16 +2124,11 @@ export class PartnerRegistry extends DurableObject {
                p.*,
                a.first_name AS partner_first_name,
                a.last_name AS partner_last_name
-
              FROM partner_payouts p
-
              LEFT JOIN partner_applications a
                ON a.account_id = p.partner_account_id
-
              WHERE p.partner_account_id = ?
-
              ORDER BY p.paid_at DESC, p.created_at DESC
-
              LIMIT ?`,
             accountId,
             MAX_PAYOUT_HISTORY
@@ -1791,49 +2140,33 @@ export class PartnerRegistry extends DurableObject {
                p.*,
                a.first_name AS partner_first_name,
                a.last_name AS partner_last_name
-
              FROM partner_payouts p
-
              LEFT JOIN partner_applications a
                ON a.account_id = p.partner_account_id
-
              ORDER BY p.paid_at DESC, p.created_at DESC
-
              LIMIT ?`,
             MAX_PAYOUT_HISTORY
           )
           .toArray();
 
-    return rows.map((row) =>
-      this.attachPayoutItems(
-        mapPayoutRow(row)
-      )
-    );
+    return rows.map((row) => this.attachPayoutItems(mapPayoutRow(row)));
   }
 
   attachPayoutItems(payout) {
     const items = this.sql
       .exec(
-        `SELECT
-           order_id,
-           commission_amount_cents,
-           created_at
-
+        `SELECT order_id, commission_amount_cents, created_at
          FROM partner_payout_items
-
          WHERE payout_id = ?
-
          ORDER BY created_at ASC, order_id ASC`,
         payout.payoutId
       )
       .toArray()
       .map((row) => ({
         orderId: row.order_id,
-
         commissionAmountCents: Number(
           row.commission_amount_cents || 0
         ),
-
         createdAt: row.created_at || "",
       }));
 
@@ -1847,21 +2180,14 @@ export class PartnerRegistry extends DurableObject {
   readPayoutSettings() {
     const rows = this.sql
       .exec(
-        `SELECT
-           setting_value,
-           updated_at,
-           updated_by
-
+        `SELECT setting_value, updated_at, updated_by
          FROM partner_program_settings
-
          WHERE setting_key = 'minimum_payout_cents'
-
          LIMIT 1`
       )
       .toArray();
 
     const rawValue = Number(rows[0]?.setting_value);
-
     const minimumPayoutCents =
       Number.isInteger(rawValue) &&
       rawValue >= 0 &&
@@ -1877,6 +2203,351 @@ export class PartnerRegistry extends DurableObject {
   }
 }
 
+function normalizeLeaderboardSettings(payload) {
+  const leaderboardMetric = cleanText(
+    payload.leaderboardMetric || DEFAULT_LEADERBOARD_METRIC,
+    30
+  ).toLowerCase();
+
+  if (!LEADERBOARD_METRICS.has(leaderboardMetric)) {
+    throw new RegistryError(
+      "Choose commission, revenue, or referrals as the leaderboard metric.",
+      400
+    );
+  }
+
+  return {
+    leaderboardMetric,
+    monthlyRewardEnabled: normalizeBoolean(
+      payload.monthlyRewardEnabled,
+      DEFAULT_MONTHLY_REWARD_ENABLED
+    ),
+    monthlyRewardType: normalizeRewardType(
+      payload.monthlyRewardType || DEFAULT_MONTHLY_REWARD_TYPE
+    ),
+    monthlyRewardAmountCents: normalizeRewardAmount(
+      payload.monthlyRewardAmountCents ?? DEFAULT_MONTHLY_REWARD_AMOUNT_CENTS
+    ),
+    monthlyMinimumReferrals: normalizeMinimumReferrals(
+      payload.monthlyMinimumReferrals ?? DEFAULT_MONTHLY_MINIMUM_REFERRALS
+    ),
+    quarterlyRewardEnabled: normalizeBoolean(
+      payload.quarterlyRewardEnabled,
+      DEFAULT_QUARTERLY_REWARD_ENABLED
+    ),
+    quarterlyRewardType: normalizeRewardType(
+      payload.quarterlyRewardType || DEFAULT_QUARTERLY_REWARD_TYPE
+    ),
+    quarterlyRewardAmountCents: normalizeRewardAmount(
+      payload.quarterlyRewardAmountCents ?? DEFAULT_QUARTERLY_REWARD_AMOUNT_CENTS
+    ),
+    quarterlyRewardDescription: cleanText(
+      payload.quarterlyRewardDescription ||
+        DEFAULT_QUARTERLY_REWARD_DESCRIPTION,
+      500
+    ),
+    quarterlyMinimumReferrals: normalizeMinimumReferrals(
+      payload.quarterlyMinimumReferrals ??
+        DEFAULT_QUARTERLY_MINIMUM_REFERRALS
+    ),
+  };
+}
+
+function normalizePeriodType(value) {
+  const periodType = cleanText(value, 20).toLowerCase();
+
+  if (!LEADERBOARD_PERIOD_TYPES.has(periodType)) {
+    throw new RegistryError("Choose monthly or quarterly leaderboard data.", 400);
+  }
+
+  return periodType;
+}
+
+function normalizePeriodKey(periodType, value) {
+  const periodKey = cleanText(value, 20).toUpperCase();
+  const pattern =
+    periodType === "monthly" ? /^\d{4}-(0[1-9]|1[0-2])$/ : /^\d{4}-Q[1-4]$/;
+
+  if (!pattern.test(periodKey)) {
+    throw new RegistryError(
+      periodType === "monthly"
+        ? "The monthly period must use YYYY-MM format."
+        : "The quarterly period must use YYYY-Q1 through YYYY-Q4 format.",
+      400
+    );
+  }
+
+  return periodKey;
+}
+
+function currentPeriodKey(periodType, date = new Date()) {
+  const year = date.getUTCFullYear();
+
+  if (periodType === "quarterly") {
+    return `${year}-Q${Math.floor(date.getUTCMonth() / 3) + 1}`;
+  }
+
+  return `${year}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function periodBounds(periodType, periodKey) {
+  if (periodType === "monthly") {
+    const [yearText, monthText] = periodKey.split("-");
+    const year = Number(yearText);
+    const monthIndex = Number(monthText) - 1;
+    const start = new Date(Date.UTC(year, monthIndex, 1));
+    const end = new Date(Date.UTC(year, monthIndex + 1, 1));
+
+    return { startAt: start.toISOString(), endAt: end.toISOString() };
+  }
+
+  const [yearText, quarterText] = periodKey.split("-Q");
+  const year = Number(yearText);
+  const startMonth = (Number(quarterText) - 1) * 3;
+  const start = new Date(Date.UTC(year, startMonth, 1));
+  const end = new Date(Date.UTC(year, startMonth + 3, 1));
+
+  return { startAt: start.toISOString(), endAt: end.toISOString() };
+}
+
+function validateNotFuturePeriod(periodType, periodKey) {
+  const requested = periodBounds(periodType, periodKey).startAt;
+  const current = periodBounds(
+    periodType,
+    currentPeriodKey(periodType)
+  ).startAt;
+
+  if (requested > current) {
+    throw new RegistryError("A future leaderboard period cannot be awarded.", 409);
+  }
+}
+
+function normalizeRewardType(value) {
+  const rewardType = cleanText(value, 40).toLowerCase();
+
+  if (!REWARD_TYPES.has(rewardType)) {
+    throw new RegistryError(
+      "Choose cash, store credit, or swag as the reward type.",
+      400
+    );
+  }
+
+  return rewardType;
+}
+
+function normalizeRewardAmount(value) {
+  const amount = Number(value);
+
+  if (
+    !Number.isInteger(amount) ||
+    amount < 0 ||
+    amount > MAX_REWARD_AMOUNT_CENTS
+  ) {
+    throw new RegistryError(
+      "Reward amount must be a whole number of cents from $0 to $10,000.",
+      400
+    );
+  }
+
+  return amount;
+}
+
+function normalizeMinimumReferrals(value) {
+  const minimum = Number(value);
+
+  if (!Number.isInteger(minimum) || minimum < 1 || minimum > 1000) {
+    throw new RegistryError(
+      "The minimum qualifying referrals must be a whole number from 1 to 1,000.",
+      400
+    );
+  }
+
+  return minimum;
+}
+
+function normalizeBoolean(value, fallback) {
+  if (typeof value === "boolean") return value;
+  if (value === 1 || value === "1" || value === "true") return true;
+  if (value === 0 || value === "0" || value === "false") return false;
+  return fallback;
+}
+
+function parseStoredBoolean(value, fallback) {
+  return normalizeBoolean(value, fallback);
+}
+
+function parseStoredInteger(value, fallback, minimum, maximum) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= minimum && number <= maximum
+    ? number
+    : fallback;
+}
+
+function mostRecentSettingValue(values, field) {
+  return Object.values(values)
+    .filter((value) => value?.[field])
+    .sort((left, right) => String(right[field]).localeCompare(String(left[field])))[0]?.[
+    field
+  ] || "";
+}
+
+function getRewardConfig(settings, periodType) {
+  if (periodType === "monthly") {
+    return {
+      enabled: settings.monthlyRewardEnabled,
+      type: settings.monthlyRewardType,
+      amountCents: settings.monthlyRewardAmountCents,
+      description: "Monthly leaderboard winner reward",
+      minimumReferrals: settings.monthlyMinimumReferrals,
+    };
+  }
+
+  return {
+    enabled: settings.quarterlyRewardEnabled,
+    type: settings.quarterlyRewardType,
+    amountCents: settings.quarterlyRewardAmountCents,
+    description: settings.quarterlyRewardDescription,
+    minimumReferrals: settings.quarterlyMinimumReferrals,
+  };
+}
+
+function mapLeaderboardRow(row) {
+  return {
+    accountId: row.partner_account_id,
+    partnerCode: row.partner_code || "",
+    partnerEmail: row.partner_email || "",
+    partnerFirstName: row.partner_first_name || "",
+    partnerLastName: row.partner_last_name || "",
+    referralCount: Number(row.referral_count || 0),
+    revenueCents: Number(row.revenue_cents || 0),
+    commissionCents: Number(row.commission_cents || 0),
+    firstEarnedAt: row.first_earned_at || "",
+    lastEarnedAt: row.last_earned_at || "",
+  };
+}
+
+function compareLeaderboardEntries(left, right, metric) {
+  const primary = leaderboardScore(right, metric) - leaderboardScore(left, metric);
+  if (primary !== 0) return primary;
+
+  const referralDifference = right.referralCount - left.referralCount;
+  if (referralDifference !== 0) return referralDifference;
+
+  const revenueDifference = right.revenueCents - left.revenueCents;
+  if (revenueDifference !== 0) return revenueDifference;
+
+  const commissionDifference = right.commissionCents - left.commissionCents;
+  if (commissionDifference !== 0) return commissionDifference;
+
+  const earnedDifference = String(left.firstEarnedAt).localeCompare(
+    String(right.firstEarnedAt)
+  );
+  if (earnedDifference !== 0) return earnedDifference;
+
+  return String(left.partnerCode).localeCompare(String(right.partnerCode));
+}
+
+function leaderboardScore(entry, metric) {
+  if (metric === "referrals") return entry.referralCount;
+  if (metric === "revenue") return entry.revenueCents;
+  return entry.commissionCents;
+}
+
+function toCustomerLeaderboardEntry(entry) {
+  return {
+    rank: entry.rank,
+    partnerCode: entry.partnerCode,
+    referralCount: entry.referralCount,
+    eligible: entry.eligible,
+  };
+}
+
+function toCustomerOwnLeaderboardEntry(entry) {
+  return {
+    ...toCustomerLeaderboardEntry(entry),
+    revenueCents: entry.revenueCents,
+    commissionCents: entry.commissionCents,
+    score: entry.score,
+    metric: entry.metric,
+  };
+}
+
+function customerLeaderboardSettings(settings) {
+  return {
+    leaderboardMetric: settings.leaderboardMetric,
+    monthlyRewardEnabled: settings.monthlyRewardEnabled,
+    monthlyRewardType: settings.monthlyRewardType,
+    monthlyRewardAmountCents: settings.monthlyRewardAmountCents,
+    monthlyMinimumReferrals: settings.monthlyMinimumReferrals,
+    quarterlyRewardEnabled: settings.quarterlyRewardEnabled,
+    quarterlyRewardType: settings.quarterlyRewardType,
+    quarterlyRewardAmountCents: settings.quarterlyRewardAmountCents,
+    quarterlyRewardDescription: settings.quarterlyRewardDescription,
+    quarterlyMinimumReferrals: settings.quarterlyMinimumReferrals,
+  };
+}
+
+function mapRewardRow(row) {
+  const status = cleanText(row.status, 30).toLowerCase();
+
+  return {
+    rewardId: row.reward_id,
+    periodType: row.period_type,
+    periodKey: row.period_key,
+    partnerAccountId: row.partner_account_id,
+    partnerCode: row.partner_code,
+    partnerEmail: row.partner_email || "",
+    partnerFirstName: row.partner_first_name || "",
+    partnerLastName: row.partner_last_name || "",
+    leaderboardMetric: row.leaderboard_metric,
+    rank: Number(row.rank || 1),
+    referralCount: Number(row.referral_count || 0),
+    revenueCents: Number(row.revenue_cents || 0),
+    commissionCents: Number(row.commission_cents || 0),
+    rewardType: row.reward_type,
+    rewardAmountCents: Number(row.reward_amount_cents || 0),
+    rewardDescription: row.reward_description || "",
+    status: REWARD_STATUSES.has(status) ? status : "awarded",
+    awardedAt: row.awarded_at || "",
+    awardedBy: row.awarded_by || "",
+    issuedAt: row.issued_at || "",
+    issuedBy: row.issued_by || "",
+    deliveryMethod: row.delivery_method || "",
+    referenceNumber: row.reference_number || "",
+    partnerNote: row.partner_note || "",
+    adminNotes: row.admin_notes || "",
+  };
+}
+
+function toCustomerRewardRecord(reward) {
+  if (!reward) return null;
+
+  return {
+    rewardId: reward.rewardId,
+    periodType: reward.periodType,
+    periodKey: reward.periodKey,
+    partnerCode: reward.partnerCode,
+    leaderboardMetric: reward.leaderboardMetric,
+    rank: reward.rank,
+    referralCount: reward.referralCount,
+    rewardType: reward.rewardType,
+    rewardAmountCents: reward.rewardAmountCents,
+    rewardDescription: reward.rewardDescription,
+    status: reward.status,
+    awardedAt: reward.awardedAt,
+    issuedAt: reward.issuedAt,
+    deliveryMethod: reward.deliveryMethod,
+    partnerNote: reward.partnerNote,
+  };
+}
+
+function createRewardId(periodType, periodKey) {
+  return `REWARD-${periodType.toUpperCase()}-${periodKey}-${crypto
+    .randomUUID()
+    .split("-")[0]
+    .toUpperCase()}`;
+}
+
 function normalizeApplication(payload) {
   const application = {
     accountId: cleanText(payload.accountId, 150),
@@ -1884,41 +2555,13 @@ function normalizeApplication(payload) {
     firstName: cleanText(payload.firstName, 100),
     lastName: cleanText(payload.lastName, 100),
     code: normalizeCode(payload.code),
-
-    primaryPlatform: cleanText(
-      payload.primaryPlatform,
-      100
-    ),
-
-    profileUrl: cleanText(
-      payload.profileUrl,
-      500
-    ),
-
-    audienceSize: cleanText(
-      payload.audienceSize,
-      100
-    ),
-
-    promotionPlan: cleanMultilineText(
-      payload.promotionPlan,
-      2000
-    ),
-
-    experience: cleanMultilineText(
-      payload.experience,
-      1000
-    ),
-
-    agreementAcceptedAt: cleanText(
-      payload.agreementAcceptedAt,
-      50
-    ),
-
-    agreementVersion: cleanText(
-      payload.agreementVersion,
-      50
-    ),
+    primaryPlatform: cleanText(payload.primaryPlatform, 100),
+    profileUrl: cleanText(payload.profileUrl, 500),
+    audienceSize: cleanText(payload.audienceSize, 100),
+    promotionPlan: cleanMultilineText(payload.promotionPlan, 2000),
+    experience: cleanMultilineText(payload.experience, 1000),
+    agreementAcceptedAt: cleanText(payload.agreementAcceptedAt, 50),
+    agreementVersion: cleanText(payload.agreementVersion, 50),
   };
 
   if (
@@ -1938,25 +2581,15 @@ function normalizeApplication(payload) {
     );
   }
 
-  if (
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-      application.email
-    )
-  ) {
-    throw new RegistryError(
-      "The customer email address is invalid.",
-      400
-    );
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(application.email)) {
+    throw new RegistryError("The customer email address is invalid.", 400);
   }
 
   return application;
 }
 
 function mapApplicationRow(row) {
-  const status = cleanText(
-    row.status,
-    30
-  ).toLowerCase();
+  const status = cleanText(row.status, 30).toLowerCase();
 
   return {
     accountId: row.account_id,
@@ -1964,135 +2597,64 @@ function mapApplicationRow(row) {
     firstName: row.first_name,
     lastName: row.last_name,
     code: row.code,
-
-    status: APPLICATION_STATUSES.has(status)
-      ? status
-      : "pending",
-
+    status: APPLICATION_STATUSES.has(status) ? status : "pending",
     primaryPlatform: row.primary_platform,
     profileUrl: row.profile_url || "",
     audienceSize: row.audience_size,
     promotionPlan: row.promotion_plan,
     experience: row.experience || "",
-
-    agreementAcceptedAt:
-      row.agreement_accepted_at,
-
-    agreementVersion:
-      row.agreement_version || "",
-
+    agreementAcceptedAt: row.agreement_accepted_at,
+    agreementVersion: row.agreement_version || "",
     submittedAt: row.submitted_at,
     updatedAt: row.updated_at,
-
-    applicationNumber: Number(
-      row.application_number || 1
-    ),
-
+    applicationNumber: Number(row.application_number || 1),
     reviewedAt: row.reviewed_at || "",
     reviewedBy: row.reviewed_by || "",
-
-    customerMessage:
-      row.customer_message || "",
-
+    customerMessage: row.customer_message || "",
     adminNotes: row.admin_notes || "",
     deniedAt: row.denied_at || "",
     suspendedAt: row.suspended_at || "",
     reactivatedAt: row.reactivated_at || "",
-
-    lastStatusChangeAt:
-      row.last_status_change_at || "",
-
+    lastStatusChangeAt: row.last_status_change_at || "",
     commissionRateBps: Number(
-      row.commission_rate_bps ??
-        DEFAULT_COMMISSION_RATE_BPS
+      row.commission_rate_bps ?? DEFAULT_COMMISSION_RATE_BPS
     ),
   };
 }
 
 function mapReferralRow(row) {
-  const referralStatus = cleanText(
-    row.referral_status,
-    30
-  ).toLowerCase();
-
-  const payoutId = cleanText(
-    row.payout_id,
-    100
-  );
+  const referralStatus = cleanText(row.referral_status, 30).toLowerCase();
+  const payoutId = cleanText(row.payout_id, 100);
 
   return {
     orderId: row.order_id,
-
-    partnerAccountId:
-      row.partner_account_id,
-
+    partnerAccountId: row.partner_account_id,
     partnerCode: row.partner_code,
-
-    customerAccountId:
-      row.customer_account_id,
-
-    customerEmail:
-      row.customer_email || "",
-
-    orderSubtotalCents: Number(
-      row.order_subtotal_cents || 0
-    ),
-
-    commissionRateBps: Number(
-      row.commission_rate_bps || 0
-    ),
-
-    commissionAmountCents: Number(
-      row.commission_amount_cents || 0
-    ),
-
-    referralStatus:
-      REFERRAL_STATUSES.has(referralStatus)
-        ? referralStatus
-        : "pending",
-
+    customerAccountId: row.customer_account_id,
+    customerEmail: row.customer_email || "",
+    orderSubtotalCents: Number(row.order_subtotal_cents || 0),
+    commissionRateBps: Number(row.commission_rate_bps || 0),
+    commissionAmountCents: Number(row.commission_amount_cents || 0),
+    referralStatus: REFERRAL_STATUSES.has(referralStatus)
+      ? referralStatus
+      : "pending",
     commissionStatus: payoutId
       ? "paid"
       : REFERRAL_STATUSES.has(referralStatus)
       ? referralStatus
       : "pending",
-
-    orderStatus:
-      row.order_status ||
-      "Order Request Received",
-
+    orderStatus: row.order_status || "Order Request Received",
     createdAt: row.created_at || "",
     updatedAt: row.updated_at || "",
     earnedAt: row.earned_at || "",
     voidedAt: row.voided_at || "",
-
     payoutId,
-
-    payoutType: cleanText(
-      row.payout_type,
-      40
-    ),
-
-    payoutMethod: cleanText(
-      row.payment_method,
-      100
-    ),
-
-    payoutReferenceNumber: cleanText(
-      row.payout_reference_number,
-      150
-    ),
-
-    payoutPaidAt:
-      row.payout_paid_at || "",
-
-    payoutCreatedAt:
-      row.payout_created_at || "",
-
-    requiresAdjustment: Boolean(
-      payoutId &&
-        referralStatus === "voided"
-    ),
+    payoutType: cleanText(row.payout_type, 40),
+    payoutMethod: cleanText(row.payment_method, 100),
+    payoutReferenceNumber: cleanText(row.payout_reference_number, 150),
+    payoutPaidAt: row.payout_paid_at || "",
+    payoutCreatedAt: row.payout_created_at || "",
+    requiresAdjustment: Boolean(payoutId && referralStatus === "voided"),
   };
 }
 
@@ -2102,66 +2664,30 @@ function mapCustomerReferralRow(row) {
   return {
     orderId: referral.orderId,
     partnerCode: referral.partnerCode,
-
-    orderSubtotalCents:
-      referral.orderSubtotalCents,
-
-    commissionRateBps:
-      referral.commissionRateBps,
-
-    commissionAmountCents:
-      referral.commissionAmountCents,
-
-    referralStatus:
-      referral.referralStatus,
-
-    commissionStatus:
-      referral.commissionStatus,
-
-    orderStatus:
-      referral.orderStatus,
-
-    createdAt:
-      referral.createdAt,
-
-    updatedAt:
-      referral.updatedAt,
-
-    earnedAt:
-      referral.earnedAt,
-
-    voidedAt:
-      referral.voidedAt,
-
-    payoutId:
-      referral.payoutId,
-
-    payoutType:
-      referral.payoutType,
-
-    payoutMethod:
-      referral.payoutMethod,
-
-    payoutPaidAt:
-      referral.payoutPaidAt,
-
-    requiresAdjustment:
-      referral.requiresAdjustment,
+    orderSubtotalCents: referral.orderSubtotalCents,
+    commissionRateBps: referral.commissionRateBps,
+    commissionAmountCents: referral.commissionAmountCents,
+    referralStatus: referral.referralStatus,
+    commissionStatus: referral.commissionStatus,
+    orderStatus: referral.orderStatus,
+    createdAt: referral.createdAt,
+    updatedAt: referral.updatedAt,
+    earnedAt: referral.earnedAt,
+    voidedAt: referral.voidedAt,
+    payoutId: referral.payoutId,
+    payoutType: referral.payoutType,
+    payoutMethod: referral.payoutMethod,
+    payoutPaidAt: referral.payoutPaidAt,
+    requiresAdjustment: referral.requiresAdjustment,
   };
 }
 
 function mapAdminReferralRow(row) {
   return {
     ...mapReferralRow(row),
-
-    partnerEmail:
-      row.partner_email || "",
-
-    partnerFirstName:
-      row.partner_first_name || "",
-
-    partnerLastName:
-      row.partner_last_name || "",
+    partnerEmail: row.partner_email || "",
+    partnerFirstName: row.partner_first_name || "",
+    partnerLastName: row.partner_last_name || "",
   };
 }
 
@@ -2171,57 +2697,19 @@ function mapSummaryRow(row) {
   }
 
   return {
-    totalCount: Number(
-      row.total_count || 0
-    ),
-
-    pendingCount: Number(
-      row.pending_count || 0
-    ),
-
-    earnedCount: Number(
-      row.earned_count || 0
-    ),
-
-    voidedCount: Number(
-      row.voided_count || 0
-    ),
-
-    pendingCommissionCents: Number(
-      row.pending_commission_cents || 0
-    ),
-
-    earnedCommissionCents: Number(
-      row.earned_commission_cents || 0
-    ),
-
-    voidedCommissionCents: Number(
-      row.voided_commission_cents || 0
-    ),
-
-    earnedRevenueCents: Number(
-      row.earned_revenue_cents || 0
-    ),
-
-    availableReferralCount: Number(
-      row.available_referral_count || 0
-    ),
-
-    availableCommissionCents: Number(
-      row.available_commission_cents || 0
-    ),
-
-    paidReferralCount: Number(
-      row.paid_referral_count || 0
-    ),
-
-    paidCommissionCents: Number(
-      row.paid_commission_cents || 0
-    ),
-
-    adjustmentRequiredCount: Number(
-      row.adjustment_required_count || 0
-    ),
+    totalCount: Number(row.total_count || 0),
+    pendingCount: Number(row.pending_count || 0),
+    earnedCount: Number(row.earned_count || 0),
+    voidedCount: Number(row.voided_count || 0),
+    pendingCommissionCents: Number(row.pending_commission_cents || 0),
+    earnedCommissionCents: Number(row.earned_commission_cents || 0),
+    voidedCommissionCents: Number(row.voided_commission_cents || 0),
+    earnedRevenueCents: Number(row.earned_revenue_cents || 0),
+    availableReferralCount: Number(row.available_referral_count || 0),
+    availableCommissionCents: Number(row.available_commission_cents || 0),
+    paidReferralCount: Number(row.paid_referral_count || 0),
+    paidCommissionCents: Number(row.paid_commission_cents || 0),
+    adjustmentRequiredCount: Number(row.adjustment_required_count || 0),
   };
 }
 
@@ -2246,62 +2734,21 @@ function emptyReferralSummary() {
 function mapPayoutRow(row) {
   return {
     payoutId: row.payout_id,
-
-    partnerAccountId:
-      row.partner_account_id,
-
-    partnerCode:
-      row.partner_code,
-
-    partnerEmail:
-      row.partner_email || "",
-
-    partnerFirstName:
-      row.partner_first_name || "",
-
-    partnerLastName:
-      row.partner_last_name || "",
-
-    amountCents: Number(
-      row.amount_cents || 0
-    ),
-
-    referralCount: Number(
-      row.referral_count || 0
-    ),
-
-    payoutType: cleanText(
-      row.payout_type,
-      40
-    ),
-
-    paymentMethod: cleanText(
-      row.payment_method,
-      100
-    ),
-
-    referenceNumber: cleanText(
-      row.reference_number,
-      150
-    ),
-
-    partnerNote: cleanMultilineText(
-      row.partner_note,
-      1000
-    ),
-
-    adminNotes: cleanMultilineText(
-      row.admin_notes,
-      2000
-    ),
-
+    partnerAccountId: row.partner_account_id,
+    partnerCode: row.partner_code,
+    partnerEmail: row.partner_email || "",
+    partnerFirstName: row.partner_first_name || "",
+    partnerLastName: row.partner_last_name || "",
+    amountCents: Number(row.amount_cents || 0),
+    referralCount: Number(row.referral_count || 0),
+    payoutType: cleanText(row.payout_type, 40),
+    paymentMethod: cleanText(row.payment_method, 100),
+    referenceNumber: cleanText(row.reference_number, 150),
+    partnerNote: cleanMultilineText(row.partner_note, 1000),
+    adminNotes: cleanMultilineText(row.admin_notes, 2000),
     paidAt: row.paid_at || "",
     createdAt: row.created_at || "",
-
-    createdBy: cleanText(
-      row.created_by,
-      254
-    ),
+    createdBy: cleanText(row.created_by, 254),
   };
 }
 
@@ -2310,21 +2757,10 @@ function normalizeCode(value) {
 }
 
 function normalizeOrderId(value) {
-  const orderId = cleanText(
-    value,
-    100
-  ).toUpperCase();
+  const orderId = cleanText(value, 100).toUpperCase();
 
-  if (
-    !orderId ||
-    !/^[A-Z0-9][A-Z0-9-]{2,99}$/.test(
-      orderId
-    )
-  ) {
-    throw new RegistryError(
-      "The order number is invalid.",
-      400
-    );
+  if (!orderId || !/^[A-Z0-9][A-Z0-9-]{2,99}$/.test(orderId)) {
+    throw new RegistryError("The order number is invalid.", 400);
   }
 
   return orderId;
@@ -2333,15 +2769,8 @@ function normalizeOrderId(value) {
 function normalizeMoneyToCents(value) {
   const amount = Number(value);
 
-  if (
-    !Number.isFinite(amount) ||
-    amount < 0 ||
-    amount > 1_000_000
-  ) {
-    throw new RegistryError(
-      "The order subtotal is invalid.",
-      400
-    );
+  if (!Number.isFinite(amount) || amount < 0 || amount > 1_000_000) {
+    throw new RegistryError("The order subtotal is invalid.", 400);
   }
 
   return Math.round(amount * 100);
@@ -2389,10 +2818,7 @@ function normalizePayoutDate(value) {
   const parsed = new Date(String(value));
 
   if (Number.isNaN(parsed.getTime())) {
-    throw new RegistryError(
-      "The payout date is invalid.",
-      400
-    );
+    throw new RegistryError("The payout date is invalid.", 400);
   }
 
   return parsed.toISOString();
@@ -2403,10 +2829,7 @@ function normalizeOptionalOrderIds(value) {
     return [];
   }
 
-  if (
-    !Array.isArray(value) ||
-    value.length > MAX_REFERRAL_HISTORY
-  ) {
+  if (!Array.isArray(value) || value.length > MAX_REFERRAL_HISTORY) {
     throw new RegistryError(
       "The selected payout referrals are invalid.",
       400
@@ -2414,11 +2837,7 @@ function normalizeOptionalOrderIds(value) {
   }
 
   return Array.from(
-    new Set(
-      value.map((orderId) =>
-        normalizeOrderId(orderId)
-      )
-    )
+    new Set(value.map((orderId) => normalizeOrderId(orderId)))
   );
 }
 
@@ -2430,60 +2849,38 @@ function createPayoutId() {
 }
 
 function formatCentsForMessage(value) {
-  return (
-    Number(value || 0) / 100
-  ).toLocaleString("en-US", {
+  return (Number(value || 0) / 100).toLocaleString("en-US", {
     style: "currency",
     currency: "USD",
   });
 }
 
 function classifyReferralStatus(orderStatus) {
-  const normalizedStatus = cleanText(
-    orderStatus,
-    100
-  ).toLowerCase();
+  const normalizedStatus = cleanText(orderStatus, 100).toLowerCase();
 
-  if (
-    VOIDED_ORDER_STATUSES.has(
-      normalizedStatus
-    )
-  ) {
+  if (VOIDED_ORDER_STATUSES.has(normalizedStatus)) {
     return "voided";
   }
 
-  if (
-    EARNED_ORDER_STATUSES.has(
-      normalizedStatus
-    )
-  ) {
+  if (EARNED_ORDER_STATUSES.has(normalizedStatus)) {
     return "earned";
   }
 
   return "pending";
 }
 
-function getReferralStatusTimestamps(
-  status,
-  existing,
-  now
-) {
+function getReferralStatusTimestamps(status, existing, now) {
   if (status === "earned") {
     return {
-      earnedAt:
-        existing?.earnedAt || now,
-
+      earnedAt: existing?.earnedAt || now,
       voidedAt: "",
     };
   }
 
   if (status === "voided") {
     return {
-      earnedAt:
-        existing?.earnedAt || "",
-
-      voidedAt:
-        existing?.voidedAt || now,
+      earnedAt: existing?.earnedAt || "",
+      voidedAt: existing?.voidedAt || now,
     };
   }
 
@@ -2494,89 +2891,39 @@ function getReferralStatusTimestamps(
 }
 
 function cleanText(value, maximumLength) {
-  return String(
-    value == null
-      ? ""
-      : value
-  )
-    .replace(
-      /[\u0000-\u001F\u007F]/g,
-      " "
-    )
-    .replace(
-      /\s+/g,
-      " "
-    )
+  return String(value == null ? "" : value)
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
     .trim()
-    .slice(
-      0,
-      maximumLength
-    );
+    .slice(0, maximumLength);
 }
 
-function cleanMultilineText(
-  value,
-  maximumLength
-) {
-  return String(
-    value == null
-      ? ""
-      : value
-  )
-    .replace(
-      /\r\n?/g,
-      "\n"
-    )
-    .replace(
-      /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
-      " "
-    )
+function cleanMultilineText(value, maximumLength) {
+  return String(value == null ? "" : value)
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ")
     .trim()
-    .slice(
-      0,
-      maximumLength
-    );
+    .slice(0, maximumLength);
 }
 
 async function readJson(request) {
-  const contentType =
-    request.headers.get(
-      "Content-Type"
-    ) || "";
+  const contentType = request.headers.get("Content-Type") || "";
 
-  if (
-    !contentType
-      .toLowerCase()
-      .includes(
-        "application/json"
-      )
-  ) {
-    throw new RegistryError(
-      "Content-Type must be application/json.",
-      415
-    );
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new RegistryError("Content-Type must be application/json.", 415);
   }
 
   const text = await request.text();
 
   if (text.length > 25_000) {
-    throw new RegistryError(
-      "The partner request is too large.",
-      413
-    );
+    throw new RegistryError("The partner request is too large.", 413);
   }
 
   try {
     const payload = JSON.parse(text);
 
-    if (
-      !payload ||
-      typeof payload !== "object" ||
-      Array.isArray(payload)
-    ) {
-      throw new Error(
-        "Invalid JSON object."
-      );
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error("Invalid JSON object.");
     }
 
     return payload;
@@ -2592,13 +2939,10 @@ function actionMessage(action) {
   const messages = {
     approve:
       "The partner application was approved and the customer-created code is active.",
-
     deny:
       "The partner application was denied and the selected code was released.",
-
     suspend:
       "The partner was suspended and the code is inactive but remains reserved.",
-
     reactivate:
       "The partner was reactivated and the existing code is active again.",
   };
@@ -2607,32 +2951,21 @@ function actionMessage(action) {
 }
 
 function jsonResponse(body, status = 200) {
-  return new Response(
-    JSON.stringify(body),
-    {
-      status,
-
-      headers: {
-        "Content-Type":
-          "application/json; charset=utf-8",
-
-        "Cache-Control":
-          "no-store",
-      },
-    }
-  );
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
 }
 
 function errorResponse(error) {
-  const status =
-    error instanceof RegistryError
-      ? error.status
-      : 500;
+  const status = error instanceof RegistryError ? error.status : 500;
 
   return jsonResponse(
     {
       success: false,
-
       error:
         error?.message ||
         "The partner registry request could not be completed.",
@@ -2644,7 +2977,6 @@ function errorResponse(error) {
 class RegistryError extends Error {
   constructor(message, status = 400) {
     super(message);
-
     this.name = "RegistryError";
     this.status = status;
   }

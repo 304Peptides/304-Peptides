@@ -24,6 +24,21 @@ const EMPTY_SETTINGS = {
   updatedBy: "",
 };
 
+const EMPTY_LEADERBOARD_SETTINGS = {
+  leaderboardMetric: "commission",
+  monthlyRewardEnabled: true,
+  monthlyRewardType: "store_credit",
+  monthlyRewardAmountCents: 5000,
+  monthlyMinimumReferrals: 1,
+  quarterlyRewardEnabled: true,
+  quarterlyRewardType: "swag",
+  quarterlyRewardAmountCents: 0,
+  quarterlyRewardDescription: "304 Peptides swag package",
+  quarterlyMinimumReferrals: 3,
+  updatedAt: "",
+  updatedBy: "",
+};
+
 function getStoredSecret() {
   try {
     return window.sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
@@ -151,6 +166,106 @@ function normalizePayouts(records) {
     );
 }
 
+function normalizeLeaderboardEntries(records) {
+  return (Array.isArray(records) ? records : [])
+    .filter((record) => record && typeof record === "object")
+    .map((record) => ({
+      ...record,
+      rank: Number(record.rank || 0),
+      partnerCode: String(record.partnerCode || "").toUpperCase(),
+      referralCount: Number(record.referralCount || 0),
+      revenueCents: Number(record.revenueCents || 0),
+      commissionCents: Number(record.commissionCents || 0),
+      score: Number(record.score || 0),
+      metric: String(record.metric || "commission").toLowerCase(),
+      eligible: Boolean(record.eligible),
+    }))
+    .sort((left, right) => left.rank - right.rank);
+}
+
+function normalizeRewards(records) {
+  return (Array.isArray(records) ? records : [])
+    .filter((record) => record && typeof record === "object")
+    .map((record) => ({
+      ...record,
+      partnerCode: String(record.partnerCode || "").toUpperCase(),
+      periodType: String(record.periodType || "monthly").toLowerCase(),
+      rewardType: String(record.rewardType || "store_credit").toLowerCase(),
+      status: String(record.status || "awarded").toLowerCase(),
+      rank: Number(record.rank || 0),
+      referralCount: Number(record.referralCount || 0),
+      revenueCents: Number(record.revenueCents || 0),
+      commissionCents: Number(record.commissionCents || 0),
+      rewardAmountCents: Number(record.rewardAmountCents || 0),
+    }))
+    .sort((left, right) =>
+      String(right.awardedAt || right.issuedAt || "").localeCompare(
+        String(left.awardedAt || left.issuedAt || "")
+      )
+    );
+}
+
+function normalizeLeaderboardSettings(settings) {
+  const source = settings && typeof settings === "object" ? settings : {};
+  return {
+    ...EMPTY_LEADERBOARD_SETTINGS,
+    ...source,
+    leaderboardMetric: ["commission", "revenue", "referrals"].includes(
+      String(source.leaderboardMetric || "").toLowerCase()
+    )
+      ? String(source.leaderboardMetric).toLowerCase()
+      : "commission",
+    monthlyRewardEnabled: source.monthlyRewardEnabled !== false,
+    monthlyRewardType: String(source.monthlyRewardType || "store_credit").toLowerCase(),
+    monthlyRewardAmountCents: Number(source.monthlyRewardAmountCents ?? 5000),
+    monthlyMinimumReferrals: Number(source.monthlyMinimumReferrals || 1),
+    quarterlyRewardEnabled: source.quarterlyRewardEnabled !== false,
+    quarterlyRewardType: String(source.quarterlyRewardType || "swag").toLowerCase(),
+    quarterlyRewardAmountCents: Number(source.quarterlyRewardAmountCents || 0),
+    quarterlyRewardDescription:
+      String(source.quarterlyRewardDescription || "304 Peptides swag package"),
+    quarterlyMinimumReferrals: Number(source.quarterlyMinimumReferrals || 3),
+  };
+}
+
+function getCurrentMonthlyPeriodKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getCurrentQuarterlyPeriodKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-Q${Math.floor(now.getMonth() / 3) + 1}`;
+}
+
+function getDefaultPeriodKey(periodType) {
+  return periodType === "quarterly"
+    ? getCurrentQuarterlyPeriodKey()
+    : getCurrentMonthlyPeriodKey();
+}
+
+function formatLeaderboardScore(entry, metric) {
+  if (metric === "revenue") return formatMoneyFromCents(entry.revenueCents);
+  if (metric === "referrals") return String(entry.referralCount);
+  return formatMoneyFromCents(entry.commissionCents);
+}
+
+function formatRewardValue(reward) {
+  if (!reward) return "Unavailable";
+  if (reward.rewardType === "swag") {
+    return reward.rewardDescription || "Swag reward";
+  }
+  return formatMoneyFromCents(reward.rewardAmountCents);
+}
+
+function rewardTypeLabel(value) {
+  return ({
+    cash: "Cash",
+    store_credit: "Store Credit",
+    swag: "Swag",
+  })[value] || "Reward";
+}
+
 async function readJson(response) {
   const text = await response.text();
   let result;
@@ -211,6 +326,37 @@ function PartnerHQ({ onNavigate = () => {} }) {
     adminNotes: "",
   });
   const [isCreatingPayout, setIsCreatingPayout] = useState(false);
+  const [leaderboardPeriodType, setLeaderboardPeriodType] = useState("monthly");
+  const [leaderboardPeriodKey, setLeaderboardPeriodKey] = useState(
+    getCurrentMonthlyPeriodKey
+  );
+  const [leaderboardPeriod, setLeaderboardPeriod] = useState(null);
+  const [leaderboardEntries, setLeaderboardEntries] = useState([]);
+  const [leaderboardReward, setLeaderboardReward] = useState(null);
+  const [rewards, setRewards] = useState([]);
+  const [leaderboardSettings, setLeaderboardSettings] = useState(
+    EMPTY_LEADERBOARD_SETTINGS
+  );
+  const [leaderboardDraft, setLeaderboardDraft] = useState({
+    ...EMPTY_LEADERBOARD_SETTINGS,
+    monthlyRewardAmountDollars: "50",
+    quarterlyRewardAmountDollars: "0",
+  });
+  const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState(false);
+  const [isSavingLeaderboardSettings, setIsSavingLeaderboardSettings] =
+    useState(false);
+  const [isAwardingReward, setIsAwardingReward] = useState(false);
+  const [awardPartnerNote, setAwardPartnerNote] = useState("");
+  const [awardAdminNotes, setAwardAdminNotes] = useState("");
+  const [rewardToIssue, setRewardToIssue] = useState(null);
+  const [issueForm, setIssueForm] = useState({
+    deliveryMethod: "",
+    referenceNumber: "",
+    issuedAt: getLocalDateTimeValue(),
+    partnerNote: "",
+    adminNotes: "",
+  });
+  const [isIssuingReward, setIsIssuingReward] = useState(false);
 
   const loadPartnerData = useCallback(
     async (secret = adminSecret) => {
@@ -224,33 +370,63 @@ function PartnerHQ({ onNavigate = () => {} }) {
           Accept: "application/json",
           Authorization: `Bearer ${cleanedSecret}`,
         };
-        const [applicationResponse, referralResponse, payoutResponse] =
-          await Promise.all([
-            fetch("/api/admin/partner-applications", {
+        const currentMonthlyPeriod = getCurrentMonthlyPeriodKey();
+        const [
+          applicationResponse,
+          referralResponse,
+          payoutResponse,
+          leaderboardResponse,
+          rewardResponse,
+        ] = await Promise.all([
+          fetch("/api/admin/partner-applications", {
+            method: "GET",
+            headers,
+            credentials: "same-origin",
+            cache: "no-store",
+          }),
+          fetch("/api/admin/partner-referrals", {
+            method: "GET",
+            headers,
+            credentials: "same-origin",
+            cache: "no-store",
+          }),
+          fetch("/api/admin/partner-payouts", {
+            method: "GET",
+            headers,
+            credentials: "same-origin",
+            cache: "no-store",
+          }),
+          fetch(
+            `/api/admin/partner-leaderboard?periodType=monthly&periodKey=${encodeURIComponent(
+              currentMonthlyPeriod
+            )}`,
+            {
               method: "GET",
               headers,
               credentials: "same-origin",
               cache: "no-store",
-            }),
-            fetch("/api/admin/partner-referrals", {
-              method: "GET",
-              headers,
-              credentials: "same-origin",
-              cache: "no-store",
-            }),
-            fetch("/api/admin/partner-payouts", {
-              method: "GET",
-              headers,
-              credentials: "same-origin",
-              cache: "no-store",
-            }),
-          ]);
-        const [applicationResult, referralResult, payoutResult] =
-          await Promise.all([
-            readJson(applicationResponse),
-            readJson(referralResponse),
-            readJson(payoutResponse),
-          ]);
+            }
+          ),
+          fetch("/api/admin/partner-rewards", {
+            method: "GET",
+            headers,
+            credentials: "same-origin",
+            cache: "no-store",
+          }),
+        ]);
+        const [
+          applicationResult,
+          referralResult,
+          payoutResult,
+          leaderboardResult,
+          rewardResult,
+        ] = await Promise.all([
+          readJson(applicationResponse),
+          readJson(referralResponse),
+          readJson(payoutResponse),
+          readJson(leaderboardResponse),
+          readJson(rewardResponse),
+        ]);
         const nextApplications = normalizeApplications(
           applicationResult.applications || applicationResult.records || []
         );
@@ -268,6 +444,29 @@ function PartnerHQ({ onNavigate = () => {} }) {
         setPayouts(
           normalizePayouts(payoutResult.payouts || payoutResult.records || [])
         );
+        const nextLeaderboardSettings = normalizeLeaderboardSettings(
+          rewardResult.settings || leaderboardResult.settings
+        );
+        setLeaderboardPeriodType("monthly");
+        setLeaderboardPeriodKey(currentMonthlyPeriod);
+        setLeaderboardPeriod(leaderboardResult.period || null);
+        setLeaderboardEntries(
+          normalizeLeaderboardEntries(leaderboardResult.entries || [])
+        );
+        setLeaderboardReward(leaderboardResult.reward || null);
+        setRewards(
+          normalizeRewards(rewardResult.rewards || rewardResult.records || [])
+        );
+        setLeaderboardSettings(nextLeaderboardSettings);
+        setLeaderboardDraft({
+          ...nextLeaderboardSettings,
+          monthlyRewardAmountDollars: String(
+            nextLeaderboardSettings.monthlyRewardAmountCents / 100
+          ),
+          quarterlyRewardAmountDollars: String(
+            nextLeaderboardSettings.quarterlyRewardAmountCents / 100
+          ),
+        });
         setSettings(nextSettings);
         setThresholdDraft(String(nextSettings.minimumPayoutCents / 100));
         setRateDrafts(
@@ -283,6 +482,9 @@ function PartnerHQ({ onNavigate = () => {} }) {
         setApplications([]);
         setReferrals([]);
         setPayouts([]);
+        setLeaderboardEntries([]);
+        setRewards([]);
+        setLeaderboardReward(null);
         setIsReady(false);
         setLoadError(error.message || "Partner records could not be loaded.");
       } finally {
@@ -536,6 +738,10 @@ function PartnerHQ({ onNavigate = () => {} }) {
     setApplications([]);
     setReferrals([]);
     setPayouts([]);
+    setLeaderboardEntries([]);
+    setRewards([]);
+    setLeaderboardReward(null);
+    setRewardToIssue(null);
     setIsReady(false);
     setLoadError("");
     setActionError("");
@@ -848,6 +1054,291 @@ function PartnerHQ({ onNavigate = () => {} }) {
     }
   }
 
+  async function loadLeaderboardPeriod(event) {
+    event?.preventDefault?.();
+    if (isLoadingLeaderboard) return;
+
+    const type = leaderboardPeriodType;
+    const key = String(leaderboardPeriodKey || "").trim().toUpperCase();
+    const valid =
+      type === "monthly"
+        ? /^\d{4}-(0[1-9]|1[0-2])$/.test(key)
+        : /^\d{4}-Q[1-4]$/.test(key);
+
+    if (!valid) {
+      setActionError(
+        type === "monthly"
+          ? "Enter the monthly period as YYYY-MM."
+          : "Enter the quarterly period as YYYY-Q1 through YYYY-Q4."
+      );
+      return;
+    }
+
+    setIsLoadingLeaderboard(true);
+    setActionError("");
+    setActionMessage("");
+
+    try {
+      const response = await fetch(
+        `/api/admin/partner-leaderboard?periodType=${encodeURIComponent(
+          type
+        )}&periodKey=${encodeURIComponent(key)}`,
+        {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${adminSecret}`,
+          },
+          credentials: "same-origin",
+          cache: "no-store",
+        }
+      );
+      const result = await readJson(response);
+      setLeaderboardPeriod(result.period || null);
+      setLeaderboardEntries(normalizeLeaderboardEntries(result.entries || []));
+      setLeaderboardReward(result.reward || null);
+      const nextSettings = normalizeLeaderboardSettings(result.settings);
+      setLeaderboardSettings(nextSettings);
+      setLeaderboardPeriodKey(key);
+    } catch (error) {
+      setActionError(error.message || "The leaderboard period could not be loaded.");
+    } finally {
+      setIsLoadingLeaderboard(false);
+    }
+  }
+
+  async function saveLeaderboardSettings(event) {
+    event.preventDefault();
+    if (isSavingLeaderboardSettings) return;
+
+    const monthlyDollars = Number(leaderboardDraft.monthlyRewardAmountDollars);
+    const quarterlyDollars = Number(
+      leaderboardDraft.quarterlyRewardAmountDollars
+    );
+    const monthlyMinimum = Number(leaderboardDraft.monthlyMinimumReferrals);
+    const quarterlyMinimum = Number(leaderboardDraft.quarterlyMinimumReferrals);
+
+    if (
+      !Number.isFinite(monthlyDollars) ||
+      monthlyDollars < 0 ||
+      monthlyDollars > 10000 ||
+      !Number.isFinite(quarterlyDollars) ||
+      quarterlyDollars < 0 ||
+      quarterlyDollars > 10000
+    ) {
+      setActionError("Reward amounts must be between $0 and $10,000.");
+      return;
+    }
+
+    if (
+      !Number.isInteger(monthlyMinimum) ||
+      monthlyMinimum < 1 ||
+      monthlyMinimum > 1000 ||
+      !Number.isInteger(quarterlyMinimum) ||
+      quarterlyMinimum < 1 ||
+      quarterlyMinimum > 1000
+    ) {
+      setActionError("Minimum referrals must be whole numbers from 1 to 1,000.");
+      return;
+    }
+
+    if (
+      leaderboardDraft.quarterlyRewardType === "swag" &&
+      !String(leaderboardDraft.quarterlyRewardDescription || "").trim()
+    ) {
+      setActionError("Enter a description for the quarterly swag reward.");
+      return;
+    }
+
+    if (!window.confirm("Save the leaderboard and reward rules?")) return;
+
+    setIsSavingLeaderboardSettings(true);
+    setActionError("");
+    setActionMessage("");
+
+    try {
+      const response = await fetch("/api/admin/partner-leaderboard-settings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${adminSecret}`,
+        },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          leaderboardMetric: leaderboardDraft.leaderboardMetric,
+          monthlyRewardEnabled: Boolean(leaderboardDraft.monthlyRewardEnabled),
+          monthlyRewardType: leaderboardDraft.monthlyRewardType,
+          monthlyRewardAmountDollars: monthlyDollars,
+          monthlyMinimumReferrals: monthlyMinimum,
+          quarterlyRewardEnabled: Boolean(
+            leaderboardDraft.quarterlyRewardEnabled
+          ),
+          quarterlyRewardType: leaderboardDraft.quarterlyRewardType,
+          quarterlyRewardAmountDollars: quarterlyDollars,
+          quarterlyRewardDescription: String(
+            leaderboardDraft.quarterlyRewardDescription || ""
+          ).trim(),
+          quarterlyMinimumReferrals: quarterlyMinimum,
+        }),
+      });
+      const result = await readJson(response);
+      const nextSettings = normalizeLeaderboardSettings(result.settings);
+      setLeaderboardSettings(nextSettings);
+      setLeaderboardDraft({
+        ...nextSettings,
+        monthlyRewardAmountDollars: String(
+          nextSettings.monthlyRewardAmountCents / 100
+        ),
+        quarterlyRewardAmountDollars: String(
+          nextSettings.quarterlyRewardAmountCents / 100
+        ),
+      });
+      setActionMessage(
+        result.message || "The leaderboard and reward rules were updated."
+      );
+      await loadLeaderboardPeriod();
+    } catch (error) {
+      setActionError(error.message || "The leaderboard settings could not be saved.");
+    } finally {
+      setIsSavingLeaderboardSettings(false);
+    }
+  }
+
+  async function awardLeaderboardWinner() {
+    if (isAwardingReward || leaderboardReward) return;
+    const winner = leaderboardEntries.find((entry) => entry.eligible);
+    if (!winner) {
+      setActionError("No partner currently meets the referral minimum for this period.");
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Record ${winner.partnerCode} as the ${leaderboardPeriodKey} ${leaderboardPeriodType} leaderboard winner?`
+      )
+    ) {
+      return;
+    }
+
+    setIsAwardingReward(true);
+    setActionError("");
+    setActionMessage("");
+
+    try {
+      const response = await fetch("/api/admin/partner-rewards/award", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${adminSecret}`,
+        },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          periodType: leaderboardPeriodType,
+          periodKey: leaderboardPeriodKey,
+          partnerNote: awardPartnerNote.trim(),
+          adminNotes: awardAdminNotes.trim(),
+        }),
+      });
+      const result = await readJson(response);
+      setLeaderboardReward(result.reward || null);
+      setRewards((current) =>
+        normalizeRewards([result.reward, ...current.filter((reward) => reward.rewardId !== result.reward?.rewardId)])
+      );
+      setAwardPartnerNote("");
+      setAwardAdminNotes("");
+      setActionMessage(result.message || "The leaderboard winner was recorded.");
+    } catch (error) {
+      setActionError(error.message || "The leaderboard winner could not be recorded.");
+    } finally {
+      setIsAwardingReward(false);
+    }
+  }
+
+  function openIssueRewardPanel(reward) {
+    setRewardToIssue(reward);
+    setIssueForm({
+      deliveryMethod: reward.deliveryMethod || "",
+      referenceNumber: reward.referenceNumber || "",
+      issuedAt: getLocalDateTimeValue(),
+      partnerNote: reward.partnerNote || "",
+      adminNotes: reward.adminNotes || "",
+    });
+    setActionError("");
+    setActionMessage("");
+    window.setTimeout(() => {
+      document.getElementById("partner-reward-issue-panel")?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 0);
+  }
+
+  function closeIssueRewardPanel() {
+    setRewardToIssue(null);
+    setIsIssuingReward(false);
+  }
+
+  async function issueReward(event) {
+    event.preventDefault();
+    if (!rewardToIssue || isIssuingReward) return;
+    if (!issueForm.deliveryMethod.trim()) {
+      setActionError("Enter how the reward was delivered or issued.");
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Mark the ${rewardToIssue.periodKey} reward for ${rewardToIssue.partnerCode} as issued?`
+      )
+    ) {
+      return;
+    }
+
+    setIsIssuingReward(true);
+    setActionError("");
+    setActionMessage("");
+
+    try {
+      const response = await fetch("/api/admin/partner-rewards/issue", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${adminSecret}`,
+        },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          rewardId: rewardToIssue.rewardId,
+          deliveryMethod: issueForm.deliveryMethod.trim(),
+          referenceNumber: issueForm.referenceNumber.trim(),
+          issuedAt: issueForm.issuedAt
+            ? new Date(issueForm.issuedAt).toISOString()
+            : undefined,
+          partnerNote: issueForm.partnerNote.trim(),
+          adminNotes: issueForm.adminNotes.trim(),
+        }),
+      });
+      const result = await readJson(response);
+      setRewards((current) =>
+        normalizeRewards(
+          current.map((reward) =>
+            reward.rewardId === result.reward.rewardId ? result.reward : reward
+          )
+        )
+      );
+      if (leaderboardReward?.rewardId === result.reward.rewardId) {
+        setLeaderboardReward(result.reward);
+      }
+      closeIssueRewardPanel();
+      setActionMessage(result.message || "The leaderboard reward was marked as issued.");
+    } catch (error) {
+      setActionError(error.message || "The reward could not be marked as issued.");
+      setIsIssuingReward(false);
+    }
+  }
+
   if (!adminSecret) {
     return (
       <>
@@ -922,7 +1413,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
               <h1>Partner HQ</h1>
               <p>
                 Review applications, control partner access, set commission rates,
-                audit referrals, and record secure cash or store-credit payouts.
+                audit referrals, record payouts, and manage monthly and quarterly partner rewards.
               </p>
             </div>
             <button
@@ -983,6 +1474,216 @@ function PartnerHQ({ onNavigate = () => {} }) {
               </button>
             </form>
           </section>
+
+          <form
+            className="partner-hq-panel partner-hq-leaderboard-settings"
+            onSubmit={saveLeaderboardSettings}
+          >
+            <div className="partner-hq-section-heading">
+              <div>
+                <p className="eyebrow">LEADERBOARD SETTINGS</p>
+                <h2>Ranking And Reward Rules</h2>
+                <p>
+                  Choose how partners are ranked and set the monthly and quarterly
+                  qualification rules. Existing recorded winners are never recalculated.
+                </p>
+              </div>
+              {leaderboardSettings.updatedAt && (
+                <small>
+                  Last updated {formatDate(leaderboardSettings.updatedAt)}
+                  {leaderboardSettings.updatedBy
+                    ? ` by ${leaderboardSettings.updatedBy}`
+                    : ""}
+                </small>
+              )}
+            </div>
+
+            <div className="partner-hq-leaderboard-settings-grid">
+              <label className="partner-hq-field">
+                <span>Ranking Metric</span>
+                <select
+                  value={leaderboardDraft.leaderboardMetric}
+                  disabled={isSavingLeaderboardSettings}
+                  onChange={(event) =>
+                    setLeaderboardDraft((current) => ({
+                      ...current,
+                      leaderboardMetric: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="commission">Commission Earned</option>
+                  <option value="revenue">Referral Revenue</option>
+                  <option value="referrals">Earned Referrals</option>
+                </select>
+              </label>
+
+              <section className="partner-hq-rule-card">
+                <label className="partner-hq-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(leaderboardDraft.monthlyRewardEnabled)}
+                    disabled={isSavingLeaderboardSettings}
+                    onChange={(event) =>
+                      setLeaderboardDraft((current) => ({
+                        ...current,
+                        monthlyRewardEnabled: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span>Monthly reward enabled</span>
+                </label>
+                <div className="partner-hq-rule-grid">
+                  <label className="partner-hq-field">
+                    <span>Reward Type</span>
+                    <select
+                      value={leaderboardDraft.monthlyRewardType}
+                      disabled={isSavingLeaderboardSettings}
+                      onChange={(event) =>
+                        setLeaderboardDraft((current) => ({
+                          ...current,
+                          monthlyRewardType: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="store_credit">Store Credit</option>
+                      <option value="cash">Cash</option>
+                      <option value="swag">Swag</option>
+                    </select>
+                  </label>
+                  <label className="partner-hq-field">
+                    <span>Reward Dollars</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="10000"
+                      step="0.01"
+                      value={leaderboardDraft.monthlyRewardAmountDollars}
+                      disabled={isSavingLeaderboardSettings}
+                      onChange={(event) =>
+                        setLeaderboardDraft((current) => ({
+                          ...current,
+                          monthlyRewardAmountDollars: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="partner-hq-field">
+                    <span>Minimum Earned Referrals</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="1000"
+                      step="1"
+                      value={leaderboardDraft.monthlyMinimumReferrals}
+                      disabled={isSavingLeaderboardSettings}
+                      onChange={(event) =>
+                        setLeaderboardDraft((current) => ({
+                          ...current,
+                          monthlyMinimumReferrals: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+              </section>
+
+              <section className="partner-hq-rule-card">
+                <label className="partner-hq-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(leaderboardDraft.quarterlyRewardEnabled)}
+                    disabled={isSavingLeaderboardSettings}
+                    onChange={(event) =>
+                      setLeaderboardDraft((current) => ({
+                        ...current,
+                        quarterlyRewardEnabled: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span>Quarterly reward enabled</span>
+                </label>
+                <div className="partner-hq-rule-grid">
+                  <label className="partner-hq-field">
+                    <span>Reward Type</span>
+                    <select
+                      value={leaderboardDraft.quarterlyRewardType}
+                      disabled={isSavingLeaderboardSettings}
+                      onChange={(event) =>
+                        setLeaderboardDraft((current) => ({
+                          ...current,
+                          quarterlyRewardType: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="swag">Swag</option>
+                      <option value="store_credit">Store Credit</option>
+                      <option value="cash">Cash</option>
+                    </select>
+                  </label>
+                  <label className="partner-hq-field">
+                    <span>Reward Dollars</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="10000"
+                      step="0.01"
+                      value={leaderboardDraft.quarterlyRewardAmountDollars}
+                      disabled={isSavingLeaderboardSettings}
+                      onChange={(event) =>
+                        setLeaderboardDraft((current) => ({
+                          ...current,
+                          quarterlyRewardAmountDollars: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="partner-hq-field">
+                    <span>Minimum Earned Referrals</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="1000"
+                      step="1"
+                      value={leaderboardDraft.quarterlyMinimumReferrals}
+                      disabled={isSavingLeaderboardSettings}
+                      onChange={(event) =>
+                        setLeaderboardDraft((current) => ({
+                          ...current,
+                          quarterlyMinimumReferrals: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+                <label className="partner-hq-field">
+                  <span>Quarterly Reward Description</span>
+                  <input
+                    type="text"
+                    maxLength="300"
+                    value={leaderboardDraft.quarterlyRewardDescription}
+                    disabled={isSavingLeaderboardSettings}
+                    onChange={(event) =>
+                      setLeaderboardDraft((current) => ({
+                        ...current,
+                        quarterlyRewardDescription: event.target.value,
+                      }))
+                    }
+                    placeholder="304 Peptides swag package"
+                  />
+                </label>
+              </section>
+            </div>
+
+            <div className="partner-hq-button-row">
+              <button
+                type="submit"
+                className="primary-btn"
+                disabled={isSavingLeaderboardSettings}
+              >
+                {isSavingLeaderboardSettings ? "Saving Rules..." : "Save Leaderboard Rules"}
+              </button>
+            </div>
+          </form>
 
           {selectedApplication && selectedAction && (
             <form
@@ -1056,6 +1757,126 @@ function PartnerHQ({ onNavigate = () => {} }) {
                   className="secondary-btn"
                   onClick={closeActionPanel}
                   disabled={isActing}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+
+          {rewardToIssue && (
+            <form
+              id="partner-reward-issue-panel"
+              className="partner-hq-panel partner-hq-reward-issue-panel"
+              onSubmit={issueReward}
+            >
+              <div className="partner-hq-section-heading">
+                <div>
+                  <p className="eyebrow">ISSUE LEADERBOARD REWARD</p>
+                  <h2>{rewardToIssue.partnerCode} — {rewardToIssue.periodKey}</h2>
+                  <p>
+                    Record how the {rewardTypeLabel(rewardToIssue.rewardType).toLowerCase()}
+                    reward was delivered. This becomes visible in the partner’s reward history,
+                    except for the private administrator fields.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="partner-hq-link-button"
+                  onClick={closeIssueRewardPanel}
+                  disabled={isIssuingReward}
+                >
+                  Close
+                </button>
+              </div>
+              <div className="partner-hq-payout-form-grid">
+                <label className="partner-hq-field">
+                  <span>Delivery Method</span>
+                  <input
+                    type="text"
+                    maxLength="100"
+                    value={issueForm.deliveryMethod}
+                    disabled={isIssuingReward}
+                    placeholder="Store credit, mailed swag, Zelle, etc."
+                    onChange={(event) =>
+                      setIssueForm((current) => ({
+                        ...current,
+                        deliveryMethod: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label className="partner-hq-field">
+                  <span>Issued Date</span>
+                  <input
+                    type="datetime-local"
+                    value={issueForm.issuedAt}
+                    disabled={isIssuingReward}
+                    onChange={(event) =>
+                      setIssueForm((current) => ({
+                        ...current,
+                        issuedAt: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label className="partner-hq-field">
+                  <span>Reference Number — Optional</span>
+                  <input
+                    type="text"
+                    maxLength="150"
+                    value={issueForm.referenceNumber}
+                    disabled={isIssuingReward}
+                    onChange={(event) =>
+                      setIssueForm((current) => ({
+                        ...current,
+                        referenceNumber: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label className="partner-hq-field">
+                  <span>Partner Note — Optional</span>
+                  <textarea
+                    rows="4"
+                    maxLength="1000"
+                    value={issueForm.partnerNote}
+                    disabled={isIssuingReward}
+                    placeholder="Visible to the partner."
+                    onChange={(event) =>
+                      setIssueForm((current) => ({
+                        ...current,
+                        partnerNote: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label className="partner-hq-field">
+                  <span>Private Admin Notes — Optional</span>
+                  <textarea
+                    rows="4"
+                    maxLength="2000"
+                    value={issueForm.adminNotes}
+                    disabled={isIssuingReward}
+                    placeholder="Visible only in Partner HQ."
+                    onChange={(event) =>
+                      setIssueForm((current) => ({
+                        ...current,
+                        adminNotes: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+              <div className="partner-hq-button-row">
+                <button type="submit" className="primary-btn" disabled={isIssuingReward}>
+                  {isIssuingReward ? "Recording..." : "Mark Reward Issued"}
+                </button>
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={closeIssueRewardPanel}
+                  disabled={isIssuingReward}
                 >
                   Cancel
                 </button>
@@ -1307,6 +2128,224 @@ function PartnerHQ({ onNavigate = () => {} }) {
                 );
               })}
             </div>
+          </section>
+
+          <section className="partner-hq-panel partner-hq-leaderboard-panel">
+            <div className="partner-hq-section-heading">
+              <div>
+                <p className="eyebrow">PARTNER LEADERBOARD</p>
+                <h2>Monthly And Quarterly Rankings</h2>
+                <p>
+                  Only earned referrals count. Pending and voided orders do not affect the rankings.
+                </p>
+              </div>
+              <span>
+                Ranked by <strong>{leaderboardSettings.leaderboardMetric}</strong>
+              </span>
+            </div>
+
+            <form className="partner-hq-period-form" onSubmit={loadLeaderboardPeriod}>
+              <label className="partner-hq-field">
+                <span>Period Type</span>
+                <select
+                  value={leaderboardPeriodType}
+                  disabled={isLoadingLeaderboard}
+                  onChange={(event) => {
+                    const nextType = event.target.value;
+                    setLeaderboardPeriodType(nextType);
+                    setLeaderboardPeriodKey(getDefaultPeriodKey(nextType));
+                  }}
+                >
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                </select>
+              </label>
+              <label className="partner-hq-field">
+                <span>{leaderboardPeriodType === "monthly" ? "Month" : "Quarter"}</span>
+                <input
+                  type={leaderboardPeriodType === "monthly" ? "month" : "text"}
+                  value={leaderboardPeriodKey}
+                  disabled={isLoadingLeaderboard}
+                  placeholder={leaderboardPeriodType === "monthly" ? "2026-07" : "2026-Q3"}
+                  onChange={(event) => setLeaderboardPeriodKey(event.target.value.toUpperCase())}
+                />
+              </label>
+              <button type="submit" className="primary-btn" disabled={isLoadingLeaderboard}>
+                {isLoadingLeaderboard ? "Loading..." : "Load Rankings"}
+              </button>
+            </form>
+
+            <section className="partner-hq-leaderboard-summary">
+              <StatCard
+                label="Period"
+                value={leaderboardPeriod?.periodKey || leaderboardPeriodKey}
+                detail={leaderboardPeriodType === "monthly" ? "Monthly ranking" : "Quarterly ranking"}
+              />
+              <StatCard
+                label="Qualified Partners"
+                value={leaderboardEntries.filter((entry) => entry.eligible).length}
+                detail={`${leaderboardPeriod?.minimumReferrals || 0} earned referral minimum`}
+              />
+              <StatCard
+                label="Winner Status"
+                value={leaderboardReward ? leaderboardReward.status.toUpperCase() : "NOT RECORDED"}
+                detail={leaderboardReward ? leaderboardReward.partnerCode : "Review and record after period closes"}
+              />
+            </section>
+
+            {leaderboardEntries.length === 0 ? (
+              <EmptyState
+                title="No Earned Referrals"
+                text="No partners have earned referrals during this leaderboard period."
+              />
+            ) : (
+              <div className="partner-hq-leaderboard-table-wrap">
+                <table className="partner-hq-leaderboard-table">
+                  <thead>
+                    <tr>
+                      <th>Rank</th>
+                      <th>Partner</th>
+                      <th>Earned Referrals</th>
+                      <th>Revenue</th>
+                      <th>Commission</th>
+                      <th>Score</th>
+                      <th>Qualified</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {leaderboardEntries.map((entry) => (
+                      <tr key={`${entry.accountId}-${entry.rank}`}>
+                        <td><strong>#{entry.rank}</strong></td>
+                        <td>
+                          <strong>{entry.partnerCode}</strong>
+                          <small>
+                            {`${entry.partnerFirstName || ""} ${entry.partnerLastName || ""}`.trim() || entry.partnerEmail || "Partner"}
+                          </small>
+                        </td>
+                        <td>{entry.referralCount}</td>
+                        <td>{formatMoneyFromCents(entry.revenueCents)}</td>
+                        <td>{formatMoneyFromCents(entry.commissionCents)}</td>
+                        <td><strong>{formatLeaderboardScore(entry, leaderboardSettings.leaderboardMetric)}</strong></td>
+                        <td>{entry.eligible ? "Yes" : "No"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {leaderboardReward ? (
+              <article className="partner-hq-current-reward-card">
+                <div>
+                  <p className="eyebrow">RECORDED WINNER</p>
+                  <h3>{leaderboardReward.partnerCode}</h3>
+                  <p>
+                    {rewardTypeLabel(leaderboardReward.rewardType)} · {formatRewardValue(leaderboardReward)}
+                  </p>
+                </div>
+                <StatusPill status={leaderboardReward.status} />
+              </article>
+            ) : (
+              <section className="partner-hq-award-panel">
+                <div>
+                  <strong>Record The Period Winner</strong>
+                  <p>
+                    The registry selects the highest-ranked eligible partner and prevents a second winner from being recorded for the same period.
+                  </p>
+                </div>
+                <div className="partner-hq-form-grid">
+                  <label className="partner-hq-field">
+                    <span>Partner Note — Optional</span>
+                    <textarea
+                      rows="3"
+                      maxLength="1000"
+                      value={awardPartnerNote}
+                      disabled={isAwardingReward}
+                      placeholder="Visible to the winning partner."
+                      onChange={(event) => setAwardPartnerNote(event.target.value)}
+                    />
+                  </label>
+                  <label className="partner-hq-field">
+                    <span>Private Admin Notes — Optional</span>
+                    <textarea
+                      rows="3"
+                      maxLength="2000"
+                      value={awardAdminNotes}
+                      disabled={isAwardingReward}
+                      placeholder="Visible only in Partner HQ."
+                      onChange={(event) => setAwardAdminNotes(event.target.value)}
+                    />
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  className="primary-btn"
+                  disabled={
+                    isAwardingReward ||
+                    !leaderboardEntries.some((entry) => entry.eligible)
+                  }
+                  onClick={awardLeaderboardWinner}
+                >
+                  {isAwardingReward ? "Recording Winner..." : "Record Leaderboard Winner"}
+                </button>
+              </section>
+            )}
+          </section>
+
+          <section className="partner-hq-panel">
+            <div className="partner-hq-section-heading">
+              <div>
+                <p className="eyebrow">REWARD HISTORY</p>
+                <h2>Leaderboard Winners And Delivery</h2>
+              </div>
+              <span><strong>{rewards.length}</strong> reward record(s)</span>
+            </div>
+            {rewards.length === 0 ? (
+              <EmptyState
+                title="No Rewards Recorded"
+                text="Monthly and quarterly winner records will appear here."
+              />
+            ) : (
+              <div className="partner-hq-stack">
+                {rewards.map((reward) => (
+                  <article key={reward.rewardId} className="partner-hq-reward-card">
+                    <div className="partner-hq-card-title-row">
+                      <div>
+                        <p className="eyebrow">{reward.periodKey} · {reward.periodType}</p>
+                        <h3>{reward.partnerCode}</h3>
+                        <p className="partner-hq-muted">
+                          {`${reward.partnerFirstName || ""} ${reward.partnerLastName || ""}`.trim() || reward.partnerEmail || "Partner"}
+                        </p>
+                      </div>
+                      <StatusPill status={reward.status} />
+                    </div>
+                    <div className="partner-hq-referral-grid">
+                      <QuickDetail label="Reward" value={`${rewardTypeLabel(reward.rewardType)} — ${formatRewardValue(reward)}`} />
+                      <QuickDetail label="Rank" value={`#${reward.rank}`} />
+                      <QuickDetail label="Earned Referrals" value={reward.referralCount} />
+                      <QuickDetail label="Commission" value={formatMoneyFromCents(reward.commissionCents)} />
+                      <QuickDetail label="Awarded" value={formatDate(reward.awardedAt)} />
+                      <QuickDetail label="Issued" value={formatDate(reward.issuedAt)} />
+                      <QuickDetail label="Delivery" value={reward.deliveryMethod || "Not issued"} />
+                      <QuickDetail label="Reference" value={reward.referenceNumber || "Not supplied"} />
+                    </div>
+                    {reward.partnerNote && <DetailBlock title="Partner Note" text={reward.partnerNote} highlighted />}
+                    {reward.adminNotes && <DetailBlock title="Private Admin Notes" text={reward.adminNotes} privateNote />}
+                    {reward.status !== "issued" && (
+                      <div className="partner-hq-button-row">
+                        <button
+                          type="button"
+                          className="primary-btn"
+                          onClick={() => openIssueRewardPanel(reward)}
+                        >
+                          Mark Reward Issued
+                        </button>
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="partner-hq-panel">
@@ -1582,12 +2621,12 @@ function PartnerHQ({ onNavigate = () => {} }) {
           </section>
 
           <section className="partner-hq-panel partner-hq-security-note">
-            <p className="eyebrow">PAYOUT SECURITY</p>
-            <h2>Each Referral Can Be Paid Only Once</h2>
+            <p className="eyebrow">PROGRAM SECURITY</p>
+            <h2>Payouts And Winner Records Are Protected</h2>
             <p>
-              The registry locks each paid order to one payout batch. Commission-rate
-              changes affect future referrals only, and changing the payout minimum does
-              not erase or recalculate existing earnings.
+              Each referral can enter only one payout, and each leaderboard period can have
+              only one recorded winner. Rule changes apply to future calculations and do not
+              rewrite existing payouts or reward history.
             </p>
           </section>
         </section>
@@ -1796,6 +2835,28 @@ const partnerHqCss = `
 .partner-hq-payout-referral-row span { display: grid; gap: 3px; }
 .partner-hq-payout-referral-row small { color: #8f9aa2; }
 .partner-hq-payout-search { max-width: 640px; }
+.partner-hq-leaderboard-settings-grid { display: grid; gap: 16px; margin-top: 20px; }
+.partner-hq-rule-card { padding: 18px; border: 1px solid rgba(61,165,255,.2); border-radius: 16px; background: rgba(61,165,255,.045); }
+.partner-hq-rule-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.partner-hq-checkbox-row { display: flex; align-items: center; gap: 10px; font-weight: 800; }
+.partner-hq-checkbox-row input { width: 19px; height: 19px; accent-color: #3da5ff; }
+.partner-hq-period-form { display: grid; grid-template-columns: minmax(180px,.5fr) minmax(220px,.8fr) auto; gap: 12px; align-items: end; margin-top: 18px; }
+.partner-hq-leaderboard-summary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin-top: 18px; }
+.partner-hq-leaderboard-table-wrap { margin-top: 18px; overflow-x: auto; border: 1px solid rgba(255,255,255,.08); border-radius: 16px; }
+.partner-hq-leaderboard-table { width: 100%; min-width: 860px; border-collapse: collapse; }
+.partner-hq-leaderboard-table th,
+.partner-hq-leaderboard-table td { padding: 14px; border-bottom: 1px solid rgba(255,255,255,.07); text-align: left; }
+.partner-hq-leaderboard-table th { color: #9ed8ff; font-size: 11px; letter-spacing: .7px; text-transform: uppercase; background: rgba(255,255,255,.035); }
+.partner-hq-leaderboard-table td small { display: block; margin-top: 4px; color: #8f9aa2; }
+.partner-hq-current-reward-card,
+.partner-hq-reward-card { margin-top: 18px; padding: 20px; border: 1px solid rgba(185,130,255,.28); border-radius: 18px; background: rgba(185,130,255,.065); }
+.partner-hq-current-reward-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.partner-hq-current-reward-card h3 { margin: 4px 0; font-size: 28px; }
+.partner-hq-award-panel { display: grid; gap: 14px; margin-top: 18px; padding: 18px; border: 1px solid rgba(72,214,151,.24); border-radius: 16px; background: rgba(72,214,151,.055); }
+.partner-hq-award-panel p { color: #9ca8b0; line-height: 1.55; }
+.partner-hq-reward-issue-panel { border-color: rgba(185,130,255,.32); }
+.partner-hq-status-awarded { border: 1px solid rgba(255,190,80,.35); background: rgba(255,170,50,.1); color: #ffe0a8; }
+.partner-hq-status-issued { border: 1px solid rgba(72,214,151,.35); background: rgba(72,214,151,.1); color: #b8f3d8; }
 button:disabled { opacity: .5; cursor: not-allowed; }
 @media (max-width: 1080px) {
   .partner-hq-stats { grid-template-columns: repeat(3,minmax(0,1fr)); }
@@ -1804,6 +2865,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   .partner-hq-referral-grid,
   .partner-hq-balance-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .partner-hq-balance-card { grid-template-columns: minmax(0,1fr); }
+  .partner-hq-rule-grid { grid-template-columns: minmax(0,1fr); }
 }
 @media (max-width: 760px) {
   .partner-hq-page { padding: 48px 12px; }
@@ -1821,7 +2883,9 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   .partner-hq-balance-metrics,
   .partner-hq-rate-panel,
   .partner-hq-settings-panel,
-  .partner-hq-threshold-form { grid-template-columns: minmax(0,1fr); }
+  .partner-hq-threshold-form,
+  .partner-hq-period-form,
+  .partner-hq-leaderboard-summary { grid-template-columns: minmax(0,1fr); }
   .partner-hq-card-buttons { flex: 1 1 100%; }
   .partner-hq-hero > button,
   .partner-hq-button-row button,

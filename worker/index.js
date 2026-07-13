@@ -32,6 +32,18 @@ const MAX_PAYOUT_REFERENCE_LENGTH = 150;
 const MAX_PAYOUT_PARTNER_NOTE_LENGTH = 1_000;
 const MAX_PAYOUT_ADMIN_NOTES_LENGTH = 2_000;
 const MAX_PAYOUT_ORDER_IDS = 100;
+const MAX_REWARD_AMOUNT_CENTS = 1_000_000;
+const MAX_REWARD_DESCRIPTION_LENGTH = 500;
+const MAX_REWARD_DELIVERY_METHOD_LENGTH = 150;
+const MAX_REWARD_REFERENCE_LENGTH = 150;
+const MAX_REWARD_PARTNER_NOTE_LENGTH = 1_000;
+const MAX_REWARD_ADMIN_NOTES_LENGTH = 2_000;
+const MAX_REWARD_ID_LENGTH = 120;
+const MAX_LEADERBOARD_MINIMUM_REFERRALS = 1_000;
+
+const LEADERBOARD_PERIOD_TYPES = new Set(["monthly", "quarterly"]);
+const LEADERBOARD_METRICS = new Set(["commission", "revenue", "referrals"]);
+const REWARD_TYPES = new Set(["cash", "store_credit", "swag"]);
 
 const RESERVED_PARTNER_CODES = new Set([
   "304",
@@ -82,6 +94,10 @@ export default {
       return handlePartnerPayoutHistoryRequest(request, env);
     }
 
+    if (url.pathname === "/api/partner/leaderboard") {
+      return handlePartnerLeaderboardRequest(request, env, url);
+    }
+
     if (url.pathname === "/api/admin/partner-applications") {
       return handleAdminPartnerApplicationsRequest(request, env);
     }
@@ -108,6 +124,26 @@ export default {
 
     if (url.pathname === "/api/admin/partner-payouts/create") {
       return handleAdminCreatePayoutRequest(request, env);
+    }
+
+    if (url.pathname === "/api/admin/partner-leaderboard") {
+      return handleAdminPartnerLeaderboardRequest(request, env, url);
+    }
+
+    if (url.pathname === "/api/admin/partner-leaderboard-settings") {
+      return handleAdminLeaderboardSettingsRequest(request, env);
+    }
+
+    if (url.pathname === "/api/admin/partner-rewards") {
+      return handleAdminPartnerRewardsRequest(request, env);
+    }
+
+    if (url.pathname === "/api/admin/partner-rewards/award") {
+      return handleAdminAwardRewardRequest(request, env);
+    }
+
+    if (url.pathname === "/api/admin/partner-rewards/issue") {
+      return handleAdminIssueRewardRequest(request, env);
     }
 
     if (url.pathname === "/api/admin/accounts") {
@@ -620,6 +656,340 @@ async function handlePartnerPayoutHistoryRequest(request, env) {
     });
   } catch (error) {
     console.error("Partner payout history request error:", error);
+    return handleApiError(error);
+  }
+}
+
+async function handlePartnerLeaderboardRequest(request, env, url) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "GET") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    requireSameOrigin(request);
+
+    const sessionState = await requireEligibleCustomerSession(request, env);
+    const periodType = normalizeLeaderboardPeriodType(
+      url.searchParams.get("periodType") || "monthly"
+    );
+    const periodKey = normalizeOptionalLeaderboardPeriodKey(
+      periodType,
+      url.searchParams.get("periodKey")
+    );
+
+    const search = new URLSearchParams({
+      accountId: sessionState.session.account.id,
+      periodType,
+    });
+
+    if (periodKey) {
+      search.set("periodKey", periodKey);
+    }
+
+    const registryResponse = await partnerRegistryFetch(
+      env,
+      `/partner/leaderboard?${search.toString()}`,
+      { method: "GET" }
+    );
+
+    const result = await readInternalJsonResponse(registryResponse);
+
+    return jsonResponse({
+      success: true,
+      period: toLeaderboardPeriod(result.period),
+      settings: toCustomerLeaderboardSettings(result.settings),
+      entries: Array.isArray(result.entries)
+        ? result.entries.map(toCustomerLeaderboardEntry).filter(Boolean)
+        : [],
+      currentPartner: toCustomerOwnLeaderboardEntry(result.currentPartner),
+      reward: toCustomerRewardRecord(result.reward),
+      rewards: Array.isArray(result.rewards)
+        ? result.rewards.map(toCustomerRewardRecord).filter(Boolean)
+        : [],
+    });
+  } catch (error) {
+    console.error("Partner leaderboard request error:", error);
+    return handleApiError(error);
+  }
+}
+
+async function handleAdminPartnerLeaderboardRequest(request, env, url) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "GET") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    requireSameOrigin(request);
+    await requireAdminAuthorization(request, env);
+
+    const periodType = normalizeLeaderboardPeriodType(
+      url.searchParams.get("periodType") || "monthly"
+    );
+    const periodKey = normalizeOptionalLeaderboardPeriodKey(
+      periodType,
+      url.searchParams.get("periodKey")
+    );
+    const search = new URLSearchParams({ periodType });
+
+    if (periodKey) {
+      search.set("periodKey", periodKey);
+    }
+
+    const registryResponse = await partnerRegistryFetch(
+      env,
+      `/admin/leaderboard?${search.toString()}`,
+      { method: "GET" }
+    );
+
+    const result = await readInternalJsonResponse(registryResponse);
+
+    return jsonResponse({
+      success: true,
+      period: toLeaderboardPeriod(result.period),
+      settings: toAdminLeaderboardSettings(result.settings),
+      entries: Array.isArray(result.entries)
+        ? result.entries.map(toAdminLeaderboardEntry).filter(Boolean)
+        : [],
+      reward: toAdminRewardRecord(result.reward),
+    });
+  } catch (error) {
+    console.error("Admin partner leaderboard request error:", error);
+    return handleApiError(error);
+  }
+}
+
+async function handleAdminLeaderboardSettingsRequest(request, env) {
+  try {
+    validatePartnerEnvironment(env);
+    requireSameOrigin(request);
+    await requireAdminAuthorization(request, env);
+
+    if (request.method === "GET") {
+      const registryResponse = await partnerRegistryFetch(
+        env,
+        "/admin/leaderboard-settings",
+        { method: "GET" }
+      );
+      const result = await readInternalJsonResponse(registryResponse);
+
+      return jsonResponse({
+        success: true,
+        settings: toAdminLeaderboardSettings(result.settings),
+      });
+    }
+
+    if (request.method !== "POST") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    validateJsonContentType(request);
+    await enforceAuthenticationRateLimit(
+      request,
+      env,
+      "partner-leaderboard-settings"
+    );
+
+    const body = await readJsonRequest(request, MAX_AUTH_REQUEST_LENGTH);
+    const settings = normalizeLeaderboardSettingsRequest(body);
+    const updatedBy = getAdminIdentity(request);
+
+    const registryResponse = await partnerRegistryFetch(
+      env,
+      "/admin/leaderboard-settings",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...settings, updatedBy }),
+      }
+    );
+
+    const result = await readInternalJsonResponse(registryResponse);
+
+    return jsonResponse({
+      success: true,
+      settings: toAdminLeaderboardSettings(result.settings),
+      message:
+        result.message || "The leaderboard and reward rules were updated.",
+    });
+  } catch (error) {
+    console.error("Admin leaderboard settings request error:", error);
+    return handleApiError(error);
+  }
+}
+
+async function handleAdminPartnerRewardsRequest(request, env) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "GET") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    requireSameOrigin(request);
+    await requireAdminAuthorization(request, env);
+
+    const registryResponse = await partnerRegistryFetch(env, "/admin/rewards", {
+      method: "GET",
+    });
+    const result = await readInternalJsonResponse(registryResponse);
+    const rewards = Array.isArray(result.rewards)
+      ? result.rewards.map(toAdminRewardRecord).filter(Boolean)
+      : [];
+
+    return jsonResponse({
+      success: true,
+      rewards,
+      records: rewards,
+      count: rewards.length,
+      settings: toAdminLeaderboardSettings(result.settings),
+    });
+  } catch (error) {
+    console.error("Admin partner rewards request error:", error);
+    return handleApiError(error);
+  }
+}
+
+async function handleAdminAwardRewardRequest(request, env) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "POST") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    requireSameOrigin(request);
+    validateJsonContentType(request);
+    await requireAdminAuthorization(request, env);
+    await enforceAuthenticationRateLimit(request, env, "partner-reward-award");
+
+    const body = await readJsonRequest(request, MAX_AUTH_REQUEST_LENGTH);
+    const periodType = normalizeLeaderboardPeriodType(body.periodType);
+    const periodKey = normalizeRequiredLeaderboardPeriodKey(
+      periodType,
+      body.periodKey
+    );
+    const rewardPayload = {
+      periodType,
+      periodKey,
+      awardedBy: getAdminIdentity(request),
+      partnerNote: cleanMultilineText(
+        body.partnerNote,
+        MAX_REWARD_PARTNER_NOTE_LENGTH
+      ),
+      adminNotes: cleanMultilineText(
+        body.adminNotes,
+        MAX_REWARD_ADMIN_NOTES_LENGTH
+      ),
+    };
+
+    if (body.rewardType !== undefined && String(body.rewardType).trim()) {
+      rewardPayload.rewardType = normalizeRewardType(body.rewardType);
+    }
+
+    const rewardAmountCents = normalizeOptionalRewardAmountCents(body);
+    if (rewardAmountCents !== undefined) {
+      rewardPayload.rewardAmountCents = rewardAmountCents;
+    }
+
+    if (body.rewardDescription !== undefined) {
+      rewardPayload.rewardDescription = cleanText(
+        body.rewardDescription,
+        MAX_REWARD_DESCRIPTION_LENGTH
+      );
+    }
+
+    const registryResponse = await partnerRegistryFetch(
+      env,
+      "/admin/rewards/award",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(rewardPayload),
+      }
+    );
+    const result = await readInternalJsonResponse(registryResponse);
+
+    return jsonResponse(
+      {
+        success: true,
+        reward: toAdminRewardRecord(result.reward),
+        message: result.message || "The leaderboard winner was recorded.",
+      },
+      201
+    );
+  } catch (error) {
+    console.error("Admin award reward request error:", error);
+    return handleApiError(error);
+  }
+}
+
+async function handleAdminIssueRewardRequest(request, env) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "POST") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    requireSameOrigin(request);
+    validateJsonContentType(request);
+    await requireAdminAuthorization(request, env);
+    await enforceAuthenticationRateLimit(request, env, "partner-reward-issue");
+
+    const body = await readJsonRequest(request, MAX_AUTH_REQUEST_LENGTH);
+    const rewardId = cleanText(body.rewardId, MAX_REWARD_ID_LENGTH);
+    const deliveryMethod = cleanText(
+      body.deliveryMethod,
+      MAX_REWARD_DELIVERY_METHOD_LENGTH
+    );
+
+    if (!rewardId) {
+      throw new ApiRequestError("A reward ID is required.", 400);
+    }
+
+    if (!deliveryMethod) {
+      throw new ApiRequestError("A reward delivery method is required.", 400);
+    }
+
+    const registryResponse = await partnerRegistryFetch(
+      env,
+      "/admin/rewards/issue",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rewardId,
+          deliveryMethod,
+          referenceNumber: cleanText(
+            body.referenceNumber,
+            MAX_REWARD_REFERENCE_LENGTH
+          ),
+          issuedAt: normalizeOptionalPayoutDate(body.issuedAt),
+          partnerNote: cleanMultilineText(
+            body.partnerNote,
+            MAX_REWARD_PARTNER_NOTE_LENGTH
+          ),
+          adminNotes: cleanMultilineText(
+            body.adminNotes,
+            MAX_REWARD_ADMIN_NOTES_LENGTH
+          ),
+          issuedBy: getAdminIdentity(request),
+        }),
+      }
+    );
+    const result = await readInternalJsonResponse(registryResponse);
+
+    return jsonResponse({
+      success: true,
+      reward: toAdminRewardRecord(result.reward),
+      message: result.message || "The leaderboard reward was marked as issued.",
+    });
+  } catch (error) {
+    console.error("Admin issue reward request error:", error);
     return handleApiError(error);
   }
 }
@@ -1452,6 +1822,347 @@ function toAdminPayoutRecord(payout) {
     ),
     createdBy: cleanText(payout.createdBy, 254),
   };
+}
+
+function toLeaderboardPeriod(period) {
+  if (!period || typeof period !== "object") {
+    return null;
+  }
+
+  return {
+    periodType: normalizeLeaderboardPeriodType(period.periodType || "monthly"),
+    periodKey: cleanText(period.periodKey, 20),
+    startAt: period.startAt || "",
+    endAt: period.endAt || "",
+    minimumReferrals: Number(period.minimumReferrals || 0),
+    metric: LEADERBOARD_METRICS.has(String(period.metric || "").toLowerCase())
+      ? String(period.metric).toLowerCase()
+      : "commission",
+  };
+}
+
+function toCustomerLeaderboardSettings(settings) {
+  const source = settings && typeof settings === "object" ? settings : {};
+
+  return {
+    leaderboardMetric: LEADERBOARD_METRICS.has(
+      String(source.leaderboardMetric || "").toLowerCase()
+    )
+      ? String(source.leaderboardMetric).toLowerCase()
+      : "commission",
+    monthlyRewardEnabled: Boolean(source.monthlyRewardEnabled),
+    monthlyRewardType: safeRewardType(source.monthlyRewardType),
+    monthlyRewardAmountCents: Number(source.monthlyRewardAmountCents || 0),
+    monthlyMinimumReferrals: Number(source.monthlyMinimumReferrals || 1),
+    quarterlyRewardEnabled: Boolean(source.quarterlyRewardEnabled),
+    quarterlyRewardType: safeRewardType(source.quarterlyRewardType),
+    quarterlyRewardAmountCents: Number(source.quarterlyRewardAmountCents || 0),
+    quarterlyRewardDescription: cleanText(
+      source.quarterlyRewardDescription,
+      MAX_REWARD_DESCRIPTION_LENGTH
+    ),
+    quarterlyMinimumReferrals: Number(source.quarterlyMinimumReferrals || 1),
+  };
+}
+
+function toAdminLeaderboardSettings(settings) {
+  const source = settings && typeof settings === "object" ? settings : {};
+
+  return {
+    ...toCustomerLeaderboardSettings(source),
+    updatedAt: source.updatedAt || "",
+    updatedBy: cleanText(source.updatedBy, 254),
+  };
+}
+
+function toCustomerLeaderboardEntry(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+
+  return {
+    rank: Number(entry.rank || 0),
+    partnerCode: cleanText(entry.partnerCode, MAX_PARTNER_CODE_LENGTH),
+    referralCount: Number(entry.referralCount || 0),
+    eligible: Boolean(entry.eligible),
+  };
+}
+
+function toCustomerOwnLeaderboardEntry(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+
+  return {
+    ...toCustomerLeaderboardEntry(entry),
+    revenueCents: Number(entry.revenueCents || 0),
+    commissionCents: Number(entry.commissionCents || 0),
+    score: Number(entry.score || 0),
+    metric: LEADERBOARD_METRICS.has(String(entry.metric || "").toLowerCase())
+      ? String(entry.metric).toLowerCase()
+      : "commission",
+  };
+}
+
+function toAdminLeaderboardEntry(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+
+  return {
+    ...toCustomerOwnLeaderboardEntry(entry),
+    accountId: cleanText(entry.accountId, 150),
+    partnerEmail: cleanText(
+      entry.partnerEmail,
+      MAX_REFERRAL_CUSTOMER_EMAIL_LENGTH
+    ).toLowerCase(),
+    partnerFirstName: cleanText(entry.partnerFirstName, 100),
+    partnerLastName: cleanText(entry.partnerLastName, 100),
+    firstEarnedAt: entry.firstEarnedAt || "",
+    lastEarnedAt: entry.lastEarnedAt || "",
+  };
+}
+
+function toCustomerRewardRecord(reward) {
+  if (!reward || typeof reward !== "object") {
+    return null;
+  }
+
+  return {
+    rewardId: cleanText(reward.rewardId, MAX_REWARD_ID_LENGTH),
+    periodType: safeLeaderboardPeriodType(reward.periodType),
+    periodKey: cleanText(reward.periodKey, 20),
+    partnerCode: cleanText(reward.partnerCode, MAX_PARTNER_CODE_LENGTH),
+    leaderboardMetric: LEADERBOARD_METRICS.has(
+      String(reward.leaderboardMetric || "").toLowerCase()
+    )
+      ? String(reward.leaderboardMetric).toLowerCase()
+      : "commission",
+    rank: Number(reward.rank || 0),
+    referralCount: Number(reward.referralCount || 0),
+    rewardType: safeRewardType(reward.rewardType),
+    rewardAmountCents: Number(reward.rewardAmountCents || 0),
+    rewardDescription: cleanText(
+      reward.rewardDescription,
+      MAX_REWARD_DESCRIPTION_LENGTH
+    ),
+    status: cleanText(reward.status || "awarded", 30).toLowerCase(),
+    awardedAt: reward.awardedAt || "",
+    issuedAt: reward.issuedAt || "",
+    deliveryMethod: cleanText(
+      reward.deliveryMethod,
+      MAX_REWARD_DELIVERY_METHOD_LENGTH
+    ),
+    partnerNote: cleanMultilineText(
+      reward.partnerNote,
+      MAX_REWARD_PARTNER_NOTE_LENGTH
+    ),
+  };
+}
+
+function toAdminRewardRecord(reward) {
+  if (!reward || typeof reward !== "object") {
+    return null;
+  }
+
+  return {
+    ...toCustomerRewardRecord(reward),
+    partnerAccountId: cleanText(reward.partnerAccountId, 150),
+    partnerEmail: cleanText(
+      reward.partnerEmail,
+      MAX_REFERRAL_CUSTOMER_EMAIL_LENGTH
+    ).toLowerCase(),
+    partnerFirstName: cleanText(reward.partnerFirstName, 100),
+    partnerLastName: cleanText(reward.partnerLastName, 100),
+    revenueCents: Number(reward.revenueCents || 0),
+    commissionCents: Number(reward.commissionCents || 0),
+    awardedBy: cleanText(reward.awardedBy, 254),
+    issuedBy: cleanText(reward.issuedBy, 254),
+    referenceNumber: cleanText(
+      reward.referenceNumber,
+      MAX_REWARD_REFERENCE_LENGTH
+    ),
+    adminNotes: cleanMultilineText(
+      reward.adminNotes,
+      MAX_REWARD_ADMIN_NOTES_LENGTH
+    ),
+  };
+}
+
+function normalizeLeaderboardSettingsRequest(body) {
+  const leaderboardMetric = cleanText(body.leaderboardMetric, 30).toLowerCase();
+
+  if (!LEADERBOARD_METRICS.has(leaderboardMetric)) {
+    throw new ApiRequestError(
+      "Choose commission, revenue, or referrals as the leaderboard metric.",
+      400
+    );
+  }
+
+  return {
+    leaderboardMetric,
+    monthlyRewardEnabled: normalizeRequestBoolean(
+      body.monthlyRewardEnabled,
+      true
+    ),
+    monthlyRewardType: normalizeRewardType(body.monthlyRewardType),
+    monthlyRewardAmountCents: normalizeRequiredRewardAmountCents(
+      body,
+      "monthlyRewardAmountCents",
+      "monthlyRewardAmountDollars"
+    ),
+    monthlyMinimumReferrals: normalizeLeaderboardMinimumReferrals(
+      body.monthlyMinimumReferrals
+    ),
+    quarterlyRewardEnabled: normalizeRequestBoolean(
+      body.quarterlyRewardEnabled,
+      true
+    ),
+    quarterlyRewardType: normalizeRewardType(body.quarterlyRewardType),
+    quarterlyRewardAmountCents: normalizeRequiredRewardAmountCents(
+      body,
+      "quarterlyRewardAmountCents",
+      "quarterlyRewardAmountDollars"
+    ),
+    quarterlyRewardDescription: cleanText(
+      body.quarterlyRewardDescription,
+      MAX_REWARD_DESCRIPTION_LENGTH
+    ),
+    quarterlyMinimumReferrals: normalizeLeaderboardMinimumReferrals(
+      body.quarterlyMinimumReferrals
+    ),
+  };
+}
+
+function normalizeLeaderboardPeriodType(value) {
+  const periodType = cleanText(value, 20).toLowerCase();
+
+  if (!LEADERBOARD_PERIOD_TYPES.has(periodType)) {
+    throw new ApiRequestError(
+      "Choose monthly or quarterly leaderboard data.",
+      400
+    );
+  }
+
+  return periodType;
+}
+
+function safeLeaderboardPeriodType(value) {
+  const periodType = cleanText(value, 20).toLowerCase();
+  return LEADERBOARD_PERIOD_TYPES.has(periodType) ? periodType : "monthly";
+}
+
+function normalizeOptionalLeaderboardPeriodKey(periodType, value) {
+  const cleaned = cleanText(value, 20).toUpperCase();
+  return cleaned ? validateLeaderboardPeriodKey(periodType, cleaned) : "";
+}
+
+function normalizeRequiredLeaderboardPeriodKey(periodType, value) {
+  const cleaned = cleanText(value, 20).toUpperCase();
+
+  if (!cleaned) {
+    throw new ApiRequestError("A leaderboard period is required.", 400);
+  }
+
+  return validateLeaderboardPeriodKey(periodType, cleaned);
+}
+
+function validateLeaderboardPeriodKey(periodType, periodKey) {
+  const pattern =
+    periodType === "monthly"
+      ? /^\d{4}-(0[1-9]|1[0-2])$/
+      : /^\d{4}-Q[1-4]$/;
+
+  if (!pattern.test(periodKey)) {
+    throw new ApiRequestError(
+      periodType === "monthly"
+        ? "The monthly period must use YYYY-MM format."
+        : "The quarterly period must use YYYY-Q1 through YYYY-Q4 format.",
+      400
+    );
+  }
+
+  return periodKey;
+}
+
+function normalizeRewardType(value) {
+  const rewardType = cleanText(value, 40).toLowerCase();
+
+  if (!REWARD_TYPES.has(rewardType)) {
+    throw new ApiRequestError(
+      "Choose cash, store credit, or swag as the reward type.",
+      400
+    );
+  }
+
+  return rewardType;
+}
+
+function safeRewardType(value) {
+  const rewardType = cleanText(value, 40).toLowerCase();
+  return REWARD_TYPES.has(rewardType) ? rewardType : "store_credit";
+}
+
+function normalizeOptionalRewardAmountCents(body) {
+  if (body.rewardAmountCents !== undefined) {
+    return validateRewardAmountCents(Number(body.rewardAmountCents));
+  }
+
+  if (body.rewardAmountDollars !== undefined) {
+    return validateRewardAmountCents(
+      Math.round(Number(body.rewardAmountDollars) * 100)
+    );
+  }
+
+  return undefined;
+}
+
+function normalizeRequiredRewardAmountCents(body, centsField, dollarsField) {
+  const value =
+    body[centsField] !== undefined
+      ? Number(body[centsField])
+      : Math.round(Number(body[dollarsField]) * 100);
+
+  return validateRewardAmountCents(value);
+}
+
+function validateRewardAmountCents(value) {
+  if (
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value > MAX_REWARD_AMOUNT_CENTS
+  ) {
+    throw new ApiRequestError(
+      "Reward amount must be between $0 and $10,000, using no more than two decimal places.",
+      400
+    );
+  }
+
+  return value;
+}
+
+function normalizeLeaderboardMinimumReferrals(value) {
+  const minimum = Number(value);
+
+  if (
+    !Number.isInteger(minimum) ||
+    minimum < 1 ||
+    minimum > MAX_LEADERBOARD_MINIMUM_REFERRALS
+  ) {
+    throw new ApiRequestError(
+      "The minimum qualifying referrals must be a whole number from 1 to 1,000.",
+      400
+    );
+  }
+
+  return minimum;
+}
+
+function normalizeRequestBoolean(value, fallback) {
+  if (typeof value === "boolean") return value;
+  if (value === 1 || value === "1" || value === "true") return true;
+  if (value === 0 || value === "0" || value === "false") return false;
+  return fallback;
 }
 
 function normalizePayoutThresholdCents(body) {
