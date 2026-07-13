@@ -1,255 +1,39 @@
-import {
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-
-import { products } from "../data/products";
-
-function normalizeText(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase();
-}
-
-function buildCatalogVariants() {
-  return products.flatMap((product) => {
-    const variants = product.variants?.length
-      ? product.variants
-      : [product];
-
-    return variants.map((variant) => ({
-      ...product,
-      ...variant,
-
-      name:
-        variant.name ||
-        product.name ||
-        "Research Product",
-
-      codeName:
-        variant.codeName ||
-        product.codeName ||
-        "",
-
-      strength:
-        variant.strength ||
-        product.strength ||
-        "",
-
-      image:
-        variant.image ||
-        product.image ||
-        "",
-    }));
-  });
-}
-
-const catalogVariants = buildCatalogVariants();
-
-function findCatalogVariant(item) {
-  const codeName = normalizeText(
-    item?.codeName
-  );
-
-  const strength = normalizeText(
-    item?.strength
-  );
-
-  const name = normalizeText(
-    item?.name
-  );
-
-  return (
-    catalogVariants.find(
-      (variant) =>
-        normalizeText(
-          variant.codeName
-        ) === codeName &&
-        normalizeText(
-          variant.strength
-        ) === strength
-    ) ||
-    catalogVariants.find(
-      (variant) =>
-        normalizeText(
-          variant.name
-        ) === name &&
-        normalizeText(
-          variant.strength
-        ) === strength
-    ) ||
-    catalogVariants.find(
-      (variant) =>
-        normalizeText(
-          variant.codeName
-        ) === codeName ||
-        normalizeText(
-          variant.name
-        ) === name
-    ) ||
-    null
-  );
-}
-
-function getOrderItems(order) {
-  const items = Array.isArray(
-    order?.items
-  )
-    ? order.items
-    : [];
-
-  return items.map((item) => {
-    const catalogItem =
-      findCatalogVariant(item);
-
-    return {
-      ...catalogItem,
-      ...item,
-
-      name:
-        item.name ||
-        catalogItem?.name ||
-        "Research Product",
-
-      codeName:
-        item.codeName ||
-        catalogItem?.codeName ||
-        "",
-
-      strength:
-        item.strength ||
-        catalogItem?.strength ||
-        "",
-
-      image:
-        item.image ||
-        catalogItem?.image ||
-        "",
-
-      quantity:
-        Number(
-          item.quantity ||
-            0
-        ),
-
-      price:
-        Number(
-          item.price ||
-            0
-        ),
-    };
-  });
-}
+import { useMemo, useState } from "react";
 
 function getOrderId(order) {
-  return String(
-    order?.orderId ||
-      order?.id ||
-      "Pending"
-  );
+  return String(order?.orderId || order?.id || "Pending");
 }
 
-function getOrderDateValue(order) {
-  return (
-    order?.createdAt ||
-    order?.updatedAt ||
-    order?.date ||
-    ""
-  );
+function getOrderDate(order) {
+  return order?.createdAt || order?.updatedAt || order?.date || "";
 }
 
-function getOrderQuantity(order) {
-  const savedQuantity =
-    Number(
-      order?.totalQuantity
-    );
-
-  if (
-    Number.isFinite(
-      savedQuantity
-    )
-  ) {
-    return savedQuantity;
-  }
-
-  return getOrderItems(
-    order
-  ).reduce(
-    (total, item) =>
-      total +
-      Number(
-        item.quantity ||
-          0
-      ),
-    0
-  );
-}
-
-function getOrderSubtotal(order) {
-  const savedSubtotal =
-    Number(
-      order?.subtotal
-    );
-
-  if (
-    Number.isFinite(
-      savedSubtotal
-    )
-  ) {
-    return savedSubtotal;
-  }
-
-  return getOrderItems(
-    order
-  ).reduce(
-    (total, item) =>
-      total +
-      Number(
-        item.price ||
-          0
-      ) *
-        Number(
-          item.quantity ||
-            0
-        ),
-    0
-  );
+function getItems(order) {
+  return Array.isArray(order?.items) ? order.items : [];
 }
 
 function getCustomer(order) {
-  return (
-    order?.customer ||
-    {}
-  );
+  return order?.customer || {};
 }
 
 function getCustomerName(order) {
-  const customer =
-    getCustomer(order);
-
-  const fullName =
-    `${customer.firstName || ""} ${
-      customer.lastName || ""
-    }`.trim();
+  const customer = getCustomer(order);
 
   return (
-    fullName ||
-    "Customer details unavailable"
+    `${customer.firstName || ""} ${customer.lastName || ""}`.trim() ||
+    "Customer unavailable"
   );
 }
 
 function getCustomerAddress(order) {
-  const customer =
-    getCustomer(order);
+  const customer = getCustomer(order);
 
-  const cityState =
-    [
-      customer.city,
-      customer.state,
-    ]
-      .filter(Boolean)
-      .join(", ");
+  const cityState = [
+    customer.city,
+    customer.state,
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   return (
     [
@@ -263,19 +47,59 @@ function getCustomerAddress(order) {
   );
 }
 
-function formatDate(value) {
-  if (!value) {
-    return "Date unavailable";
+function getQuantity(order) {
+  const savedQuantity = Number(
+    order?.totalQuantity
+  );
+
+  if (Number.isFinite(savedQuantity)) {
+    return savedQuantity;
   }
 
-  const date =
-    new Date(value);
+  return getItems(order).reduce(
+    (total, item) =>
+      total +
+      Number(item.quantity || 0),
+    0
+  );
+}
 
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
+function getSubtotal(order) {
+  const savedSubtotal = Number(
+    order?.subtotal
+  );
+
+  if (Number.isFinite(savedSubtotal)) {
+    return savedSubtotal;
+  }
+
+  return getItems(order).reduce(
+    (total, item) =>
+      total +
+      Number(item.price || 0) *
+        Number(item.quantity || 0),
+    0
+  );
+}
+
+function formatMoney(value) {
+  return Number(value || 0).toLocaleString(
+    "en-US",
+    {
+      style: "currency",
+      currency: "USD",
+    }
+  );
+}
+
+function formatDate(value) {
+  if (!value) {
+    return "Unavailable";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
     return String(value);
   }
 
@@ -291,75 +115,66 @@ function formatDate(value) {
   );
 }
 
-function formatMoney(value) {
-  const amount =
-    Number(value);
-
-  return Number.isFinite(
-    amount
+function sortOrders(records) {
+  return (
+    Array.isArray(records)
+      ? records
+      : []
   )
-    ? amount.toLocaleString(
-        "en-US",
-        {
-          style:
-            "currency",
-
-          currency:
-            "USD",
-        }
+    .filter(
+      (record) =>
+        record &&
+        typeof record === "object"
+    )
+    .sort((left, right) =>
+      String(
+        getOrderDate(right)
+      ).localeCompare(
+        String(
+          getOrderDate(left)
+        )
       )
-    : "$0.00";
+    );
 }
 
-function normalizeOrders(orders) {
-  if (
-    !Array.isArray(
-      orders
-    )
-  ) {
-    return [];
-  }
+function formatPartnerStatus(value) {
+  const status = String(
+    value || "pending"
+  ).toLowerCase();
 
-  return [...orders]
-    .filter(
-      (order) =>
-        order &&
-        typeof order ===
-          "object"
-    )
-    .sort(
-      (
-        left,
-        right
-      ) => {
-        const leftTime =
-          new Date(
-            getOrderDateValue(
-              left
-            )
-          ).getTime();
+  const labels = {
+    pending: "Pending Review",
+    approved: "Approved",
+    denied: "Not Approved",
+    suspended: "Suspended",
+  };
 
-        const rightTime =
-          new Date(
-            getOrderDateValue(
-              right
-            )
-          ).getTime();
+  return labels[status] || status;
+}
 
-        return (
-          (Number.isFinite(
-            rightTime
-          )
-            ? rightTime
-            : 0) -
-          (Number.isFinite(
-            leftTime
-          )
-            ? leftTime
-            : 0)
-        );
-      }
-    );
+function getPartnerStatusMessage(value) {
+  const status = String(
+    value || "pending"
+  ).toLowerCase();
+
+  const messages = {
+    pending:
+      "Your selected code is reserved while the application is reviewed.",
+
+    approved:
+      "Your selected code is approved. Referral tracking and commission tools are the next Partner Program phase.",
+
+    denied:
+      "Review the decision message, update your application, and choose an available code before reapplying.",
+
+    suspended:
+      "Your code remains reserved but is currently inactive. Review the message below or contact support.",
+  };
+
+  return (
+    messages[status] ||
+    "Review your current Partner Program record."
+  );
 }
 
 function CustomerDashboard({
@@ -390,100 +205,40 @@ function CustomerDashboard({
     setRefreshMessage,
   ] = useState("");
 
-  const savedOrders =
-    useMemo(
-      () =>
-        normalizeOrders(
-          orders
-        ),
-      [
-        orders,
-      ]
-    );
-
-  const hasOrders =
-    savedOrders.length >
-    0;
+  const savedOrders = useMemo(
+    () =>
+      sortOrders(orders),
+    [orders]
+  );
 
   const latestOrder =
-    savedOrders[0] ||
-    null;
+    savedOrders[0] || null;
 
-  const latestCustomer =
-    latestOrder
-      ? getCustomer(
-          latestOrder
-        )
-      : {};
+  const hasOrders =
+    savedOrders.length > 0;
 
-  const accountName =
-    `${account?.firstName || ""} ${
-      account?.lastName || ""
-    }`.trim();
+  const statistics = useMemo(
+    () => ({
+      totalOrders:
+        savedOrders.length,
 
-  const customerName =
-    accountName ||
-    (latestOrder
-      ? getCustomerName(
-          latestOrder
-        )
-      : "Customer name unavailable");
-
-  const customerEmail =
-    account?.email ||
-    latestCustomer.email ||
-    "Account email unavailable";
-
-  const customerAddress =
-    latestOrder
-      ? getCustomerAddress(
-          latestOrder
-        )
-      : "No shipping address has been used yet";
-
-  const accountStatus =
-    account?.status ||
-    "Active";
-
-  const accountCreatedAt =
-    account?.createdAt
-      ? formatDate(
-          account.createdAt
-        )
-      : "Account date unavailable";
-
-  const statistics =
-    useMemo(() => {
-      const totalOrders =
-        savedOrders.length;
-
-      const totalItems =
+      totalItems:
         savedOrders.reduce(
-          (
-            total,
-            order
-          ) =>
+          (total, order) =>
             total +
-            getOrderQuantity(
-              order
-            ),
+            getQuantity(order),
           0
-        );
+        ),
 
-      const requestedValue =
+      requestedValue:
         savedOrders.reduce(
-          (
-            total,
-            order
-          ) =>
+          (total, order) =>
             total +
-            getOrderSubtotal(
-              order
-            ),
+            getSubtotal(order),
           0
-        );
+        ),
 
-      const activeOrders =
+      activeOrders:
         savedOrders.filter(
           (order) =>
             ![
@@ -492,29 +247,36 @@ function CustomerDashboard({
             ].includes(
               order.status
             )
-        ).length;
+        ).length,
+    }),
+    [savedOrders]
+  );
 
-      return {
-        totalOrders,
-        totalItems,
-        requestedValue,
-        activeOrders,
-      };
-    }, [
-      savedOrders,
-    ]);
+  const accountName =
+    `${account?.firstName || ""} ${
+      account?.lastName || ""
+    }`.trim() ||
+    (
+      latestOrder
+        ? getCustomerName(
+            latestOrder
+          )
+        : "Customer unavailable"
+    );
 
-  async function handleRefreshOrders(
-    showSuccess = true
-  ) {
+  const accountEmail =
+    account?.email ||
+    getCustomer(
+      latestOrder
+    ).email ||
+    "Email unavailable";
+
+  async function handleRefresh() {
     if (
       typeof onRefreshOrders !==
-      "function"
+        "function" ||
+      isRefreshing
     ) {
-      setRefreshError(
-        "Order refresh is not available."
-      );
-
       return;
     }
 
@@ -528,76 +290,27 @@ function CustomerDashboard({
           replace: true,
         });
 
-      if (showSuccess) {
-        const orderCount =
-          Array.isArray(
-            refreshedOrders
-          )
-            ? refreshedOrders.length
-            : 0;
+      const count =
+        Array.isArray(
+          refreshedOrders
+        )
+          ? refreshedOrders.length
+          : 0;
 
-        setRefreshMessage(
-          orderCount === 1
-            ? "Your secure order history is up to date."
-            : `Your secure order history is up to date. ${orderCount} account orders loaded.`
-        );
-      }
+      setRefreshMessage(
+        count === 1
+          ? "Your secure order history is up to date with 1 order."
+          : `Your secure order history is up to date with ${count} orders.`
+      );
     } catch (error) {
       setRefreshError(
-        error?.message ||
-          "Secure order history could not be refreshed."
+        error.message ||
+          "Order history could not be refreshed."
       );
     } finally {
       setIsRefreshing(false);
     }
   }
-
-  useEffect(() => {
-    let active = true;
-
-    if (
-      typeof onRefreshOrders !==
-      "function"
-    ) {
-      return () => {
-        active = false;
-      };
-    }
-
-    async function refreshOnOpen() {
-      setIsRefreshing(true);
-      setRefreshError("");
-
-      try {
-        await onRefreshOrders({
-          replace: true,
-        });
-      } catch (error) {
-        if (active) {
-          setRefreshError(
-            error?.message ||
-              "Secure order history could not be loaded."
-          );
-        }
-      } finally {
-        if (active) {
-          setIsRefreshing(false);
-        }
-      }
-    }
-
-    refreshOnOpen();
-
-    return () => {
-      active = false;
-    };
-  }, [
-    onRefreshOrders,
-  ]);
-
-  const displayedError =
-    refreshError ||
-    authenticationError;
 
   return (
     <>
@@ -608,7 +321,7 @@ function CustomerDashboard({
       <main className="customer-dashboard-page">
         <section className="customer-dashboard-inner">
           <header className="customer-dashboard-hero">
-            <span className="customer-dashboard-pill">
+            <span className="customer-dashboard-secure-pill">
               Secure Account
             </span>
 
@@ -621,13 +334,18 @@ function CustomerDashboard({
             </h1>
 
             <p>
-              Review secure account-linked order history,
-              current statuses, checkout details, product
-              totals, research-use reminders, and Partner
-              Program access.
+              Review
+              account-linked
+              order history,
+              checkout details,
+              product totals,
+              research-use
+              reminders, and
+              your Partner
+              Program record.
             </p>
 
-            <div className="customer-dashboard-hero-actions">
+            <div className="customer-dashboard-actions">
               <button
                 type="button"
                 className="primary-btn"
@@ -645,64 +363,6 @@ function CustomerDashboard({
                 className="secondary-btn"
                 onClick={() =>
                   onNavigate(
-                    "cart"
-                  )
-                }
-              >
-                View Cart
-              </button>
-
-              <button
-                type="button"
-                className="secondary-btn"
-                onClick={() =>
-                  onNavigate(
-                    "researchAgreement"
-                  )
-                }
-              >
-                Research Agreement
-              </button>
-            </div>
-          </header>
-
-          <section className="customer-dashboard-security">
-            <div>
-              <strong>
-                Secure account session confirmed for{" "}
-                {customerEmail}.
-              </strong>
-
-              <p>
-                Orders submitted while logged in are linked
-                to this account and can be reviewed across
-                approved devices.
-              </p>
-            </div>
-
-            <div className="customer-dashboard-security-actions">
-              <button
-                type="button"
-                className="primary-btn"
-                disabled={
-                  isRefreshing
-                }
-                onClick={() =>
-                  handleRefreshOrders(
-                    true
-                  )
-                }
-              >
-                {isRefreshing
-                  ? "Refreshing..."
-                  : "Refresh Orders"}
-              </button>
-
-              <button
-                type="button"
-                className="secondary-btn"
-                onClick={() =>
-                  onNavigate(
                     "changePassword"
                   )
                 }
@@ -713,29 +373,34 @@ function CustomerDashboard({
               <button
                 type="button"
                 className="secondary-btn"
-                onClick={() =>
-                  onNavigate(
-                    "contact"
-                  )
+                onClick={
+                  handleRefresh
+                }
+                disabled={
+                  isRefreshing
                 }
               >
-                Contact Support
+                {isRefreshing
+                  ? "Refreshing..."
+                  : "Refresh Orders"}
               </button>
             </div>
-          </section>
+          </header>
 
-          {displayedError && (
+          {(refreshError ||
+            authenticationError) && (
             <div
-              className="customer-dashboard-alert customer-dashboard-error"
+              className="customer-dashboard-error"
               role="alert"
             >
-              {displayedError}
+              {refreshError ||
+                authenticationError}
             </div>
           )}
 
           {refreshMessage && (
             <div
-              className="customer-dashboard-alert customer-dashboard-success"
+              className="customer-dashboard-success"
               aria-live="polite"
             >
               {refreshMessage}
@@ -744,19 +409,19 @@ function CustomerDashboard({
 
           <section className="customer-dashboard-stats">
             <StatCard
-              label="Account Orders"
+              label="Orders"
               value={
                 statistics.totalOrders
               }
-              detail="Secure Cloudflare history"
+              detail="Account-linked records"
             />
 
             <StatCard
-              label="Total Items"
+              label="Items"
               value={
                 statistics.totalItems
               }
-              detail="Units requested"
+              detail="Research products requested"
             />
 
             <StatCard
@@ -764,11 +429,11 @@ function CustomerDashboard({
               value={formatMoney(
                 statistics.requestedValue
               )}
-              detail="Product subtotal only"
+              detail="Before payment completion"
             />
 
             <StatCard
-              label="Active Orders"
+              label="Active"
               value={
                 statistics.activeOrders
               }
@@ -779,49 +444,56 @@ function CustomerDashboard({
           <div className="customer-dashboard-overview">
             <section className="customer-dashboard-panel">
               <p className="eyebrow">
-                ACCOUNT PROFILE
+                ACCOUNT DETAILS
               </p>
 
               <h2>
-                Secure Customer Account
+                Secure Customer
+                Profile
               </h2>
 
               <div className="customer-dashboard-info-grid">
                 <InfoBox
                   label="Name"
                   value={
-                    customerName
+                    accountName
                   }
                 />
 
                 <InfoBox
                   label="Email"
                   value={
-                    customerEmail
+                    accountEmail
                   }
                 />
 
                 <InfoBox
                   label="Account Status"
                   value={
-                    accountStatus
+                    account?.status ||
+                    "Active"
                   }
                 />
 
                 <InfoBox
-                  label="Member Since"
-                  value={
-                    accountCreatedAt
-                  }
+                  label="Account Created"
+                  value={formatDate(
+                    account?.createdAt
+                  )}
                 />
 
                 <div className="customer-dashboard-address-box">
                   <span>
-                    Latest Shipping Address
+                    Latest Shipping
+                    Address
                   </span>
 
                   <strong>
-                    {customerAddress}
+                    {latestOrder
+                      ? getCustomerAddress(
+                          latestOrder
+                        )
+                      : "No shipping address has been used yet"}
                   </strong>
                 </div>
               </div>
@@ -854,7 +526,7 @@ function CustomerDashboard({
 
                   <small>
                     {formatDate(
-                      getOrderDateValue(
+                      getOrderDate(
                         latestOrder
                       )
                     )}
@@ -869,7 +541,8 @@ function CustomerDashboard({
               </p>
 
               <h2>
-                Research Partner Access
+                Research Partner
+                Access
               </h2>
 
               {partnerApplication ? (
@@ -877,54 +550,83 @@ function CustomerDashboard({
                   <InfoBox
                     label="Your Code"
                     value={
-                      partnerApplication.code
+                      partnerApplication.code ||
+                      "Unavailable"
                     }
                   />
 
                   <InfoBox
                     label="Status"
-                    value={
+                    value={formatPartnerStatus(
                       partnerApplication.status
-                    }
+                    )}
                   />
 
                   <InfoBox
                     label="Submitted"
-                    value={
-                      partnerApplication.date ||
-                      "Date unavailable"
-                    }
+                    value={formatDate(
+                      partnerApplication.submittedAt
+                    )}
                   />
+
+                  <p className="customer-dashboard-muted">
+                    {getPartnerStatusMessage(
+                      partnerApplication.status
+                    )}
+                  </p>
+
+                  {partnerApplication.customerMessage && (
+                    <div className="customer-dashboard-partner-message">
+                      <strong>
+                        Message from
+                        304 Peptides
+                      </strong>
+
+                      <p>
+                        {
+                          partnerApplication.customerMessage
+                        }
+                      </p>
+                    </div>
+                  )}
 
                   <button
                     type="button"
                     className="primary-btn customer-dashboard-full-button"
                     onClick={() =>
                       onNavigate(
-                        "partnerHQ"
+                        "partnerApplication"
                       )
                     }
                   >
-                    Open Partner HQ
+                    {partnerApplication.status ===
+                    "denied"
+                      ? "Update And Reapply"
+                      : "View Partner Record"}
                   </button>
 
-                  <button
-                    type="button"
-                    className="secondary-btn customer-dashboard-full-button"
-                    onClick={() =>
-                      onNavigate(
-                        "marketingCenter"
-                      )
-                    }
-                  >
-                    Marketing Center
-                  </button>
+                  {partnerApplication.status ===
+                    "approved" && (
+                    <button
+                      type="button"
+                      className="secondary-btn customer-dashboard-full-button"
+                      disabled
+                    >
+                      Referral Tools
+                      Coming Next
+                    </button>
+                  )}
                 </>
               ) : hasOrders ? (
                 <>
                   <p className="customer-dashboard-muted">
-                    Your first order request is saved, so
-                    the Partner Application is available.
+                    Your first
+                    account-linked
+                    order request is
+                    saved, so the
+                    Partner
+                    Application is
+                    available.
                   </p>
 
                   <button
@@ -936,14 +638,19 @@ function CustomerDashboard({
                       )
                     }
                   >
-                    Apply For Partner Code
+                    Create Your
+                    Affiliate Code
                   </button>
                 </>
               ) : (
                 <>
                   <p className="customer-dashboard-muted">
-                    Submit your first order request to
-                    unlock the Partner Application.
+                    Submit your
+                    first order
+                    request to
+                    unlock the
+                    Partner
+                    Application.
                   </p>
 
                   <button
@@ -955,16 +662,24 @@ function CustomerDashboard({
                       )
                     }
                   >
-                    Start First Order
+                    Start First
+                    Order
                   </button>
                 </>
               )}
 
               <div className="customer-dashboard-partner-note">
-                Secure customer orders are stored with the
-                account. Partner application data remains
-                stored in this browser until the Partner
-                Program backend is added.
+                Partner
+                applications and
+                customer-selected
+                affiliate codes
+                are stored
+                securely with
+                the account.
+                Codes activate
+                only after
+                administrator
+                approval.
               </div>
             </aside>
           </div>
@@ -977,7 +692,8 @@ function CustomerDashboard({
                 </p>
 
                 <h2>
-                  Account Order History
+                  Account Order
+                  History
                 </h2>
               </div>
 
@@ -997,13 +713,18 @@ function CustomerDashboard({
             {!hasOrders ? (
               <div className="customer-dashboard-empty">
                 <h3>
-                  No Account Orders Yet
+                  No Account
+                  Orders Yet
                 </h3>
 
                 <p>
-                  Orders submitted while logged in will
-                  appear here with products, status,
-                  customer details, and totals.
+                  Orders submitted
+                  while logged in
+                  will appear here
+                  with products,
+                  status, customer
+                  details, and
+                  totals.
                 </p>
 
                 <button
@@ -1023,23 +744,23 @@ function CustomerDashboard({
                 {savedOrders.map(
                   (order) => {
                     const orderId =
-                      getOrderId(order);
+                      getOrderId(
+                        order
+                      );
 
-                    const items =
-                      getOrderItems(order);
-
-                    const subtotal =
-                      getOrderSubtotal(order);
-
-                    const quantity =
-                      getOrderQuantity(order);
-
-                    const customer =
-                      getCustomer(order);
-
-                    const isExpanded =
+                    const expanded =
                       expandedOrderId ===
                       orderId;
+
+                    const items =
+                      getItems(
+                        order
+                      );
+
+                    const customer =
+                      getCustomer(
+                        order
+                      );
 
                     return (
                       <article
@@ -1049,51 +770,39 @@ function CustomerDashboard({
                         className="customer-dashboard-order-card"
                       >
                         <div className="customer-dashboard-order-summary">
-                          <div className="customer-dashboard-order-main">
+                          <div>
                             <div className="customer-dashboard-order-heading">
-                              <p>
-                                Order #
-                                {orderId}
-                              </p>
-
                               <span className="customer-dashboard-status">
                                 {order.status ||
                                   "Order Request Received"}
                               </span>
+
+                              <small>
+                                {formatDate(
+                                  getOrderDate(
+                                    order
+                                  )
+                                )}
+                              </small>
                             </div>
 
                             <h3>
-                              {formatMoney(
-                                subtotal
-                              )}
+                              Order #
+                              {
+                                orderId
+                              }
                             </h3>
 
                             <p>
-                              {formatDate(
-                                getOrderDateValue(
+                              {getQuantity(
+                                order
+                              )}{" "}
+                              item(s) ·{" "}
+                              {formatMoney(
+                                getSubtotal(
                                   order
                                 )
                               )}
-                            </p>
-
-                            <p>
-                              {items.length} product
-                              {items.length === 1
-                                ? ""
-                                : "s"}{" "}
-                              · {quantity} total item
-                              {quantity === 1
-                                ? ""
-                                : "s"}
-                            </p>
-
-                            <p>
-                              Payment preference:{" "}
-                              <strong>
-                                {order.preferredPaymentLabel ||
-                                  order.paymentMethod ||
-                                  "Not selected"}
-                              </strong>
                             </p>
                           </div>
 
@@ -1101,30 +810,39 @@ function CustomerDashboard({
                             {items
                               .slice(
                                 0,
-                                3
+                                2
                               )
                               .map(
                                 (
                                   item,
                                   index
                                 ) => (
-                                  <ProductPreview
-                                    key={`${item.codeName}-${item.strength}-${index}`}
-                                    item={
-                                      item
-                                    }
-                                  />
+                                  <span
+                                    key={`${orderId}-${item.codeName || item.name}-${index}`}
+                                  >
+                                    {Number(
+                                      item.quantity ||
+                                        0
+                                    )}
+                                    ×{" "}
+                                    {item.name ||
+                                      "Research Product"}
+                                    {item.strength
+                                      ? ` — ${item.strength}`
+                                      : ""}
+                                  </span>
                                 )
                               )}
 
                             {items.length >
-                              3 && (
-                              <span>
+                              2 && (
+                              <small>
                                 +
                                 {items.length -
-                                  3}{" "}
-                                more
-                              </span>
+                                  2}{" "}
+                                additional
+                                product(s)
+                              </small>
                             )}
                           </div>
 
@@ -1133,19 +851,19 @@ function CustomerDashboard({
                             className="secondary-btn"
                             onClick={() =>
                               setExpandedOrderId(
-                                isExpanded
+                                expanded
                                   ? ""
                                   : orderId
                               )
                             }
                           >
-                            {isExpanded
+                            {expanded
                               ? "Hide Details"
                               : "View Details"}
                           </button>
                         </div>
 
-                        {isExpanded && (
+                        {expanded && (
                           <div className="customer-dashboard-order-details">
                             <section>
                               <h4>
@@ -1158,12 +876,55 @@ function CustomerDashboard({
                                     item,
                                     index
                                   ) => (
-                                    <ProductRow
-                                      key={`${item.codeName}-${item.strength}-${index}`}
-                                      item={
-                                        item
-                                      }
-                                    />
+                                    <div
+                                      key={`${orderId}-${item.codeName || item.name}-${item.strength || index}`}
+                                      className="customer-dashboard-product-row"
+                                    >
+                                      <div>
+                                        <strong>
+                                          {item.name ||
+                                            "Research Product"}
+                                        </strong>
+
+                                        <span>
+                                          {[
+                                            item.codeName,
+                                            item.strength,
+                                          ]
+                                            .filter(
+                                              Boolean
+                                            )
+                                            .join(
+                                              " · "
+                                            ) ||
+                                            "Details unavailable"}
+                                        </span>
+                                      </div>
+
+                                      <span>
+                                        {Number(
+                                          item.quantity ||
+                                            0
+                                        )}{" "}
+                                        ×{" "}
+                                        {formatMoney(
+                                          item.price
+                                        )}
+                                      </span>
+
+                                      <strong>
+                                        {formatMoney(
+                                          Number(
+                                            item.quantity ||
+                                              0
+                                          ) *
+                                            Number(
+                                              item.price ||
+                                                0
+                                            )
+                                        )}
+                                      </strong>
+                                    </div>
                                   )
                                 )}
                               </div>
@@ -1171,7 +932,7 @@ function CustomerDashboard({
 
                             <section>
                               <h4>
-                                Checkout Information
+                                Customer
                               </h4>
 
                               <DetailRow
@@ -1190,7 +951,7 @@ function CustomerDashboard({
                               />
 
                               <DetailRow
-                                label="Shipping Address"
+                                label="Address"
                                 value={getCustomerAddress(
                                   order
                                 )}
@@ -1203,30 +964,28 @@ function CustomerDashboard({
                               </h4>
 
                               <DetailRow
-                                label="Status"
-                                value={
-                                  order.status ||
-                                  "Order Request Received"
-                                }
-                              />
-
-                              <DetailRow
-                                label="Product Subtotal"
-                                value={formatMoney(
-                                  subtotal
+                                label="Quantity"
+                                value={getQuantity(
+                                  order
                                 )}
                               />
 
                               <DetailRow
-                                label="Total Items"
-                                value={
-                                  quantity
-                                }
+                                label="Subtotal"
+                                value={formatMoney(
+                                  getSubtotal(
+                                    order
+                                  )
+                                )}
                               />
 
                               <DetailRow
-                                label="Shipping & Taxes"
-                                value="Confirmed By Invoice"
+                                label="Payment Preference"
+                                value={
+                                  order.preferredPaymentLabel ||
+                                  order.preferredPaymentMethod ||
+                                  "Unavailable"
+                                }
                               />
                             </section>
                           </div>
@@ -1240,140 +999,13 @@ function CustomerDashboard({
           </section>
 
           <div className="customer-dashboard-research-notice">
-            For Research Use Only. Products are not intended
-            for human consumption.
+            For research use
+            only. Not for human
+            consumption.
           </div>
         </section>
       </main>
     </>
-  );
-}
-
-function ProductImage({
-  item,
-  compact = false,
-}) {
-  const [
-    imageFailed,
-    setImageFailed,
-  ] = useState(false);
-
-  if (
-    !item.image ||
-    imageFailed
-  ) {
-    return (
-      <div
-        className={
-          compact
-            ? "customer-dashboard-image-fallback customer-dashboard-image-compact"
-            : "customer-dashboard-image-fallback"
-        }
-      >
-        304
-      </div>
-    );
-  }
-
-  return (
-    <img
-      src={
-        item.image
-      }
-      alt={`${item.name} ${item.strength || ""}`}
-      loading="lazy"
-      onError={() =>
-        setImageFailed(
-          true
-        )
-      }
-    />
-  );
-}
-
-function ProductPreview({
-  item,
-}) {
-  return (
-    <div className="customer-dashboard-preview-item">
-      <ProductImage
-        item={
-          item
-        }
-        compact
-      />
-
-      <div>
-        <strong>
-          {item.name}
-        </strong>
-
-        <span>
-          {item.strength ||
-            item.codeName}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function ProductRow({
-  item,
-}) {
-  const quantity =
-    Number(
-      item.quantity ||
-        0
-    );
-
-  const price =
-    Number(
-      item.price ||
-        0
-    );
-
-  return (
-    <div className="customer-dashboard-product-row">
-      <div className="customer-dashboard-product-image">
-        <ProductImage
-          item={
-            item
-          }
-        />
-      </div>
-
-      <div className="customer-dashboard-product-copy">
-        <strong>
-          {item.name}
-        </strong>
-
-        <span>
-          {item.codeName}
-
-          {item.codeName &&
-          item.strength
-            ? " · "
-            : ""}
-
-          {item.strength}
-        </span>
-
-        <span>
-          Quantity: {quantity} ·{" "}
-          {formatMoney(
-            price
-          )}{" "}
-          each
-        </span>
-      </div>
-
-      <strong className="customer-dashboard-line-total">
-        {formatMoney(
-          quantity *
-            price
-        )}
-      </strong>
-    </div>
   );
 }
 
@@ -1410,7 +1042,8 @@ function InfoBox({
       </span>
 
       <strong>
-        {value}
+        {value ||
+          "Unavailable"}
       </strong>
     </div>
   );
@@ -1427,707 +1060,491 @@ function DetailRow({
       </span>
 
       <strong>
-        {value}
+        {value ||
+          "Unavailable"}
       </strong>
     </div>
   );
 }
 
 const customerDashboardCss = `
-  .customer-dashboard-page,
-  .customer-dashboard-page *,
-  .customer-dashboard-page *::before,
-  .customer-dashboard-page *::after {
-    box-sizing: border-box;
-  }
+.customer-dashboard-page,
+.customer-dashboard-page *,
+.customer-dashboard-page *::before,
+.customer-dashboard-page *::after {
+  box-sizing: border-box;
+}
 
-  .customer-dashboard-page {
-    width: 100%;
-    padding: 90px 60px;
-    overflow-x: hidden;
-  }
+.customer-dashboard-page {
+  width: 100%;
+  padding: 72px 28px;
+}
 
-  .customer-dashboard-inner {
-    width: 100%;
-    max-width: 1200px;
-    margin: 0 auto;
-  }
+.customer-dashboard-inner {
+  width: 100%;
+  max-width: 1260px;
+  margin: 0 auto;
+}
 
-  .customer-dashboard-hero {
-    position: relative;
-    margin-bottom: 24px;
-    padding: 64px 56px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 34px;
-    background:
-      radial-gradient(
-        circle at top,
-        rgba(61,165,255,0.22),
-        transparent 42%
-      ),
-      rgba(255,255,255,0.035);
-    box-shadow:
-      0 30px 90px rgba(0,0,0,0.5);
-    text-align: center;
-  }
+.customer-dashboard-hero,
+.customer-dashboard-panel,
+.customer-dashboard-partner,
+.customer-dashboard-orders {
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: 28px;
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(61, 165, 255, .13),
+      transparent 38%
+    ),
+    rgba(255, 255, 255, .035);
+  box-shadow: 0 28px 75px rgba(0, 0, 0, .4);
+}
 
-  .customer-dashboard-pill {
-    position: absolute;
-    top: 22px;
-    right: 24px;
-    padding: 8px 12px;
-    border: 1px solid rgba(61,165,255,0.28);
-    border-radius: 999px;
-    background: rgba(61,165,255,0.12);
-    color: #9ed8ff;
-    font-size: 10px;
-    font-weight: 900;
-    text-transform: uppercase;
-    letter-spacing: 0.7px;
-  }
+.customer-dashboard-hero {
+  position: relative;
+  padding: 48px;
+  margin-bottom: 20px;
+  text-align: center;
+}
 
-  .customer-dashboard-hero h1 {
-    margin-bottom: 20px;
-    font-size: clamp(45px, 7vw, 62px);
-    line-height: 1.05;
-    background:
-      linear-gradient(
-        180deg,
-        #ffffff,
-        #9d9d9d
-      );
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-  }
+.customer-dashboard-secure-pill {
+  display: inline-flex;
+  padding: 8px 12px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(72, 214, 151, .3);
+  border-radius: 999px;
+  background: rgba(72, 214, 151, .09);
+  color: #b8f3d8;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+}
 
-  .customer-dashboard-hero > p:not(.eyebrow) {
-    max-width: 820px;
-    margin: 0 auto;
-    color: #c8c8c8;
-    font-size: 18px;
-    line-height: 1.8;
-  }
+.customer-dashboard-hero h1 {
+  margin: 7px 0 16px;
+  font-size: clamp(39px, 7vw, 64px);
+  line-height: 1.03;
+}
 
-  .customer-dashboard-hero-actions,
-  .customer-dashboard-security-actions {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
+.customer-dashboard-hero > p:not(.eyebrow) {
+  max-width: 850px;
+  margin: 0 auto;
+  color: #bac4cb;
+  line-height: 1.72;
+}
 
-  .customer-dashboard-hero-actions {
-    justify-content: center;
-    margin-top: 28px;
-  }
+.customer-dashboard-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 25px;
+}
 
-  .customer-dashboard-security {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 22px;
-    margin-bottom: 18px;
-    padding: 20px 22px;
-    border: 1px solid rgba(61,165,255,0.3);
-    border-radius: 20px;
-    background: rgba(61,165,255,0.09);
-    color: #c8eaff;
-  }
+.customer-dashboard-error,
+.customer-dashboard-success {
+  margin: 16px 0;
+  padding: 15px;
+  border-radius: 14px;
+  line-height: 1.55;
+}
 
-  .customer-dashboard-security p {
-    max-width: 720px;
-    margin-top: 5px;
-    color: #a9cfe5;
-    line-height: 1.6;
-  }
+.customer-dashboard-error {
+  border: 1px solid rgba(255, 95, 95, .34);
+  background: rgba(255, 70, 70, .1);
+  color: #ffd0d0;
+}
 
-  .customer-dashboard-security-actions {
-    flex: 0 0 auto;
-  }
+.customer-dashboard-success {
+  border: 1px solid rgba(72, 214, 151, .3);
+  background: rgba(72, 214, 151, .09);
+  color: #b8f3d8;
+}
 
-  .customer-dashboard-security-actions button:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
+.customer-dashboard-stats {
+  display: grid;
+  grid-template-columns:
+    repeat(
+      4,
+      minmax(0, 1fr)
+    );
+  gap: 12px;
+  margin-bottom: 20px;
+}
 
-  .customer-dashboard-alert {
-    margin-bottom: 20px;
-    padding: 15px 17px;
-    border-radius: 15px;
-    font-size: 13px;
-    font-weight: 700;
-    line-height: 1.6;
-  }
+.customer-dashboard-stat-card,
+.customer-dashboard-info-box,
+.customer-dashboard-address-box {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, .035);
+  overflow-wrap: anywhere;
+}
 
-  .customer-dashboard-error {
-    border: 1px solid rgba(255,95,95,0.4);
-    background: rgba(255,70,70,0.1);
-    color: #ffd0d0;
-  }
+.customer-dashboard-stat-card span,
+.customer-dashboard-info-box span,
+.customer-dashboard-address-box span,
+.customer-dashboard-detail-row span {
+  color: #9ed8ff;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+}
 
-  .customer-dashboard-success {
-    border: 1px solid rgba(61,165,255,0.3);
-    background: rgba(61,165,255,0.1);
-    color: #bce7ff;
-  }
+.customer-dashboard-stat-card strong {
+  font-size: 29px;
+}
 
+.customer-dashboard-stat-card small {
+  color: #8f9aa2;
+}
+
+.customer-dashboard-overview {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr)
+    minmax(310px, 370px);
+  gap: 20px;
+  align-items: start;
+  margin-bottom: 20px;
+}
+
+.customer-dashboard-panel,
+.customer-dashboard-partner,
+.customer-dashboard-orders {
+  padding: 30px;
+}
+
+.customer-dashboard-partner {
+  position: sticky;
+  top: 105px;
+}
+
+.customer-dashboard-panel h2,
+.customer-dashboard-partner h2,
+.customer-dashboard-orders h2 {
+  margin: 7px 0 20px;
+  font-size: clamp(28px, 4vw, 38px);
+  line-height: 1.12;
+}
+
+.customer-dashboard-info-grid {
+  display: grid;
+  grid-template-columns:
+    repeat(
+      2,
+      minmax(0, 1fr)
+    );
+  gap: 12px;
+}
+
+.customer-dashboard-address-box {
+  grid-column: 1 / -1;
+  border-color: rgba(61, 165, 255, .2);
+  background: rgba(61, 165, 255, .08);
+}
+
+.customer-dashboard-partner .customer-dashboard-info-box {
+  margin-bottom: 11px;
+  border-color: rgba(61, 165, 255, .2);
+  background: rgba(61, 165, 255, .08);
+}
+
+.customer-dashboard-latest-order {
+  display: grid;
+  grid-template-columns:
+    repeat(
+      2,
+      minmax(0, 1fr)
+    );
+  gap: 12px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 15px;
+  background: rgba(0, 0, 0, .15);
+}
+
+.customer-dashboard-latest-order > div {
+  display: grid;
+  gap: 5px;
+}
+
+.customer-dashboard-latest-order span {
+  color: #9ed8ff;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.customer-dashboard-latest-order small {
+  grid-column: 1 / -1;
+  color: #8f9aa2;
+}
+
+.customer-dashboard-muted {
+  margin: 14px 0;
+  color: #c2cbd1;
+  line-height: 1.65;
+}
+
+.customer-dashboard-full-button {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.customer-dashboard-partner-message,
+.customer-dashboard-partner-note {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 14px;
+  line-height: 1.6;
+}
+
+.customer-dashboard-partner-message {
+  border: 1px solid rgba(61, 165, 255, .28);
+  background: rgba(61, 165, 255, .08);
+}
+
+.customer-dashboard-partner-message p {
+  margin-top: 6px;
+  color: #b8c4cc;
+}
+
+.customer-dashboard-partner-note {
+  border: 1px solid rgba(255, 255, 255, .08);
+  background: rgba(255, 255, 255, .03);
+  color: #929da6;
+  font-size: 13px;
+}
+
+.customer-dashboard-section-heading,
+.customer-dashboard-order-summary,
+.customer-dashboard-order-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.customer-dashboard-section-heading {
+  margin-bottom: 20px;
+}
+
+.customer-dashboard-empty {
+  padding: 38px 20px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .03);
+  text-align: center;
+}
+
+.customer-dashboard-empty p {
+  max-width: 700px;
+  margin: 9px auto 20px;
+  color: #aeb8bf;
+  line-height: 1.65;
+}
+
+.customer-dashboard-order-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.customer-dashboard-order-card {
+  padding: 20px;
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: 19px;
+  background: rgba(0, 0, 0, .15);
+}
+
+.customer-dashboard-order-summary > div:first-child {
+  flex: 1 1 320px;
+}
+
+.customer-dashboard-order-summary h3 {
+  margin: 7px 0;
+  font-size: 25px;
+}
+
+.customer-dashboard-order-summary p,
+.customer-dashboard-order-preview {
+  color: #aeb8bf;
+}
+
+.customer-dashboard-order-heading {
+  justify-content: flex-start;
+}
+
+.customer-dashboard-status {
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: rgba(61, 165, 255, .12);
+  color: #b8e4ff;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.customer-dashboard-order-heading small {
+  color: #8f9aa2;
+}
+
+.customer-dashboard-order-preview {
+  flex: 1 1 280px;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.customer-dashboard-order-details {
+  display: grid;
+  grid-template-columns:
+    1.4fr 1fr 1fr;
+  gap: 13px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, .08);
+}
+
+.customer-dashboard-order-details > section {
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, .025);
+}
+
+.customer-dashboard-order-details h4 {
+  margin-bottom: 12px;
+  font-size: 19px;
+}
+
+.customer-dashboard-product-stack {
+  display: grid;
+  gap: 9px;
+}
+
+.customer-dashboard-product-row {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr)
+    auto
+    auto;
+  gap: 12px;
+  align-items: center;
+  padding: 11px;
+  border: 1px solid rgba(255, 255, 255, .07);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, .13);
+}
+
+.customer-dashboard-product-row > div {
+  display: grid;
+  gap: 4px;
+}
+
+.customer-dashboard-product-row span {
+  color: #9ca7af;
+  font-size: 12px;
+}
+
+.customer-dashboard-detail-row {
+  display: grid;
+  gap: 5px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, .06);
+  overflow-wrap: anywhere;
+}
+
+.customer-dashboard-detail-row:last-child {
+  border-bottom: 0;
+}
+
+.customer-dashboard-research-notice {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid rgba(61, 165, 255, .27);
+  border-radius: 17px;
+  background: rgba(61, 165, 255, .09);
+  color: #9ed8ff;
+  font-weight: 900;
+  letter-spacing: .8px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 1000px) {
   .customer-dashboard-stats {
-    display: grid;
     grid-template-columns:
       repeat(
-        4,
+        2,
         minmax(0, 1fr)
       );
-    gap: 18px;
-    margin-bottom: 30px;
   }
 
-  .customer-dashboard-stat-card {
-    min-width: 0;
-    display: grid;
-    gap: 8px;
-    padding: 22px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 22px;
-    background: rgba(255,255,255,0.035);
-    box-shadow:
-      0 22px 60px rgba(0,0,0,0.32);
-  }
-
-  .customer-dashboard-stat-card span,
-  .customer-dashboard-info-box span,
-  .customer-dashboard-address-box span,
-  .customer-dashboard-latest-order span,
-  .customer-dashboard-detail-row span {
-    color: #9ed8ff;
-    font-size: 11px;
-    font-weight: 900;
-    text-transform: uppercase;
-    letter-spacing: 0.7px;
-  }
-
-  .customer-dashboard-stat-card strong {
-    color: #ffffff;
-    font-size: 28px;
-    overflow-wrap: anywhere;
-  }
-
-  .customer-dashboard-stat-card small {
-    color: #8d98a2;
-  }
-
-  .customer-dashboard-overview {
-    display: grid;
+  .customer-dashboard-overview,
+  .customer-dashboard-order-details {
     grid-template-columns:
-      minmax(0, 1fr)
-      minmax(300px, 360px);
-    gap: 30px;
-    align-items: start;
-    margin-bottom: 30px;
-  }
-
-  .customer-dashboard-panel,
-  .customer-dashboard-partner,
-  .customer-dashboard-orders {
-    min-width: 0;
-    padding: 38px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 30px;
-    background:
-      radial-gradient(
-        circle at top left,
-        rgba(61,165,255,0.14),
-        transparent 35%
-      ),
-      rgba(255,255,255,0.035);
-    box-shadow:
-      0 30px 80px rgba(0,0,0,0.45);
+      minmax(0, 1fr);
   }
 
   .customer-dashboard-partner {
-    position: sticky;
-    top: 110px;
-    padding: 30px;
+    position: static;
+  }
+}
+
+@media (max-width: 680px) {
+  .customer-dashboard-page {
+    padding: 44px 12px;
   }
 
-  .customer-dashboard-panel h2,
-  .customer-dashboard-partner h2,
-  .customer-dashboard-orders h2 {
-    margin-bottom: 24px;
-    font-size:
-      clamp(
-        29px,
-        4vw,
-        38px
-      );
-    line-height: 1.12;
-    background:
-      linear-gradient(
-        180deg,
-        #ffffff,
-        #9d9d9d
-      );
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+  .customer-dashboard-hero,
+  .customer-dashboard-panel,
+  .customer-dashboard-partner,
+  .customer-dashboard-orders {
+    padding: 20px;
+    border-radius: 20px;
   }
 
-  .customer-dashboard-info-grid {
-    display: grid;
-    grid-template-columns:
-      repeat(
-        2,
-        minmax(0, 1fr)
-      );
-    gap: 14px;
-  }
-
-  .customer-dashboard-info-box,
-  .customer-dashboard-address-box {
-    min-width: 0;
-    display: grid;
-    gap: 7px;
-    padding: 16px;
-    border: 1px solid rgba(61,165,255,0.22);
-    border-radius: 16px;
-    background: rgba(61,165,255,0.1);
-    color: #c8eaff;
-    overflow-wrap: anywhere;
-  }
-
-  .customer-dashboard-address-box {
-    grid-column: 1 / -1;
-  }
-
-  .customer-dashboard-partner .customer-dashboard-info-box {
-    margin-bottom: 12px;
-  }
-
+  .customer-dashboard-stats,
+  .customer-dashboard-info-grid,
   .customer-dashboard-latest-order {
-    display: grid;
     grid-template-columns:
-      repeat(
-        2,
-        minmax(0, 1fr)
-      );
-    gap: 14px;
-    margin-top: 20px;
-    padding: 16px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 16px;
-    background: rgba(255,255,255,0.04);
+      minmax(0, 1fr);
   }
 
-  .customer-dashboard-latest-order > div {
-    display: grid;
-    gap: 6px;
-  }
-
-  .customer-dashboard-latest-order strong {
-    color: #ffffff;
-    overflow-wrap: anywhere;
-  }
-
+  .customer-dashboard-address-box,
   .customer-dashboard-latest-order small {
-    grid-column: 1 / -1;
-    color: #8f9ba6;
+    grid-column: auto;
   }
 
-  .customer-dashboard-muted {
-    color: #c8c8c8;
-    line-height: 1.7;
-  }
-
-  .customer-dashboard-full-button {
+  .customer-dashboard-actions,
+  .customer-dashboard-actions button,
+  .customer-dashboard-section-heading > button,
+  .customer-dashboard-order-summary > button {
     width: 100%;
-    margin-top: 14px;
-  }
-
-  .customer-dashboard-partner-note {
-    margin-top: 20px;
-    padding: 15px;
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 15px;
-    background: rgba(255,255,255,0.035);
-    color: #929da6;
-    font-size: 13px;
-    line-height: 1.6;
-  }
-
-  .customer-dashboard-section-heading {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 18px;
-    flex-wrap: wrap;
-    margin-bottom: 24px;
-  }
-
-  .customer-dashboard-empty {
-    padding: 34px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 22px;
-    background: rgba(255,255,255,0.04);
-    color: #c8c8c8;
-    line-height: 1.8;
-    text-align: center;
-  }
-
-  .customer-dashboard-empty h3 {
-    margin-bottom: 8px;
-    color: #ffffff;
-    font-size: 24px;
-  }
-
-  .customer-dashboard-empty button {
-    margin-top: 20px;
-  }
-
-  .customer-dashboard-order-stack {
-    display: grid;
-    gap: 18px;
-  }
-
-  .customer-dashboard-order-card {
-    min-width: 0;
-    padding: 22px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 24px;
-    background: rgba(255,255,255,0.04);
-  }
-
-  .customer-dashboard-order-summary {
-    display: grid;
-    grid-template-columns:
-      minmax(0, 1fr)
-      minmax(230px, 310px)
-      auto;
-    gap: 20px;
-    align-items: center;
-  }
-
-  .customer-dashboard-order-heading {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-bottom: 8px;
-  }
-
-  .customer-dashboard-order-heading p {
-    color: #9ed8ff;
-    font-size: 12px;
-    font-weight: 900;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-  }
-
-  .customer-dashboard-status {
-    padding: 6px 9px;
-    border-radius: 999px;
-    background: rgba(61,165,255,0.13);
-    color: #b8e4ff;
-    font-size: 10px;
-    font-weight: 900;
-    text-transform: uppercase;
-  }
-
-  .customer-dashboard-order-main h3 {
-    margin-bottom: 7px;
-    color: #ffffff;
-    font-size: 28px;
-  }
-
-  .customer-dashboard-order-main > p {
-    color: #aaaaaa;
-    line-height: 1.55;
-    overflow-wrap: anywhere;
-  }
-
-  .customer-dashboard-order-main > p strong {
-    color: #d6d6d6;
-  }
-
-  .customer-dashboard-order-preview {
-    min-width: 0;
-    display: grid;
-    gap: 8px;
-  }
-
-  .customer-dashboard-preview-item {
-    display: grid;
-    grid-template-columns:
-      46px minmax(0, 1fr);
-    gap: 10px;
-    align-items: center;
-    padding: 7px;
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 12px;
-    background: rgba(0,0,0,0.15);
-  }
-
-  .customer-dashboard-preview-item img,
-  .customer-dashboard-image-compact {
-    width: 46px;
-    height: 54px;
-    object-fit: contain;
-    border-radius: 9px;
-  }
-
-  .customer-dashboard-preview-item > div:last-child {
-    min-width: 0;
-    display: grid;
-    gap: 3px;
-  }
-
-  .customer-dashboard-preview-item strong {
-    color: #ffffff;
-    font-size: 12px;
-    overflow-wrap: anywhere;
-  }
-
-  .customer-dashboard-preview-item span,
-  .customer-dashboard-order-preview > span {
-    color: #929ba3;
-    font-size: 11px;
-  }
-
-  .customer-dashboard-order-details {
-    display: grid;
-    grid-template-columns:
-      1.4fr 1fr 1fr;
-    gap: 16px;
-    margin-top: 20px;
-    padding-top: 20px;
-    border-top: 1px solid rgba(255,255,255,0.08);
-  }
-
-  .customer-dashboard-order-details > section {
-    min-width: 0;
-    padding: 17px;
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 17px;
-    background: rgba(0,0,0,0.16);
-  }
-
-  .customer-dashboard-order-details h4 {
-    margin-bottom: 14px;
-    color: #ffffff;
-    font-size: 20px;
-  }
-
-  .customer-dashboard-product-stack {
-    display: grid;
-    gap: 12px;
   }
 
   .customer-dashboard-product-row {
-    display: grid;
     grid-template-columns:
-      72px minmax(0, 1fr) auto;
-    gap: 12px;
-    align-items: center;
-    padding: 11px;
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 14px;
-    background: rgba(255,255,255,0.035);
+      minmax(0, 1fr);
   }
-
-  .customer-dashboard-product-image {
-    width: 72px;
-    height: 85px;
-    display: grid;
-    place-items: center;
-  }
-
-  .customer-dashboard-product-image img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-  }
-
-  .customer-dashboard-image-fallback {
-    width: 65px;
-    height: 75px;
-    display: grid;
-    place-items: center;
-    border: 1px solid rgba(61,165,255,0.27);
-    border-radius: 9px;
-    background: #10161c;
-    color: #9ed8ff;
-    font-size: 11px;
-    font-weight: 900;
-  }
-
-  .customer-dashboard-product-copy {
-    min-width: 0;
-    display: grid;
-    gap: 4px;
-  }
-
-  .customer-dashboard-product-copy strong {
-    color: #ffffff;
-    overflow-wrap: anywhere;
-  }
-
-  .customer-dashboard-product-copy span {
-    color: #929ba3;
-    font-size: 12px;
-    overflow-wrap: anywhere;
-  }
-
-  .customer-dashboard-line-total {
-    color: #9ed8ff;
-    white-space: nowrap;
-  }
-
-  .customer-dashboard-detail-row {
-    display: grid;
-    gap: 5px;
-    padding: 10px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-    overflow-wrap: anywhere;
-  }
-
-  .customer-dashboard-detail-row:last-child {
-    border-bottom: 0;
-  }
-
-  .customer-dashboard-detail-row strong {
-    color: #d4d4d4;
-    font-size: 13px;
-    line-height: 1.5;
-  }
-
-  .customer-dashboard-research-notice {
-    margin-top: 30px;
-    padding: 20px;
-    border: 1px solid rgba(61,165,255,0.28);
-    border-radius: 20px;
-    background: rgba(61,165,255,0.12);
-    color: #9ed8ff;
-    font-weight: 900;
-    line-height: 1.6;
-    text-align: center;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-  }
-
-  @media (max-width: 1050px) {
-    .customer-dashboard-page {
-      padding: 65px 24px;
-    }
-
-    .customer-dashboard-stats {
-      grid-template-columns:
-        repeat(
-          2,
-          minmax(0, 1fr)
-        );
-    }
-
-    .customer-dashboard-overview {
-      grid-template-columns:
-        minmax(0, 1fr);
-    }
-
-    .customer-dashboard-partner {
-      position: static;
-    }
-
-    .customer-dashboard-order-summary {
-      grid-template-columns:
-        minmax(0, 1fr)
-        minmax(220px, 300px);
-    }
-
-    .customer-dashboard-order-summary > button {
-      grid-column: 1 / -1;
-    }
-
-    .customer-dashboard-order-details {
-      grid-template-columns:
-        minmax(0, 1fr);
-    }
-  }
-
-  @media (max-width: 720px) {
-    .customer-dashboard-page {
-      padding: 44px 12px;
-    }
-
-    .customer-dashboard-hero,
-    .customer-dashboard-panel,
-    .customer-dashboard-partner,
-    .customer-dashboard-orders {
-      padding: 20px;
-      border-radius: 22px;
-    }
-
-    .customer-dashboard-pill {
-      position: static;
-      display: inline-flex;
-      margin-bottom: 20px;
-    }
-
-    .customer-dashboard-security {
-      align-items: stretch;
-      flex-direction: column;
-    }
-
-    .customer-dashboard-security-actions,
-    .customer-dashboard-security-actions button,
-    .customer-dashboard-hero-actions,
-    .customer-dashboard-hero-actions button {
-      width: 100%;
-    }
-
-    .customer-dashboard-info-grid,
-    .customer-dashboard-order-summary {
-      grid-template-columns:
-        minmax(0, 1fr);
-    }
-
-    .customer-dashboard-address-box,
-    .customer-dashboard-order-summary > button {
-      grid-column: auto;
-    }
-
-    .customer-dashboard-order-summary > button {
-      width: 100%;
-    }
-  }
-
-  @media (max-width: 480px) {
-    .customer-dashboard-page {
-      padding: 34px 8px;
-    }
-
-    .customer-dashboard-hero,
-    .customer-dashboard-panel,
-    .customer-dashboard-partner,
-    .customer-dashboard-orders,
-    .customer-dashboard-order-card {
-      padding: 15px;
-    }
-
-    .customer-dashboard-stats,
-    .customer-dashboard-latest-order {
-      grid-template-columns:
-        minmax(0, 1fr);
-    }
-
-    .customer-dashboard-latest-order small {
-      grid-column: auto;
-    }
-
-    .customer-dashboard-product-row {
-      grid-template-columns:
-        65px minmax(0, 1fr);
-    }
-
-    .customer-dashboard-line-total {
-      grid-column: 2;
-    }
-  }
+}
 `;
 
 export default CustomerDashboard;

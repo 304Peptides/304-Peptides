@@ -1,601 +1,2122 @@
-function PartnerHQ({ onNavigate, partnerApplication }) {
-  const partnerCode = partnerApplication?.code || "YOURCODE";
-  const partnerStatus = partnerApplication?.status || "Not Submitted";
-  const partnerDate = partnerApplication?.date || "No application date";
-  const trackingLink = `304peptides.com/?ref=${partnerCode}`;
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-  function copyText(text) {
-    navigator.clipboard?.writeText(text);
-    alert("Copied to clipboard.");
+const ADMIN_SESSION_KEY = "304-document-admin-session";
+
+const statusFilters = [
+  ["all", "All Applications"],
+  ["pending", "Pending Review"],
+  ["approved", "Approved Partners"],
+  ["suspended", "Suspended Partners"],
+  ["denied", "Denied Applications"],
+];
+
+function getStoredSecret() {
+  try {
+    return window.sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function storeSecret(secret) {
+  try {
+    window.sessionStorage.setItem(ADMIN_SESSION_KEY, secret);
+  } catch {
+    // The secret remains available in React state for this page session.
+  }
+}
+
+function removeStoredSecret() {
+  try {
+    window.sessionStorage.removeItem(ADMIN_SESSION_KEY);
+  } catch {
+    // Storage may be unavailable.
+  }
+}
+
+function formatDate(value) {
+  if (!value) {
+    return "Unavailable";
   }
 
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function normalizeApplications(records) {
+  return (Array.isArray(records) ? records : [])
+    .filter((record) => record && typeof record === "object")
+    .map((record) => ({
+      ...record,
+      status: String(record.status || "pending").toLowerCase(),
+      code: String(record.code || "").toUpperCase(),
+    }))
+    .sort((left, right) => {
+      const priority = {
+        pending: 0,
+        approved: 1,
+        suspended: 2,
+        denied: 3,
+      };
+
+      const statusDifference =
+        (priority[left.status] ?? 9) -
+        (priority[right.status] ?? 9);
+
+      if (statusDifference !== 0) {
+        return statusDifference;
+      }
+
+      return String(
+        right.submittedAt ||
+          right.updatedAt ||
+          ""
+      ).localeCompare(
+        String(
+          left.submittedAt ||
+            left.updatedAt ||
+            ""
+        )
+      );
+    });
+}
+
+async function readJson(response) {
+  const text = await response.text();
+  let result;
+
+  try {
+    result = JSON.parse(text);
+  } catch {
+    throw new Error(
+      "The protected Partner Program service returned an invalid response."
+    );
+  }
+
+  if (!response.ok || !result.success) {
+    throw new Error(
+      result.error ||
+        "The protected Partner Program request could not be completed."
+    );
+  }
+
+  return result;
+}
+
+function PartnerHQ({
+  onNavigate = () => {},
+}) {
+  const [
+    adminSecret,
+    setAdminSecret,
+  ] = useState(getStoredSecret);
+
+  const [
+    secretInput,
+    setSecretInput,
+  ] = useState("");
+
+  const [
+    applications,
+    setApplications,
+  ] = useState([]);
+
+  const [
+    isLoading,
+    setIsLoading,
+  ] = useState(
+    Boolean(adminSecret)
+  );
+
+  const [
+    isReady,
+    setIsReady,
+  ] = useState(false);
+
+  const [
+    loadError,
+    setLoadError,
+  ] = useState("");
+
+  const [
+    actionError,
+    setActionError,
+  ] = useState("");
+
+  const [
+    actionMessage,
+    setActionMessage,
+  ] = useState("");
+
+  const [
+    searchTerm,
+    setSearchTerm,
+  ] = useState("");
+
+  const [
+    statusFilter,
+    setStatusFilter,
+  ] = useState("all");
+
+  const [
+    expandedAccountId,
+    setExpandedAccountId,
+  ] = useState("");
+
+  const [
+    actionAccountId,
+    setActionAccountId,
+  ] = useState("");
+
+  const [
+    actionType,
+    setActionType,
+  ] = useState("");
+
+  const [
+    customerMessage,
+    setCustomerMessage,
+  ] = useState("");
+
+  const [
+    adminNotes,
+    setAdminNotes,
+  ] = useState("");
+
+  const [
+    isActing,
+    setIsActing,
+  ] = useState(false);
+
+  const loadApplications =
+    useCallback(
+      async (
+        secret = adminSecret
+      ) => {
+        const cleanedSecret =
+          String(
+            secret || ""
+          ).trim();
+
+        if (!cleanedSecret) {
+          return;
+        }
+
+        setIsLoading(true);
+        setLoadError("");
+        setActionError("");
+
+        try {
+          const response =
+            await fetch(
+              "/api/admin/partner-applications",
+              {
+                method: "GET",
+
+                headers: {
+                  Accept:
+                    "application/json",
+
+                  Authorization:
+                    `Bearer ${cleanedSecret}`,
+                },
+
+                credentials:
+                  "same-origin",
+
+                cache:
+                  "no-store",
+              }
+            );
+
+          const result =
+            await readJson(
+              response
+            );
+
+          setApplications(
+            normalizeApplications(
+              result.applications ||
+                result.records ||
+                []
+            )
+          );
+
+          setIsReady(true);
+        } catch (error) {
+          setApplications([]);
+          setIsReady(false);
+
+          setLoadError(
+            error.message ||
+              "Partner applications could not be loaded."
+          );
+        } finally {
+          setIsLoading(false);
+        }
+      },
+      [
+        adminSecret,
+      ]
+    );
+
+  useEffect(() => {
+    if (adminSecret) {
+      loadApplications(
+        adminSecret
+      );
+    }
+  }, [
+    adminSecret,
+    loadApplications,
+  ]);
+
+  const statistics =
+    useMemo(() => {
+      return applications.reduce(
+        (
+          totals,
+          application
+        ) => {
+          totals.total += 1;
+
+          totals[
+            application.status
+          ] =
+            Number(
+              totals[
+                application.status
+              ] || 0
+            ) + 1;
+
+          return totals;
+        },
+        {
+          total: 0,
+          pending: 0,
+          approved: 0,
+          suspended: 0,
+          denied: 0,
+        }
+      );
+    }, [
+      applications,
+    ]);
+
+  const filteredApplications =
+    useMemo(() => {
+      const search =
+        searchTerm
+          .trim()
+          .toLowerCase();
+
+      return applications.filter(
+        (
+          application
+        ) => {
+          const matchesStatus =
+            statusFilter ===
+              "all" ||
+            application.status ===
+              statusFilter;
+
+          const searchableText = [
+            application.firstName,
+            application.lastName,
+            application.email,
+            application.code,
+            application.primaryPlatform,
+            application.profileUrl,
+            application.audienceSize,
+            application.promotionPlan,
+            application.experience,
+            application.customerMessage,
+            application.adminNotes,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+
+          return (
+            matchesStatus &&
+            (
+              !search ||
+              searchableText.includes(
+                search
+              )
+            )
+          );
+        }
+      );
+    }, [
+      applications,
+      searchTerm,
+      statusFilter,
+    ]);
+
+  function handleUnlock(
+    event
+  ) {
+    event.preventDefault();
+
+    const cleanedSecret =
+      secretInput.trim();
+
+    if (!cleanedSecret) {
+      setLoadError(
+        "Enter the administrator secret."
+      );
+
+      return;
+    }
+
+    storeSecret(
+      cleanedSecret
+    );
+
+    setAdminSecret(
+      cleanedSecret
+    );
+
+    setSecretInput("");
+  }
+
+  function clearAdminSession() {
+    removeStoredSecret();
+
+    setAdminSecret("");
+    setSecretInput("");
+    setApplications([]);
+    setIsReady(false);
+    setLoadError("");
+    setActionError("");
+    setActionMessage("");
+
+    closeActionPanel();
+  }
+
+  function openActionPanel(
+    application,
+    action
+  ) {
+    setActionAccountId(
+      application.accountId
+    );
+
+    setActionType(
+      action
+    );
+
+    setCustomerMessage("");
+
+    setAdminNotes(
+      application.adminNotes ||
+        ""
+    );
+
+    setActionError("");
+    setActionMessage("");
+
+    window.setTimeout(
+      () => {
+        document
+          .getElementById(
+            "partner-action-panel"
+          )
+          ?.scrollIntoView({
+            behavior:
+              "smooth",
+
+            block:
+              "center",
+          });
+      },
+      0
+    );
+  }
+
+  function closeActionPanel() {
+    setActionAccountId("");
+    setActionType("");
+    setCustomerMessage("");
+    setAdminNotes("");
+    setIsActing(false);
+  }
+
+  async function submitAction(
+    event
+  ) {
+    event.preventDefault();
+
+    const application =
+      applications.find(
+        (
+          record
+        ) =>
+          record.accountId ===
+          actionAccountId
+      );
+
+    if (
+      !application ||
+      !actionType ||
+      isActing
+    ) {
+      return;
+    }
+
+    if (
+      [
+        "deny",
+        "suspend",
+      ].includes(
+        actionType
+      ) &&
+      !customerMessage.trim()
+    ) {
+      setActionError(
+        actionType ===
+          "deny"
+          ? "Enter the reason the customer will see before denying the application."
+          : "Enter the reason the customer will see before suspending the partner."
+      );
+
+      return;
+    }
+
+    const confirmationText =
+      getConfirmationText(
+        actionType,
+        application
+      );
+
+    if (
+      !window.confirm(
+        confirmationText
+      )
+    ) {
+      return;
+    }
+
+    setIsActing(true);
+    setActionError("");
+    setActionMessage("");
+
+    try {
+      const response =
+        await fetch(
+          "/api/admin/partner-applications/action",
+          {
+            method:
+              "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+
+              Accept:
+                "application/json",
+
+              Authorization:
+                `Bearer ${adminSecret}`,
+            },
+
+            credentials:
+              "same-origin",
+
+            body:
+              JSON.stringify({
+                action:
+                  actionType,
+
+                accountId:
+                  application.accountId,
+
+                customerMessage:
+                  customerMessage.trim(),
+
+                adminNotes:
+                  adminNotes.trim(),
+              }),
+          }
+        );
+
+      const result =
+        await readJson(
+          response
+        );
+
+      const updatedApplication =
+        result.application;
+
+      setApplications(
+        (
+          current
+        ) =>
+          normalizeApplications(
+            current.map(
+              (
+                record
+              ) =>
+                record.accountId ===
+                updatedApplication.accountId
+                  ? updatedApplication
+                  : record
+            )
+          )
+      );
+
+      setActionMessage(
+        result.message ||
+          "The Partner Program record was updated."
+      );
+
+      closeActionPanel();
+    } catch (error) {
+      setActionError(
+        error.message ||
+          "The Partner Program action failed."
+      );
+
+      setIsActing(false);
+    }
+  }
+
+  if (!adminSecret) {
+    return (
+      <>
+        <style>
+          {partnerHqCss}
+        </style>
+
+        <main className="partner-hq-page">
+          <section className="partner-hq-login-card">
+            <p className="eyebrow">
+              PROTECTED ADMIN
+              AREA
+            </p>
+
+            <h1>
+              Partner HQ
+            </h1>
+
+            <p>
+              Cloudflare
+              Access protects
+              this route. Enter
+              the same
+              administrator
+              secret used by
+              Customer Manager
+              to load Partner
+              Program records.
+            </p>
+
+            <form
+              onSubmit={
+                handleUnlock
+              }
+            >
+              <label className="partner-hq-field">
+                <span>
+                  Administrator
+                  Secret
+                </span>
+
+                <input
+                  type="password"
+                  value={
+                    secretInput
+                  }
+                  onChange={(
+                    event
+                  ) =>
+                    setSecretInput(
+                      event.target
+                        .value
+                    )
+                  }
+                  autoComplete="current-password"
+                  placeholder="Enter administrator secret"
+                />
+              </label>
+
+              {loadError && (
+                <div
+                  className="partner-hq-error"
+                  role="alert"
+                >
+                  {
+                    loadError
+                  }
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="primary-btn partner-hq-full-button"
+              >
+                Unlock Partner
+                HQ
+              </button>
+            </form>
+
+            <button
+              type="button"
+              className="secondary-btn partner-hq-full-button"
+              onClick={() =>
+                onNavigate(
+                  "missionControl"
+                )
+              }
+            >
+              Back To Mission
+              Control
+            </button>
+          </section>
+        </main>
+      </>
+    );
+  }
+
+  const selectedApplication =
+    applications.find(
+      (
+        application
+      ) =>
+        application.accountId ===
+        actionAccountId
+    );
+
   return (
-    <main style={{ padding: "90px 60px" }}>
-      <section style={{ maxWidth: "1250px", margin: "0 auto" }}>
+    <>
+      <style>
+        {partnerHqCss}
+      </style>
 
-        <button
-          className="secondary-btn"
-          style={{ marginBottom: "30px" }}
-          onClick={() => onNavigate("dashboard")}
-        >
-          ← Back To Research Hub
-        </button>
+      <main className="partner-hq-page">
+        <section className="partner-hq-inner">
+          <div className="partner-hq-topbar">
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() =>
+                onNavigate(
+                  "missionControl"
+                )
+              }
+            >
+              ← Mission Control
+            </button>
 
-        <div style={heroPanelStyle}>
-          <p className="eyebrow">PARTNER HQ</p>
+            <div className="partner-hq-topbar-actions">
+              <span className="partner-hq-source-pill">
+                {isReady
+                  ? "Live Partner Registry"
+                  : "Registry Locked"}
+              </span>
 
-          <h1 style={titleStyle}>
-            Research Partner Dashboard
-          </h1>
-
-          <p style={subtitleStyle}>
-            View your partner code, tracking link, activity preview, reward
-            options, approved language, and Marketing Center tools.
-          </p>
-
-          <div style={codeDisplayStyle}>
-            {partnerCode}
+              <button
+                type="button"
+                className="partner-hq-clear-button"
+                onClick={
+                  clearAdminSession
+                }
+              >
+                Clear Admin
+                Session
+              </button>
+            </div>
           </div>
 
-          <div style={buttonRowStyle}>
+          <header className="partner-hq-hero">
+            <div>
+              <p className="eyebrow">
+                304 PEPTIDES
+                ADMIN
+              </p>
+
+              <h1>
+                Partner HQ
+              </h1>
+
+              <p>
+                Review
+                applications,
+                preserve
+                customer-selected
+                affiliate codes,
+                record private
+                notes, and
+                control partner
+                approval status.
+              </p>
+            </div>
+
             <button
+              type="button"
               className="primary-btn"
-              onClick={() => onNavigate("marketingCenter")}
+              disabled={
+                isLoading
+              }
+              onClick={() =>
+                loadApplications(
+                  adminSecret
+                )
+              }
             >
-              Open Marketing Center
+              {isLoading
+                ? "Refreshing..."
+                : "Refresh Applications"}
             </button>
+          </header>
 
-            <button
-              className="secondary-btn"
-              onClick={() => onNavigate("partners")}
+          <section className="partner-hq-stats">
+            <StatCard
+              label="Total"
+              value={
+                statistics.total
+              }
+              detail="All records"
+            />
+
+            <StatCard
+              label="Pending"
+              value={
+                statistics.pending
+              }
+              detail="Need review"
+            />
+
+            <StatCard
+              label="Approved"
+              value={
+                statistics.approved
+              }
+              detail="Active codes"
+            />
+
+            <StatCard
+              label="Suspended"
+              value={
+                statistics.suspended
+              }
+              detail="Codes inactive"
+            />
+
+            <StatCard
+              label="Denied"
+              value={
+                statistics.denied
+              }
+              detail="May reapply"
+            />
+          </section>
+
+          {loadError && (
+            <div
+              className="partner-hq-error"
+              role="alert"
             >
-              Partner Program
-            </button>
-
-            <button
-              className="secondary-btn"
-              onClick={() => onNavigate("researchAgreement")}
-            >
-              Research Agreement
-            </button>
-          </div>
-        </div>
-
-        <div style={statsGridStyle}>
-          <div style={statCardStyle}>
-            <span>Partner Code</span>
-            <strong>{partnerCode}</strong>
-          </div>
-
-          <div style={statCardStyle}>
-            <span>Status</span>
-            <strong>{partnerStatus}</strong>
-          </div>
-
-          <div style={statCardStyle}>
-            <span>Submitted</span>
-            <strong>{partnerDate}</strong>
-          </div>
-
-          <div style={statCardStyle}>
-            <span>Level</span>
-            <strong>Research Associate</strong>
-          </div>
-        </div>
-
-        <div style={dashboardGridStyle}>
-
-          <div style={mainPanelStyle}>
-            <p className="eyebrow">TRACKING LINK</p>
-
-            <h2 style={sectionTitleStyle}>
-              Your Partner Link
-            </h2>
-
-            <div style={trackingBoxStyle}>
-              {trackingLink}
+              {loadError}
             </div>
+          )}
 
-            <div style={buttonRowLeftStyle}>
-              <button
-                className="primary-btn"
-                onClick={() => copyText(trackingLink)}
+          {actionError && (
+            <div
+              className="partner-hq-error"
+              role="alert"
+            >
+              {actionError}
+            </div>
+          )}
+
+          {actionMessage && (
+            <div
+              className="partner-hq-success"
+              aria-live="polite"
+            >
+              {actionMessage}
+            </div>
+          )}
+
+          {selectedApplication &&
+            actionType && (
+              <form
+                id="partner-action-panel"
+                className="partner-hq-action-panel"
+                onSubmit={
+                  submitAction
+                }
               >
-                Copy Tracking Link
-              </button>
+                <div className="partner-hq-section-heading">
+                  <div>
+                    <p className="eyebrow">
+                      CONFIRM
+                      PARTNER
+                      ACTION
+                    </p>
 
-              <button
-                className="secondary-btn"
-                onClick={() => onNavigate("marketingCenter")}
-              >
-                Get Captions
-              </button>
+                    <h2>
+                      {
+                        getActionTitle(
+                          actionType
+                        )
+                      }
+                    </h2>
+
+                    <p>
+                      {
+                        selectedApplication.firstName
+                      }{" "}
+                      {
+                        selectedApplication.lastName
+                      }{" "}
+                      —{" "}
+                      <strong>
+                        {
+                          selectedApplication.code
+                        }
+                      </strong>
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="partner-hq-close-button"
+                    onClick={
+                      closeActionPanel
+                    }
+                    disabled={
+                      isActing
+                    }
+                  >
+                    Close
+                  </button>
+                </div>
+
+                <div className="partner-hq-form-grid">
+                  <label className="partner-hq-field">
+                    <span>
+                      Customer
+                      Message
+                      {[
+                        "deny",
+                        "suspend",
+                      ].includes(
+                        actionType
+                      )
+                        ? " — Required"
+                        : " — Optional"}
+                    </span>
+
+                    <textarea
+                      rows="5"
+                      value={
+                        customerMessage
+                      }
+                      onChange={(
+                        event
+                      ) =>
+                        setCustomerMessage(
+                          event.target
+                            .value
+                        )
+                      }
+                      maxLength="1000"
+                      disabled={
+                        isActing
+                      }
+                      placeholder={
+                        getCustomerMessagePlaceholder(
+                          actionType
+                        )
+                      }
+                    />
+
+                    <small>
+                      {
+                        customerMessage.length
+                      }
+                      /1000
+                      characters
+                    </small>
+                  </label>
+
+                  <label className="partner-hq-field">
+                    <span>
+                      Private Admin
+                      Notes —
+                      Optional
+                    </span>
+
+                    <textarea
+                      rows="5"
+                      value={
+                        adminNotes
+                      }
+                      onChange={(
+                        event
+                      ) =>
+                        setAdminNotes(
+                          event.target
+                            .value
+                        )
+                      }
+                      maxLength="2000"
+                      disabled={
+                        isActing
+                      }
+                      placeholder="Visible only inside protected Partner HQ."
+                    />
+
+                    <small>
+                      {
+                        adminNotes.length
+                      }
+                      /2000
+                      characters
+                    </small>
+                  </label>
+                </div>
+
+                <div className="partner-hq-action-buttons">
+                  <button
+                    type="submit"
+                    className={
+                      [
+                        "deny",
+                        "suspend",
+                      ].includes(
+                        actionType
+                      )
+                        ? "partner-hq-danger-button"
+                        : "primary-btn"
+                    }
+                    disabled={
+                      isActing
+                    }
+                  >
+                    {isActing
+                      ? "Saving..."
+                      : getActionButtonLabel(
+                          actionType
+                        )}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    onClick={
+                      closeActionPanel
+                    }
+                    disabled={
+                      isActing
+                    }
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+
+          <section className="partner-hq-records-panel">
+            <div className="partner-hq-section-heading">
+              <div>
+                <p className="eyebrow">
+                  APPLICATION
+                  DIRECTORY
+                </p>
+
+                <h2>
+                  Partner Records
+                </h2>
+              </div>
+
+              <span>
+                Showing{" "}
+                <strong>
+                  {
+                    filteredApplications.length
+                  }
+                </strong>{" "}
+                of{" "}
+                <strong>
+                  {
+                    applications.length
+                  }
+                </strong>
+              </span>
             </div>
 
-            <div style={noticeBoxStyle}>
-              This is prototype tracking only. Real clicks, referrals, order
-              attribution, fraud controls, and payout tracking will require backend
-              development.
+            <div className="partner-hq-filters">
+              <label className="partner-hq-field">
+                <span>
+                  Search
+                  Applications
+                </span>
+
+                <input
+                  type="search"
+                  value={
+                    searchTerm
+                  }
+                  onChange={(
+                    event
+                  ) =>
+                    setSearchTerm(
+                      event.target
+                        .value
+                    )
+                  }
+                  placeholder="Name, email, code, platform, or notes"
+                />
+              </label>
+
+              <label className="partner-hq-field">
+                <span>
+                  Status
+                </span>
+
+                <select
+                  value={
+                    statusFilter
+                  }
+                  onChange={(
+                    event
+                  ) =>
+                    setStatusFilter(
+                      event.target
+                        .value
+                    )
+                  }
+                >
+                  {statusFilters.map(
+                    ([
+                      value,
+                      label,
+                    ]) => (
+                      <option
+                        key={
+                          value
+                        }
+                        value={
+                          value
+                        }
+                      >
+                        {
+                          label
+                        }
+                      </option>
+                    )
+                  )}
+                </select>
+              </label>
             </div>
-          </div>
 
-          <aside style={sidePanelStyle}>
-            <p className="eyebrow">QR PREVIEW</p>
+            {isLoading ? (
+              <div className="partner-hq-empty">
+                <h3>
+                  Loading
+                  Applications
+                </h3>
 
-            <h2 style={sideTitleStyle}>
-              Partner QR
+                <p>
+                  Retrieving
+                  protected
+                  Partner Program
+                  records.
+                </p>
+              </div>
+            ) : filteredApplications.length ===
+              0 ? (
+              <div className="partner-hq-empty">
+                <h3>
+                  No Matching
+                  Applications
+                </h3>
+
+                <p>
+                  No Partner
+                  Program records
+                  match the
+                  current search
+                  and status
+                  filter.
+                </p>
+              </div>
+            ) : (
+              <div className="partner-hq-card-stack">
+                {filteredApplications.map(
+                  (
+                    application
+                  ) => {
+                    const expanded =
+                      expandedAccountId ===
+                      application.accountId;
+
+                    return (
+                      <article
+                        key={
+                          application.accountId
+                        }
+                        className={`partner-hq-card partner-hq-card-${application.status}`}
+                      >
+                        <div className="partner-hq-card-summary">
+                          <div className="partner-hq-card-main">
+                            <div className="partner-hq-card-title-row">
+                              <div>
+                                <p className="eyebrow">
+                                  {
+                                    application.code
+                                  }
+                                </p>
+
+                                <h3>
+                                  {`${application.firstName || ""} ${application.lastName || ""}`.trim() ||
+                                    "Name unavailable"}
+                                </h3>
+
+                                <p className="partner-hq-email">
+                                  {
+                                    application.email
+                                  }
+                                </p>
+                              </div>
+
+                              <StatusPill
+                                status={
+                                  application.status
+                                }
+                              />
+                            </div>
+
+                            <div className="partner-hq-card-quick-grid">
+                              <QuickDetail
+                                label="Platform"
+                                value={
+                                  application.primaryPlatform ||
+                                  "Unavailable"
+                                }
+                              />
+
+                              <QuickDetail
+                                label="Audience"
+                                value={
+                                  application.audienceSize ||
+                                  "Unavailable"
+                                }
+                              />
+
+                              <QuickDetail
+                                label="Submitted"
+                                value={formatDate(
+                                  application.submittedAt
+                                )}
+                              />
+
+                              <QuickDetail
+                                label="Application"
+                                value={`#${application.applicationNumber || 1}`}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="partner-hq-card-buttons">
+                            <button
+                              type="button"
+                              className="secondary-btn"
+                              onClick={() =>
+                                setExpandedAccountId(
+                                  expanded
+                                    ? ""
+                                    : application.accountId
+                                )
+                              }
+                            >
+                              {expanded
+                                ? "Hide Details"
+                                : "View Details"}
+                            </button>
+
+                            {application.status ===
+                              "pending" && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="primary-btn"
+                                  onClick={() =>
+                                    openActionPanel(
+                                      application,
+                                      "approve"
+                                    )
+                                  }
+                                >
+                                  Approve
+                                </button>
+
+                                <button
+                                  type="button"
+                                  className="partner-hq-danger-button"
+                                  onClick={() =>
+                                    openActionPanel(
+                                      application,
+                                      "deny"
+                                    )
+                                  }
+                                >
+                                  Deny
+                                </button>
+                              </>
+                            )}
+
+                            {application.status ===
+                              "approved" && (
+                              <button
+                                type="button"
+                                className="partner-hq-danger-button"
+                                onClick={() =>
+                                  openActionPanel(
+                                    application,
+                                    "suspend"
+                                  )
+                                }
+                              >
+                                Suspend
+                              </button>
+                            )}
+
+                            {application.status ===
+                              "suspended" && (
+                              <button
+                                type="button"
+                                className="primary-btn"
+                                onClick={() =>
+                                  openActionPanel(
+                                    application,
+                                    "reactivate"
+                                  )
+                                }
+                              >
+                                Reactivate
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {expanded && (
+                          <div className="partner-hq-card-details">
+                            <DetailBlock
+                              title="Promotion Plan"
+                              text={
+                                application.promotionPlan ||
+                                "Not supplied."
+                              }
+                            />
+
+                            <DetailBlock
+                              title="Relevant Experience"
+                              text={
+                                application.experience ||
+                                "Not supplied."
+                              }
+                            />
+
+                            <div className="partner-hq-detail-grid">
+                              <QuickDetail
+                                label="Profile URL"
+                                value={
+                                  application.profileUrl ||
+                                  "Not supplied"
+                                }
+                              />
+
+                              <QuickDetail
+                                label="Agreement Accepted"
+                                value={formatDate(
+                                  application.agreementAcceptedAt
+                                )}
+                              />
+
+                              <QuickDetail
+                                label="Reviewed"
+                                value={formatDate(
+                                  application.reviewedAt
+                                )}
+                              />
+
+                              <QuickDetail
+                                label="Reviewed By"
+                                value={
+                                  application.reviewedBy ||
+                                  "Not reviewed"
+                                }
+                              />
+                            </div>
+
+                            {application.customerMessage && (
+                              <DetailBlock
+                                title="Customer Message"
+                                text={
+                                  application.customerMessage
+                                }
+                                highlighted
+                              />
+                            )}
+
+                            {application.adminNotes && (
+                              <DetailBlock
+                                title="Private Admin Notes"
+                                text={
+                                  application.adminNotes
+                                }
+                                privateNote
+                              />
+                            )}
+
+                            <div className="partner-hq-history-grid">
+                              <QuickDetail
+                                label="Denied"
+                                value={formatDate(
+                                  application.deniedAt
+                                )}
+                              />
+
+                              <QuickDetail
+                                label="Suspended"
+                                value={formatDate(
+                                  application.suspendedAt
+                                )}
+                              />
+
+                              <QuickDetail
+                                label="Reactivated"
+                                value={formatDate(
+                                  application.reactivatedAt
+                                )}
+                              />
+
+                              <QuickDetail
+                                label="Last Status Change"
+                                value={formatDate(
+                                  application.lastStatusChangeAt
+                                )}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </article>
+                    );
+                  }
+                )}
+              </div>
+            )}
+          </section>
+
+          <section className="partner-hq-security-note">
+            <p className="eyebrow">
+              PROGRAM SECURITY
+            </p>
+
+            <h2>
+              Customer Codes
+              Stay With Their
+              Accounts
             </h2>
 
-            <div style={qrBoxStyle}>
-              QR
-            </div>
-
-            <p style={sideTextStyle}>
-              Later, this can generate a real QR code connected to your partner
-              tracking link.
+            <p>
+              Pending and
+              approved codes
+              remain reserved
+              to the
+              applicant’s
+              account. Denial
+              releases the
+              code so it can
+              be selected
+              again.
+              Suspension
+              disables the
+              code without
+              releasing it to
+              another
+              applicant.
             </p>
-          </aside>
-
-        </div>
-
-        <div style={activityPanelStyle}>
-          <p className="eyebrow">ACTIVITY OVERVIEW</p>
-
-          <h2 style={sectionTitleStyle}>
-            Prototype Metrics
-          </h2>
-
-          <div style={activityGridStyle}>
-            <div style={activityBoxStyle}>
-              <span>Clicks</span>
-              <strong>0</strong>
-              <small>Backend needed</small>
-            </div>
-
-            <div style={activityBoxStyle}>
-              <span>Referred Orders</span>
-              <strong>0</strong>
-              <small>Backend needed</small>
-            </div>
-
-            <div style={activityBoxStyle}>
-              <span>Approved Rewards</span>
-              <strong>$0</strong>
-              <small>Backend needed</small>
-            </div>
-
-            <div style={activityBoxStyle}>
-              <span>Store Credit</span>
-              <strong>$0</strong>
-              <small>Backend needed</small>
-            </div>
-          </div>
-        </div>
-
-        <div style={rewardPanelStyle}>
-          <div>
-            <p className="eyebrow">REWARD OPTIONS</p>
-
-            <h2 style={sectionTitleStyle}>
-              Cash Or Boosted Store Credit
-            </h2>
-
-            <p style={textStyle}>
-              Partner rewards can be structured so partners choose between cash
-              payout or boosted store credit. Final rules will need real tracking,
-              approval, and payout controls.
-            </p>
-          </div>
-
-          <div style={rewardGridStyle}>
-            <div style={rewardBoxStyle}>
-              <strong>$100 Cash</strong>
-              <span>Example payout option.</span>
-            </div>
-
-            <div style={rewardBoxStyle}>
-              <strong>$125 Store Credit</strong>
-              <span>Boosted credit option.</span>
-            </div>
-
-            <div style={rewardBoxStyle}>
-              <strong>Monthly Leaders</strong>
-              <span>Leaderboard reward ideas.</span>
-            </div>
-
-            <div style={rewardBoxStyle}>
-              <strong>Quarterly Swag</strong>
-              <span>Merch and recognition later.</span>
-            </div>
-          </div>
-        </div>
-
-        <div style={levelsPanelStyle}>
-          <p className="eyebrow">PARTNER LEVELS</p>
-
-          <h2 style={sectionTitleStyle}>
-            Growth Path
-          </h2>
-
-          <div style={levelsGridStyle}>
-            <div style={levelBadgeStyle}>Research Associate</div>
-            <div style={levelBadgeStyle}>Senior Research Associate</div>
-            <div style={levelBadgeStyle}>Lead Research Associate</div>
-            <div style={levelBadgeStyle}>Principal Research Associate</div>
-            <div style={levelBadgeStyle}>Research Director</div>
-          </div>
-        </div>
-
-        <div style={languagePanelStyle}>
-          <p className="eyebrow">APPROVED LANGUAGE</p>
-
-          <h2 style={sectionTitleStyle}>
-            Keep Promotion Brand-Safe
-          </h2>
-
-          <div style={languageGridStyle}>
-            <div style={approvedBoxStyle}>
-              <h3>Approved Focus</h3>
-
-              <ul style={listStyle}>
-                <li>Research-use only</li>
-                <li>Quality standards</li>
-                <li>COA transparency</li>
-                <li>Clear documentation</li>
-                <li>Professional customer experience</li>
-              </ul>
-            </div>
-
-            <div style={restrictedBoxStyle}>
-              <h3>Restricted Language</h3>
-
-              <ul style={listStyle}>
-                <li>No human-use claims</li>
-                <li>No dosing instructions</li>
-                <li>No treatment claims</li>
-                <li>No medical promises</li>
-                <li>No before/after transformation claims</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <div style={ctaPanelStyle}>
-          <p className="eyebrow">NEXT STEP</p>
-
-          <h2 style={ctaTitleStyle}>
-            Grab Approved Captions
-          </h2>
-
-          <p style={ctaTextStyle}>
-            Use the Marketing Center to copy captions, view your tracking link,
-            and keep partner promotion focused on research-use standards.
-          </p>
-
-          <button
-            className="primary-btn"
-            style={{ marginTop: "26px" }}
-            onClick={() => onNavigate("marketingCenter")}
-          >
-            Open Marketing Center
-          </button>
-        </div>
-
-      </section>
-    </main>
+          </section>
+        </section>
+      </main>
+    </>
   );
 }
 
-const heroPanelStyle = {
-  textAlign: "center",
+function StatCard({
+  label,
+  value,
+  detail,
+}) {
+  return (
+    <div className="partner-hq-stat-card">
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
+
+      <small>
+        {detail}
+      </small>
+    </div>
+  );
+}
+
+function StatusPill({
+  status,
+}) {
+  return (
+    <span
+      className={`partner-hq-status partner-hq-status-${status}`}
+    >
+      {String(
+        status ||
+          "pending"
+      ).toUpperCase()}
+    </span>
+  );
+}
+
+function QuickDetail({
+  label,
+  value,
+}) {
+  return (
+    <div className="partner-hq-quick-detail">
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
+    </div>
+  );
+}
+
+function DetailBlock({
+  title,
+  text,
+  highlighted = false,
+  privateNote = false,
+}) {
+  const classes = [
+    "partner-hq-detail-block",
+
+    highlighted
+      ? "partner-hq-detail-highlighted"
+      : "",
+
+    privateNote
+      ? "partner-hq-detail-private"
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <section
+      className={
+        classes
+      }
+    >
+      <strong>
+        {title}
+      </strong>
+
+      <p>
+        {text}
+      </p>
+    </section>
+  );
+}
+
+function getActionTitle(
+  action
+) {
+  const titles = {
+    approve:
+      "Approve Partner Application",
+
+    deny:
+      "Deny Partner Application",
+
+    suspend:
+      "Suspend Partner Access",
+
+    reactivate:
+      "Reactivate Partner Access",
+  };
+
+  return (
+    titles[action] ||
+    "Update Partner Record"
+  );
+}
+
+function getActionButtonLabel(
+  action
+) {
+  const labels = {
+    approve:
+      "Approve Application",
+
+    deny:
+      "Deny Application",
+
+    suspend:
+      "Suspend Partner",
+
+    reactivate:
+      "Reactivate Partner",
+  };
+
+  return (
+    labels[action] ||
+    "Save Action"
+  );
+}
+
+function getCustomerMessagePlaceholder(
+  action
+) {
+  if (
+    action ===
+    "deny"
+  ) {
+    return "Explain why the application was not approved and what may be changed before reapplying.";
+  }
+
+  if (
+    action ===
+    "suspend"
+  ) {
+    return "Explain why Partner Program access was suspended and how the partner may contact support.";
+  }
+
+  if (
+    action ===
+    "approve"
+  ) {
+    return "Optional welcome or approval message shown to the partner.";
+  }
+
+  return "Optional reactivation message shown to the partner.";
+}
+
+function getConfirmationText(
+  action,
+  application
+) {
+  const code =
+    application.code ||
+    "this code";
+
+  if (
+    action ===
+    "approve"
+  ) {
+    return `Approve ${code}? The customer-selected code will become active.`;
+  }
+
+  if (
+    action ===
+    "deny"
+  ) {
+    return `Deny ${code}? The code reservation will be released and may be claimed again.`;
+  }
+
+  if (
+    action ===
+    "suspend"
+  ) {
+    return `Suspend ${code}? The code will become inactive but remain reserved to this account.`;
+  }
+
+  return `Reactivate ${code}? The existing code will become active again.`;
+}
+
+const partnerHqCss = `
+.partner-hq-page,
+.partner-hq-page *,
+.partner-hq-page *::before,
+.partner-hq-page *::after {
+  box-sizing: border-box;
+}
+
+.partner-hq-page {
+  width: 100%;
+  padding: 72px 28px;
+}
+
+.partner-hq-inner {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.partner-hq-login-card,
+.partner-hq-hero,
+.partner-hq-records-panel,
+.partner-hq-action-panel,
+.partner-hq-security-note {
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 24px;
   background:
-    "radial-gradient(circle at top, rgba(61, 165, 255, 0.22), transparent 42%), rgba(255, 255, 255, 0.035)",
-  border: "1px solid rgba(255, 255, 255, 0.09)",
-  borderRadius: "34px",
-  padding: "64px 56px",
-  boxShadow: "0 30px 90px rgba(0,0,0,0.5)",
-  marginBottom: "30px",
-};
+    radial-gradient(
+      circle at top left,
+      rgba(61, 165, 255, .12),
+      transparent 38%
+    ),
+    rgba(255, 255, 255, .04);
+  box-shadow: 0 24px 65px rgba(0, 0, 0, .35);
+}
 
-const titleStyle = {
-  fontSize: "62px",
-  lineHeight: "1.05",
-  marginBottom: "20px",
-  background: "linear-gradient(180deg, #ffffff, #9d9d9d)",
-  WebkitBackgroundClip: "text",
-  WebkitTextFillColor: "transparent",
-};
+.partner-hq-login-card {
+  width: 100%;
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 42px;
+  text-align: center;
+}
 
-const subtitleStyle = {
-  maxWidth: "780px",
-  margin: "0 auto",
-  color: "#c8c8c8",
-  fontSize: "19px",
-  lineHeight: "1.8",
-};
+.partner-hq-login-card h1,
+.partner-hq-hero h1 {
+  margin: 8px 0 16px;
+  font-size: clamp(38px, 7vw, 62px);
+  line-height: 1.03;
+}
 
-const codeDisplayStyle = {
-  display: "inline-flex",
-  marginTop: "30px",
-  padding: "18px 30px",
-  borderRadius: "999px",
-  background: "rgba(61,165,255,0.14)",
-  border: "1px solid rgba(61,165,255,0.35)",
-  color: "#9ed8ff",
-  fontSize: "30px",
-  fontWeight: "900",
-  letterSpacing: "1px",
-};
+.partner-hq-login-card > p:not(.eyebrow),
+.partner-hq-hero p,
+.partner-hq-security-note p {
+  color: #b6c0c8;
+  line-height: 1.7;
+}
 
-const buttonRowStyle = {
-  display: "flex",
-  justifyContent: "center",
-  gap: "16px",
-  flexWrap: "wrap",
-  marginTop: "30px",
-};
+.partner-hq-topbar,
+.partner-hq-topbar-actions,
+.partner-hq-hero,
+.partner-hq-section-heading,
+.partner-hq-card-summary,
+.partner-hq-card-title-row,
+.partner-hq-action-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
 
-const buttonRowLeftStyle = {
-  display: "flex",
-  gap: "16px",
-  flexWrap: "wrap",
-  marginTop: "24px",
-};
+.partner-hq-topbar {
+  margin-bottom: 20px;
+}
 
-const statsGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(4, 1fr)",
-  gap: "18px",
-  marginBottom: "30px",
-};
+.partner-hq-topbar-actions {
+  justify-content: flex-end;
+}
 
-const statCardStyle = {
-  display: "grid",
-  gap: "8px",
-  background: "rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "22px",
-  padding: "22px",
-  color: "#c8c8c8",
-  boxShadow: "0 22px 60px rgba(0,0,0,0.32)",
-};
+.partner-hq-source-pill,
+.partner-hq-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+}
 
-const dashboardGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "1fr 340px",
-  gap: "30px",
-  alignItems: "stretch",
-  marginBottom: "30px",
-};
+.partner-hq-source-pill {
+  border: 1px solid rgba(72, 214, 151, .3);
+  background: rgba(72, 214, 151, .09);
+  color: #b8f3d8;
+}
 
-const mainPanelStyle = {
-  background:
-    "radial-gradient(circle at top left, rgba(61, 165, 255, 0.14), transparent 35%), rgba(255, 255, 255, 0.035)",
-  border: "1px solid rgba(255, 255, 255, 0.09)",
-  borderRadius: "30px",
-  padding: "38px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
-};
+.partner-hq-clear-button,
+.partner-hq-close-button {
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: #9ca8b0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+}
 
-const sidePanelStyle = {
-  background:
-    "radial-gradient(circle at top left, rgba(61, 165, 255, 0.16), transparent 35%), rgba(255, 255, 255, 0.035)",
-  border: "1px solid rgba(255, 255, 255, 0.09)",
-  borderRadius: "28px",
-  padding: "32px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
-  textAlign: "center",
-};
+.partner-hq-hero {
+  padding: 40px;
+  margin-bottom: 20px;
+}
 
-const sectionTitleStyle = {
-  fontSize: "38px",
-  lineHeight: "1.12",
-  marginBottom: "22px",
-  background: "linear-gradient(180deg, #ffffff, #9d9d9d)",
-  WebkitBackgroundClip: "text",
-  WebkitTextFillColor: "transparent",
-};
+.partner-hq-hero > div {
+  max-width: 780px;
+}
 
-const sideTitleStyle = {
-  fontSize: "32px",
-  lineHeight: "1.12",
-  marginBottom: "24px",
-  background: "linear-gradient(180deg, #ffffff, #9d9d9d)",
-  WebkitBackgroundClip: "text",
-  WebkitTextFillColor: "transparent",
-};
+.partner-hq-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
 
-const trackingBoxStyle = {
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "18px",
-  padding: "20px",
-  color: "#9ed8ff",
-  fontSize: "22px",
-  fontWeight: "900",
-  overflowWrap: "anywhere",
-};
+.partner-hq-stat-card,
+.partner-hq-quick-detail {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .035);
+}
 
-const noticeBoxStyle = {
-  marginTop: "22px",
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
-  color: "#9ed8ff",
-  borderRadius: "16px",
-  padding: "16px",
-  fontSize: "14px",
-  fontWeight: "800",
-  lineHeight: "1.6",
-};
+.partner-hq-stat-card span,
+.partner-hq-quick-detail span,
+.partner-hq-field > span {
+  color: #9ed8ff;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+}
 
-const qrBoxStyle = {
-  width: "180px",
-  height: "180px",
-  margin: "0 auto 22px",
-  borderRadius: "24px",
-  background: "rgba(255,255,255,0.92)",
-  color: "#050505",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  fontSize: "42px",
-  fontWeight: "900",
-  boxShadow: "0 24px 60px rgba(0,0,0,0.4)",
-};
+.partner-hq-stat-card strong {
+  font-size: 30px;
+}
 
-const sideTextStyle = {
-  color: "#aaa",
-  lineHeight: "1.7",
-};
+.partner-hq-stat-card small,
+.partner-hq-field small {
+  color: #8f9aa2;
+}
 
-const activityPanelStyle = {
-  background:
-    "radial-gradient(circle at top left, rgba(61, 165, 255, 0.14), transparent 35%), rgba(255, 255, 255, 0.035)",
-  border: "1px solid rgba(255, 255, 255, 0.09)",
-  borderRadius: "30px",
-  padding: "38px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
-  marginBottom: "30px",
-};
+.partner-hq-records-panel,
+.partner-hq-action-panel,
+.partner-hq-security-note {
+  padding: 28px;
+  margin-top: 20px;
+}
 
-const activityGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(4, 1fr)",
-  gap: "18px",
-};
+.partner-hq-section-heading h2,
+.partner-hq-action-panel h2,
+.partner-hq-security-note h2 {
+  margin: 6px 0 8px;
+  font-size: clamp(28px, 4vw, 38px);
+}
 
-const activityBoxStyle = {
-  display: "grid",
-  gap: "8px",
-  background: "rgba(255,255,255,0.045)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "18px",
-  padding: "20px",
-  color: "#c8c8c8",
-};
+.partner-hq-filters,
+.partner-hq-form-grid {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1.6fr)
+    minmax(220px, .7fr);
+  gap: 14px;
+  margin-top: 20px;
+}
 
-const rewardPanelStyle = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: "30px",
-  alignItems: "center",
-  background: "rgba(255,255,255,0.035)",
-  border: "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "30px",
-  padding: "38px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.35)",
-  marginBottom: "30px",
-};
+.partner-hq-form-grid {
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+}
 
-const textStyle = {
-  color: "#c8c8c8",
-  lineHeight: "1.8",
-};
+.partner-hq-field {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  text-align: left;
+}
 
-const rewardGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: "14px",
-};
+.partner-hq-field input,
+.partner-hq-field select,
+.partner-hq-field textarea {
+  width: 100%;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 12px;
+  outline: none;
+  background: #151b22;
+  color: #fff;
+  font: inherit;
+}
 
-const rewardBoxStyle = {
-  display: "grid",
-  gap: "8px",
-  background: "rgba(61,165,255,0.10)",
-  border: "1px solid rgba(61,165,255,0.22)",
-  borderRadius: "16px",
-  padding: "16px",
-  color: "#c8eaff",
-};
+.partner-hq-field input:focus,
+.partner-hq-field select:focus,
+.partner-hq-field textarea:focus {
+  border-color: rgba(61, 165, 255, .65);
+  box-shadow: 0 0 0 3px rgba(61, 165, 255, .12);
+}
 
-const levelsPanelStyle = {
-  background:
-    "radial-gradient(circle at top left, rgba(61, 165, 255, 0.14), transparent 35%), rgba(255, 255, 255, 0.035)",
-  border: "1px solid rgba(255, 255, 255, 0.09)",
-  borderRadius: "30px",
-  padding: "38px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
-  marginBottom: "30px",
-};
+.partner-hq-field select option {
+  background: #151b22;
+  color: #fff;
+}
 
-const levelsGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(5, 1fr)",
-  gap: "14px",
-};
+.partner-hq-field textarea {
+  resize: vertical;
+}
 
-const levelBadgeStyle = {
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
-  color: "#9ed8ff",
-  borderRadius: "16px",
-  padding: "15px",
-  fontWeight: "900",
-  textAlign: "center",
-};
+.partner-hq-full-button {
+  width: 100%;
+  margin-top: 16px;
+}
 
-const languagePanelStyle = {
-  background:
-    "radial-gradient(circle at top left, rgba(61, 165, 255, 0.14), transparent 35%), rgba(255, 255, 255, 0.035)",
-  border: "1px solid rgba(255, 255, 255, 0.09)",
-  borderRadius: "30px",
-  padding: "38px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
-  marginBottom: "30px",
-};
+.partner-hq-error,
+.partner-hq-success {
+  margin: 16px 0;
+  padding: 15px;
+  border-radius: 14px;
+  line-height: 1.55;
+}
 
-const languageGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: "20px",
-};
+.partner-hq-error {
+  border: 1px solid rgba(255, 95, 95, .34);
+  background: rgba(255, 70, 70, .1);
+  color: #ffd0d0;
+}
 
-const approvedBoxStyle = {
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
-  color: "#c8eaff",
-  borderRadius: "20px",
-  padding: "22px",
-};
+.partner-hq-success {
+  border: 1px solid rgba(72, 214, 151, .3);
+  background: rgba(72, 214, 151, .09);
+  color: #b8f3d8;
+}
 
-const restrictedBoxStyle = {
-  background: "rgba(255,120,120,0.10)",
-  border: "1px solid rgba(255,120,120,0.22)",
-  color: "#ffd1d1",
-  borderRadius: "20px",
-  padding: "22px",
-};
+.partner-hq-danger-button {
+  padding: 12px 18px;
+  border: 1px solid rgba(255, 95, 95, .45);
+  border-radius: 10px;
+  background: rgba(255, 70, 70, .12);
+  color: #ffd0d0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+}
 
-const listStyle = {
-  display: "grid",
-  gap: "10px",
-  paddingLeft: "18px",
-  lineHeight: "1.6",
-  marginTop: "14px",
-};
+.partner-hq-card-stack {
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+}
 
-const ctaPanelStyle = {
-  textAlign: "center",
-  background: "rgba(61,165,255,0.12)",
-  border: "1px solid rgba(61,165,255,0.28)",
-  borderRadius: "30px",
-  padding: "42px",
-  boxShadow: "0 30px 80px rgba(0,0,0,0.35)",
-};
+.partner-hq-card {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 18px;
+  background: rgba(0, 0, 0, .17);
+}
 
-const ctaTitleStyle = {
-  color: "#ffffff",
-  fontSize: "38px",
-  lineHeight: "1.12",
-  marginBottom: "18px",
-};
+.partner-hq-card-pending {
+  border-color: rgba(255, 190, 80, .28);
+}
 
-const ctaTextStyle = {
-  maxWidth: "760px",
-  margin: "0 auto",
-  color: "#c8eaff",
-  lineHeight: "1.8",
-  fontWeight: "700",
-};
+.partner-hq-card-approved {
+  border-color: rgba(72, 214, 151, .25);
+}
+
+.partner-hq-card-suspended,
+.partner-hq-card-denied {
+  border-color: rgba(255, 95, 95, .25);
+}
+
+.partner-hq-card-summary {
+  align-items: stretch;
+  padding: 20px;
+}
+
+.partner-hq-card-main {
+  flex: 1 1 720px;
+  min-width: 0;
+}
+
+.partner-hq-card-title-row {
+  align-items: flex-start;
+}
+
+.partner-hq-card-title-row h3 {
+  margin: 4px 0;
+  font-size: 25px;
+}
+
+.partner-hq-email {
+  color: #aab5bd;
+  overflow-wrap: anywhere;
+}
+
+.partner-hq-status-pending {
+  border: 1px solid rgba(255, 190, 80, .35);
+  background: rgba(255, 170, 50, .1);
+  color: #ffe0a8;
+}
+
+.partner-hq-status-approved {
+  border: 1px solid rgba(72, 214, 151, .35);
+  background: rgba(72, 214, 151, .1);
+  color: #b8f3d8;
+}
+
+.partner-hq-status-suspended,
+.partner-hq-status-denied {
+  border: 1px solid rgba(255, 95, 95, .38);
+  background: rgba(255, 70, 70, .11);
+  color: #ffcaca;
+}
+
+.partner-hq-card-quick-grid,
+.partner-hq-detail-grid,
+.partner-hq-history-grid {
+  display: grid;
+  grid-template-columns:
+    repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.partner-hq-quick-detail strong {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.partner-hq-card-buttons {
+  flex: 0 0 170px;
+  display: grid;
+  align-content: center;
+  gap: 10px;
+}
+
+.partner-hq-card-buttons button {
+  width: 100%;
+}
+
+.partner-hq-card-details {
+  display: grid;
+  gap: 13px;
+  padding: 0 20px 20px;
+}
+
+.partner-hq-detail-block {
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .025);
+}
+
+.partner-hq-detail-block p {
+  margin-top: 8px;
+  color: #b0bac1;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.partner-hq-detail-highlighted {
+  border-color: rgba(61, 165, 255, .28);
+  background: rgba(61, 165, 255, .07);
+}
+
+.partner-hq-detail-private {
+  border-color: rgba(185, 130, 255, .3);
+  background: rgba(185, 130, 255, .07);
+}
+
+.partner-hq-empty {
+  padding: 48px 20px;
+  text-align: center;
+  color: #aab5bd;
+}
+
+.partner-hq-empty h3 {
+  margin-bottom: 8px;
+  color: #fff;
+  font-size: 26px;
+}
+
+.partner-hq-action-buttons {
+  justify-content: flex-start;
+  margin-top: 20px;
+}
+
+.partner-hq-security-note {
+  text-align: center;
+}
+
+.partner-hq-security-note p {
+  max-width: 820px;
+  margin: 0 auto;
+}
+
+button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 1050px) {
+  .partner-hq-stats {
+    grid-template-columns:
+      repeat(3, minmax(0, 1fr));
+  }
+
+  .partner-hq-card-quick-grid,
+  .partner-hq-detail-grid,
+  .partner-hq-history-grid {
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .partner-hq-page {
+    padding: 48px 12px;
+  }
+
+  .partner-hq-login-card,
+  .partner-hq-hero,
+  .partner-hq-records-panel,
+  .partner-hq-action-panel,
+  .partner-hq-security-note {
+    padding: 20px;
+    border-radius: 19px;
+  }
+
+  .partner-hq-stats,
+  .partner-hq-filters,
+  .partner-hq-form-grid,
+  .partner-hq-card-quick-grid,
+  .partner-hq-detail-grid,
+  .partner-hq-history-grid {
+    grid-template-columns:
+      minmax(0, 1fr);
+  }
+
+  .partner-hq-card-buttons {
+    flex: 1 1 100%;
+  }
+
+  .partner-hq-hero > button,
+  .partner-hq-action-buttons button {
+    width: 100%;
+  }
+}
+`;
 
 export default PartnerHQ;
