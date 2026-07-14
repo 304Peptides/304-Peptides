@@ -53,11 +53,32 @@ const MAX_CAMPAIGN_URL_LENGTH = 1_000;
 const MAX_CAMPAIGN_DISCLAIMER_LENGTH = 1_000;
 const MAX_CAMPAIGN_CTA_LENGTH = 80;
 const MAX_CAMPAIGN_DESTINATION_LENGTH = 200;
+const ANALYTICS_VISITOR_COOKIE_NAME = "__Host-304_visitor";
+const ANALYTICS_CLICK_COOKIE_NAME = "__Host-304_click";
+const ANALYTICS_CHANNEL_COOKIE_NAME = "__Host-304_channel";
+const ANALYTICS_PARTNER_COOKIE_NAME = "__Host-304_click_partner";
+const ANALYTICS_CAMPAIGN_COOKIE_NAME = "__Host-304_click_campaign";
+const ANALYTICS_VISITOR_TTL_SECONDS = 60 * 60 * 24 * 365;
+const ANALYTICS_CLICK_TTL_SECONDS = 60 * 60 * 24 * 30;
+const MAX_ANALYTICS_VISITOR_ID_LENGTH = 120;
+const MAX_ANALYTICS_CLICK_ID_LENGTH = 120;
 
 const LEADERBOARD_PERIOD_TYPES = new Set(["monthly", "quarterly"]);
 const LEADERBOARD_METRICS = new Set(["commission", "revenue", "referrals"]);
 const REWARD_TYPES = new Set(["cash", "store_credit", "swag"]);
 const CAMPAIGN_STATUSES = new Set(["draft", "published", "archived"]);
+const ANALYTICS_PERIODS = new Set(["7", "30", "90", "all"]);
+const ANALYTICS_CHANNELS = new Set([
+  "general",
+  "facebook",
+  "instagram",
+  "tiktok",
+  "sms",
+  "email",
+  "qr",
+  "other",
+  "untracked",
+]);
 
 const RESERVED_PARTNER_CODES = new Set([
   "304",
@@ -83,6 +104,10 @@ const RESERVED_PARTNER_CODES = new Set([
 export default {
   async fetch(request, env, context) {
     const url = new URL(request.url);
+
+    if (url.pathname === "/r") {
+      return handleReferralTrackingRedirect(request, env, url);
+    }
 
     if (url.pathname === "/api/partner/application") {
       return handleCustomerPartnerApplicationRequest(request, env);
@@ -114,6 +139,10 @@ export default {
 
     if (url.pathname === "/api/partner/campaigns") {
       return handlePartnerCampaignsRequest(request, env);
+    }
+
+    if (url.pathname === "/api/partner/analytics") {
+      return handlePartnerAnalyticsRequest(request, env, url);
     }
 
     if (url.pathname === "/api/campaign/validate") {
@@ -178,6 +207,10 @@ export default {
 
     if (url.pathname === "/api/admin/partner-campaigns/status") {
       return handleAdminCampaignStatusRequest(request, env);
+    }
+
+    if (url.pathname === "/api/admin/partner-analytics") {
+      return handleAdminPartnerAnalyticsRequest(request, env, url);
     }
 
     if (url.pathname === "/api/admin/accounts") {
@@ -277,6 +310,222 @@ export default {
     return coreWorker.fetch(request, env, context);
   },
 };
+
+async function handleReferralTrackingRedirect(request, env, url) {
+  const fallbackUrl = new URL("/checkout", url.origin);
+
+  try {
+    validatePartnerEnvironment(env);
+
+    if (!['GET', 'HEAD'].includes(request.method)) {
+      return new Response(null, {
+        status: 405,
+        headers: {
+          Allow: 'GET, HEAD',
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+
+    const code = validatePartnerCode(
+      url.searchParams.get('ref') || url.searchParams.get('code')
+    );
+    const campaignSlug = normalizeOptionalCampaignSlug(
+      url.searchParams.get('campaign')
+    );
+    const channel = normalizeAnalyticsChannel(
+      url.searchParams.get('channel') || 'general'
+    );
+    const existingVisitorId = cleanText(
+      getCookieValue(request, ANALYTICS_VISITOR_COOKIE_NAME),
+      MAX_ANALYTICS_VISITOR_ID_LENGTH
+    );
+    const visitorId = isValidAnalyticsIdentifier(existingVisitorId)
+      ? existingVisitorId
+      : createAnalyticsVisitorId();
+
+    const registryResponse = await partnerRegistryFetch(
+      env,
+      '/analytics/track',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code,
+          campaignSlug,
+          visitorId,
+          channel,
+        }),
+      }
+    );
+    const result = await readInternalJsonResponse(registryResponse);
+    const click = result.click && typeof result.click === 'object'
+      ? result.click
+      : {};
+    const trackedCode = cleanText(
+      click.partnerCode || code,
+      MAX_REFERRAL_CODE_LENGTH
+    ).toUpperCase();
+    const trackedCampaign = normalizeOptionalCampaignSlug(
+      click.campaignSlug || ''
+    );
+    const destinationPath = validateAnalyticsDestinationPath(
+      click.destinationPath || '/checkout'
+    );
+    const destination = new URL(destinationPath, url.origin);
+
+    destination.searchParams.set('ref', trackedCode);
+    if (trackedCampaign) {
+      destination.searchParams.set('campaign', trackedCampaign);
+    } else {
+      destination.searchParams.delete('campaign');
+    }
+
+    const headers = new Headers({
+      Location: destination.toString(),
+      'Cache-Control': 'no-store, private',
+      'Referrer-Policy': 'strict-origin-when-cross-origin',
+      'X-Robots-Tag': 'noindex, nofollow',
+    });
+
+    headers.append(
+      'Set-Cookie',
+      buildAnalyticsCookie(
+        ANALYTICS_VISITOR_COOKIE_NAME,
+        visitorId,
+        ANALYTICS_VISITOR_TTL_SECONDS
+      )
+    );
+    headers.append(
+      'Set-Cookie',
+      buildAnalyticsCookie(
+        ANALYTICS_CLICK_COOKIE_NAME,
+        cleanText(click.clickId, MAX_ANALYTICS_CLICK_ID_LENGTH),
+        ANALYTICS_CLICK_TTL_SECONDS
+      )
+    );
+    headers.append(
+      'Set-Cookie',
+      buildAnalyticsCookie(
+        ANALYTICS_CHANNEL_COOKIE_NAME,
+        channel,
+        ANALYTICS_CLICK_TTL_SECONDS
+      )
+    );
+    headers.append(
+      'Set-Cookie',
+      buildAnalyticsCookie(
+        ANALYTICS_PARTNER_COOKIE_NAME,
+        trackedCode,
+        ANALYTICS_CLICK_TTL_SECONDS
+      )
+    );
+    headers.append(
+      'Set-Cookie',
+      buildAnalyticsCookie(
+        ANALYTICS_CAMPAIGN_COOKIE_NAME,
+        trackedCampaign || '-',
+        ANALYTICS_CLICK_TTL_SECONDS
+      )
+    );
+
+    return new Response(null, {
+      status: 302,
+      headers,
+    });
+  } catch (error) {
+    console.error('Referral tracking redirect error:', error);
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: fallbackUrl.toString(),
+        'Cache-Control': 'no-store, private',
+        'X-Robots-Tag': 'noindex, nofollow',
+      },
+    });
+  }
+}
+
+async function handlePartnerAnalyticsRequest(request, env, url) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== 'GET') {
+      throw new ApiRequestError('Method not allowed.', 405);
+    }
+
+    requireSameOrigin(request);
+    const sessionState = await requireEligibleCustomerSession(request, env);
+    const period = normalizeAnalyticsPeriod(url.searchParams.get('period'));
+    const search = new URLSearchParams({
+      accountId: sessionState.session.account.id,
+      period,
+    });
+    const registryResponse = await partnerRegistryFetch(
+      env,
+      `/partner/analytics?${search.toString()}`,
+      { method: 'GET' }
+    );
+    const result = await readInternalJsonResponse(registryResponse);
+    const application = toCustomerPartnerApplication(result.application);
+
+    if (!application || !['approved', 'suspended'].includes(application.status)) {
+      throw new ApiRequestError(
+        'Approved Partner Program access is required to view analytics.',
+        403
+      );
+    }
+
+    return jsonResponse({
+      success: true,
+      application,
+      analytics: toCustomerAnalyticsReport(result.analytics),
+    });
+  } catch (error) {
+    console.error('Partner analytics request error:', error);
+    return handleApiError(error);
+  }
+}
+
+async function handleAdminPartnerAnalyticsRequest(request, env, url) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== 'GET') {
+      throw new ApiRequestError('Method not allowed.', 405);
+    }
+
+    requireSameOrigin(request);
+    await requireAdminAuthorization(request, env);
+
+    const period = normalizeAnalyticsPeriod(url.searchParams.get('period'));
+    const partnerCode = normalizeOptionalPartnerCode(
+      url.searchParams.get('partnerCode')
+    );
+    const campaignSlug = normalizeOptionalCampaignSlug(
+      url.searchParams.get('campaign')
+    );
+    const search = new URLSearchParams({ period });
+
+    if (partnerCode) search.set('partnerCode', partnerCode);
+    if (campaignSlug) search.set('campaign', campaignSlug);
+
+    const registryResponse = await partnerRegistryFetch(
+      env,
+      `/admin/analytics?${search.toString()}`,
+      { method: 'GET' }
+    );
+    const result = await readInternalJsonResponse(registryResponse);
+
+    return jsonResponse({
+      success: true,
+      analytics: toAdminAnalyticsReport(result.analytics),
+    });
+  } catch (error) {
+    console.error('Admin partner analytics request error:', error);
+    return handleApiError(error);
+  }
+}
 
 async function handleCustomerPartnerApplicationRequest(request, env) {
   try {
@@ -1470,6 +1719,14 @@ async function handleOrderWithReferral(request, env, context) {
       };
     }
 
+    const analyticsContext = validatedReferral
+      ? extractAnalyticsContextFromRequest(
+          request,
+          validatedReferral.code,
+          validatedReferral.campaign?.slug || ''
+        )
+      : emptyAnalyticsContext();
+
     const response = await coreWorker.fetch(request, env, context);
 
     if (!response.ok || !validatedReferral) {
@@ -1541,6 +1798,9 @@ async function handleOrderWithReferral(request, env, context) {
             orderStatus:
               storedOrder.status || "Order Request Received",
             campaignSlug: validatedReferral.campaign?.slug || "",
+            analyticsVisitorId: analyticsContext.visitorId,
+            analyticsClickId: analyticsContext.clickId,
+            analyticsChannel: analyticsContext.channel,
           }),
         }
       );
@@ -1725,6 +1985,7 @@ async function attachReferralToStoredOrder(env, order, referral) {
     referralCommissionAmountCents: referral.commissionAmountCents,
     referralCampaignSlug: referral.campaignSlug || "",
     referralCampaignTitle: referral.campaignTitle || "",
+    referralAnalyticsChannel: referral.analyticsChannel || "untracked",
     referralAttachedAt: referral.createdAt || now,
     updatedAt: order.updatedAt || now,
   };
@@ -1853,6 +2114,9 @@ function toCustomerReferralRecord(referral) {
       referral.campaignTitle,
       MAX_CAMPAIGN_TITLE_LENGTH
     ),
+    analyticsChannel: normalizeAnalyticsChannel(
+      referral.analyticsChannel || "untracked"
+    ),
     requiresAdjustment: Boolean(referral.requiresAdjustment),
   };
 }
@@ -1882,7 +2146,121 @@ function toAdminReferralRecord(referral) {
     ),
     payoutCreatedAt: referral.payoutCreatedAt || "",
     campaignId: cleanText(referral.campaignId, MAX_CAMPAIGN_ID_LENGTH),
+    analyticsClickId: cleanText(
+      referral.analyticsClickId,
+      MAX_ANALYTICS_CLICK_ID_LENGTH
+    ),
   };
+}
+
+function toCustomerAnalyticsReport(report) {
+  const source = report && typeof report === 'object' ? report : {};
+
+  return {
+    period: toAnalyticsPeriod(source.period),
+    summary: toAnalyticsMetrics(source.summary),
+    byCampaign: Array.isArray(source.byCampaign)
+      ? source.byCampaign.map(toAnalyticsCampaignRow).filter(Boolean)
+      : [],
+    byChannel: Array.isArray(source.byChannel)
+      ? source.byChannel.map(toAnalyticsChannelRow).filter(Boolean)
+      : [],
+    daily: Array.isArray(source.daily)
+      ? source.daily.map(toAnalyticsDailyRow).filter(Boolean)
+      : [],
+  };
+}
+
+function toAdminAnalyticsReport(report) {
+  const source = report && typeof report === 'object' ? report : {};
+
+  return {
+    ...toCustomerAnalyticsReport(source),
+    filters: {
+      partnerCode: cleanText(source.filters?.partnerCode, MAX_PARTNER_CODE_LENGTH),
+      campaignSlug: normalizeOptionalCampaignSlug(
+        source.filters?.campaignSlug
+      ),
+    },
+    byPartner: Array.isArray(source.byPartner)
+      ? source.byPartner.map(toAnalyticsPartnerRow).filter(Boolean)
+      : [],
+  };
+}
+
+function toAnalyticsPeriod(period) {
+  const source = period && typeof period === 'object' ? period : {};
+
+  return {
+    key: normalizeAnalyticsPeriod(source.key),
+    label: cleanText(source.label, 100),
+    startAt: cleanText(source.startAt, 50),
+    endAt: cleanText(source.endAt, 50),
+  };
+}
+
+function toAnalyticsMetrics(metrics) {
+  const source = metrics && typeof metrics === 'object' ? metrics : {};
+
+  return {
+    totalClicks: safeNonNegativeInteger(source.totalClicks),
+    uniqueVisitors: safeNonNegativeInteger(source.uniqueVisitors),
+    attributedOrders: safeNonNegativeInteger(source.attributedOrders),
+    earnedOrders: safeNonNegativeInteger(source.earnedOrders),
+    voidedOrders: safeNonNegativeInteger(source.voidedOrders),
+    earnedRevenueCents: safeNonNegativeInteger(source.earnedRevenueCents),
+    earnedCommissionCents: safeNonNegativeInteger(
+      source.earnedCommissionCents
+    ),
+    conversionRateBps: Math.min(
+      1_000_000,
+      safeNonNegativeInteger(source.conversionRateBps)
+    ),
+  };
+}
+
+function toAnalyticsCampaignRow(row) {
+  if (!row || typeof row !== 'object') return null;
+
+  return {
+    campaignSlug: normalizeOptionalCampaignSlug(row.campaignSlug),
+    campaignTitle:
+      cleanText(row.campaignTitle, MAX_CAMPAIGN_TITLE_LENGTH) ||
+      'General Referral Link',
+    ...toAnalyticsMetrics(row),
+  };
+}
+
+function toAnalyticsChannelRow(row) {
+  if (!row || typeof row !== 'object') return null;
+
+  return {
+    channel: normalizeAnalyticsChannel(row.channel || 'untracked'),
+    ...toAnalyticsMetrics(row),
+  };
+}
+
+function toAnalyticsDailyRow(row) {
+  if (!row || typeof row !== 'object') return null;
+
+  return {
+    day: cleanText(row.day, 20),
+    ...toAnalyticsMetrics(row),
+  };
+}
+
+function toAnalyticsPartnerRow(row) {
+  if (!row || typeof row !== 'object') return null;
+
+  return {
+    partnerCode: cleanText(row.partnerCode, MAX_PARTNER_CODE_LENGTH).toUpperCase(),
+    ...toAnalyticsMetrics(row),
+  };
+}
+
+function safeNonNegativeInteger(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0;
 }
 
 function toCustomerPayoutSettings(settings) {
@@ -4027,25 +4405,132 @@ async function getCustomerSessionSigningKey(env) {
   );
 }
 
-function getSessionToken(request) {
-  const cookieHeader = request.headers.get("Cookie") || "";
+function normalizeAnalyticsPeriod(value) {
+  const period = cleanText(value || '30', 10).toLowerCase();
+  return ANALYTICS_PERIODS.has(period) ? period : '30';
+}
 
-  for (const cookie of cookieHeader.split(";")) {
-    const separatorIndex = cookie.indexOf("=");
+function normalizeAnalyticsChannel(value) {
+  const channel = cleanText(value || 'untracked', 30).toLowerCase();
+  return ANALYTICS_CHANNELS.has(channel) ? channel : 'other';
+}
 
-    if (separatorIndex < 0) {
-      continue;
-    }
+function normalizeOptionalPartnerCode(value) {
+  const code = cleanText(value, MAX_PARTNER_CODE_LENGTH).toUpperCase();
+  return code ? validatePartnerCode(code) : '';
+}
+
+function validateAnalyticsDestinationPath(value) {
+  const destinationPath = cleanText(
+    value || '/checkout',
+    MAX_CAMPAIGN_DESTINATION_LENGTH
+  );
+
+  if (!destinationPath.startsWith('/') || destinationPath.startsWith('//')) {
+    return '/checkout';
+  }
+
+  return destinationPath;
+}
+
+function createAnalyticsVisitorId() {
+  return `VIS-${crypto.randomUUID()}`;
+}
+
+function isValidAnalyticsIdentifier(value) {
+  return /^[A-Za-z0-9_-]{8,120}$/.test(value || '');
+}
+
+function emptyAnalyticsContext() {
+  return {
+    visitorId: '',
+    clickId: '',
+    channel: 'untracked',
+  };
+}
+
+function extractAnalyticsContextFromRequest(
+  request,
+  expectedPartnerCode,
+  expectedCampaignSlug
+) {
+  const cookiePartnerCode = cleanText(
+    getCookieValue(request, ANALYTICS_PARTNER_COOKIE_NAME),
+    MAX_PARTNER_CODE_LENGTH
+  ).toUpperCase();
+  const cookieCampaignValue = cleanText(
+    getCookieValue(request, ANALYTICS_CAMPAIGN_COOKIE_NAME),
+    MAX_CAMPAIGN_SLUG_LENGTH
+  );
+  const cookieCampaignSlug = cookieCampaignValue === '-'
+    ? ''
+    : normalizeOptionalCampaignSlug(cookieCampaignValue);
+  const normalizedExpectedCampaign = normalizeOptionalCampaignSlug(
+    expectedCampaignSlug
+  );
+
+  if (
+    cookiePartnerCode !== cleanText(
+      expectedPartnerCode,
+      MAX_PARTNER_CODE_LENGTH
+    ).toUpperCase() ||
+    cookieCampaignSlug !== normalizedExpectedCampaign
+  ) {
+    return emptyAnalyticsContext();
+  }
+
+  const visitorId = cleanText(
+    getCookieValue(request, ANALYTICS_VISITOR_COOKIE_NAME),
+    MAX_ANALYTICS_VISITOR_ID_LENGTH
+  );
+  const clickId = cleanText(
+    getCookieValue(request, ANALYTICS_CLICK_COOKIE_NAME),
+    MAX_ANALYTICS_CLICK_ID_LENGTH
+  );
+
+  return {
+    visitorId: isValidAnalyticsIdentifier(visitorId) ? visitorId : '',
+    clickId: isValidAnalyticsIdentifier(clickId) ? clickId : '',
+    channel: normalizeAnalyticsChannel(
+      getCookieValue(request, ANALYTICS_CHANNEL_COOKIE_NAME) || 'untracked'
+    ),
+  };
+}
+
+function getCookieValue(request, cookieName) {
+  const cookieHeader = request.headers.get('Cookie') || '';
+
+  for (const cookie of cookieHeader.split(';')) {
+    const separatorIndex = cookie.indexOf('=');
+    if (separatorIndex < 0) continue;
 
     const name = cookie.slice(0, separatorIndex).trim();
-    const value = cookie.slice(separatorIndex + 1).trim();
+    if (name !== cookieName) continue;
 
-    if (name === SESSION_COOKIE_NAME) {
-      return value;
+    const rawValue = cookie.slice(separatorIndex + 1).trim();
+    try {
+      return decodeURIComponent(rawValue);
+    } catch {
+      return rawValue;
     }
   }
 
-  return "";
+  return '';
+}
+
+function buildAnalyticsCookie(name, value, maxAge) {
+  return [
+    `${name}=${encodeURIComponent(value || '')}`,
+    'Path=/',
+    `Max-Age=${Math.max(0, Number(maxAge) || 0)}`,
+    'HttpOnly',
+    'Secure',
+    'SameSite=Lax',
+  ].join('; ');
+}
+
+function getSessionToken(request) {
+  return getCookieValue(request, SESSION_COOKIE_NAME);
 }
 
 function buildSessionCookie(token) {

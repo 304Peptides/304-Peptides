@@ -102,6 +102,31 @@ const MAX_CAMPAIGN_DISCLAIMER_LENGTH = 1000;
 const MAX_CAMPAIGN_CTA_LENGTH = 80;
 const MAX_CAMPAIGN_DESTINATION_LENGTH = 200;
 
+
+const ANALYTICS_CHANNELS = new Set([
+  "general",
+  "facebook",
+  "instagram",
+  "tiktok",
+  "sms",
+  "email",
+  "qr",
+  "other",
+  "untracked",
+]);
+
+const ANALYTICS_PERIODS = new Set([
+  "7",
+  "30",
+  "90",
+  "all",
+]);
+
+const DEFAULT_ANALYTICS_PERIOD = "30";
+const MAX_ANALYTICS_VISITOR_ID_LENGTH = 120;
+const MAX_ANALYTICS_CLICK_ID_LENGTH = 120;
+const MAX_ANALYTICS_BREAKDOWN_ROWS = 250;
+
 export class PartnerRegistry extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -320,6 +345,34 @@ export class PartnerRegistry extends DurableObject {
     `);
 
     this.ensureReferralCampaignColumns();
+    this.ensureReferralAnalyticsColumns();
+
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS partner_click_events (
+        click_id TEXT PRIMARY KEY,
+        visitor_id TEXT NOT NULL,
+        partner_account_id TEXT NOT NULL,
+        partner_code TEXT NOT NULL COLLATE NOCASE,
+        campaign_id TEXT NOT NULL DEFAULT '',
+        campaign_slug TEXT NOT NULL DEFAULT '',
+        campaign_title TEXT NOT NULL DEFAULT '',
+        channel TEXT NOT NULL,
+        destination_path TEXT NOT NULL,
+        clicked_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS partner_click_events_partner_index
+        ON partner_click_events(partner_account_id, clicked_at DESC);
+
+      CREATE INDEX IF NOT EXISTS partner_click_events_campaign_index
+        ON partner_click_events(campaign_slug, clicked_at DESC);
+
+      CREATE INDEX IF NOT EXISTS partner_click_events_visitor_index
+        ON partner_click_events(visitor_id, clicked_at DESC);
+
+      CREATE INDEX IF NOT EXISTS partner_click_events_channel_index
+        ON partner_click_events(channel, clicked_at DESC);
+    `);
   }
 
   ensureCommissionRateColumn() {
@@ -350,6 +403,26 @@ export class PartnerRegistry extends DurableObject {
       ["campaign_id", "TEXT NOT NULL DEFAULT ''"],
       ["campaign_slug", "TEXT NOT NULL DEFAULT ''"],
       ["campaign_title", "TEXT NOT NULL DEFAULT ''"],
+    ]) {
+      if (!names.has(name)) {
+        this.sql.exec(
+          `ALTER TABLE partner_referrals ADD COLUMN ${name} ${definition}`
+        );
+      }
+    }
+  }
+
+  ensureReferralAnalyticsColumns() {
+    const columns = this.sql
+      .exec("PRAGMA table_info(partner_referrals)")
+      .toArray();
+
+    const names = new Set(columns.map((column) => column.name));
+
+    for (const [name, definition] of [
+      ["analytics_visitor_id", "TEXT NOT NULL DEFAULT ''"],
+      ["analytics_channel", "TEXT NOT NULL DEFAULT ''"],
+      ["analytics_click_id", "TEXT NOT NULL DEFAULT ''"],
     ]) {
       if (!names.has(name)) {
         this.sql.exec(
@@ -396,6 +469,18 @@ export class PartnerRegistry extends DurableObject {
 
       if (url.pathname === "/partner/payouts" && request.method === "GET") {
         return this.getPartnerPayouts(url);
+      }
+
+      if (url.pathname === "/analytics/track" && request.method === "POST") {
+        return this.trackAnalyticsClick(request);
+      }
+
+      if (url.pathname === "/partner/analytics" && request.method === "GET") {
+        return this.getPartnerAnalytics(url);
+      }
+
+      if (url.pathname === "/admin/analytics" && request.method === "GET") {
+        return this.getAdminAnalytics(url);
       }
 
       if (url.pathname === "/admin/list" && request.method === "GET") {
@@ -759,6 +844,17 @@ export class PartnerRegistry extends DurableObject {
     );
     const orderSubtotalCents = normalizeMoneyToCents(payload.orderSubtotal);
     const campaignSlug = normalizeOptionalCampaignSlug(payload.campaignSlug);
+    const analyticsVisitorId = cleanText(
+      payload.analyticsVisitorId,
+      MAX_ANALYTICS_VISITOR_ID_LENGTH
+    );
+    const analyticsClickId = cleanText(
+      payload.analyticsClickId,
+      MAX_ANALYTICS_CLICK_ID_LENGTH
+    );
+    const analyticsChannel = normalizeAnalyticsChannel(
+      payload.analyticsChannel || "untracked"
+    );
 
     if (!orderId || !code || !customerAccountId) {
       throw new RegistryError(
@@ -852,8 +948,11 @@ export class PartnerRegistry extends DurableObject {
             voided_at,
             campaign_id,
             campaign_slug,
-            campaign_title
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            campaign_title,
+            analytics_visitor_id,
+            analytics_channel,
+            analytics_click_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           orderId,
           partner.accountId,
           partner.code,
@@ -870,7 +969,10 @@ export class PartnerRegistry extends DurableObject {
           timestamps.voidedAt,
           campaign?.campaignId || "",
           campaign?.slug || "",
-          campaign?.title || ""
+          campaign?.title || "",
+          analyticsVisitorId,
+          analyticsChannel,
+          analyticsClickId
         );
       }
 
@@ -938,6 +1040,364 @@ export class PartnerRegistry extends DurableObject {
       referral: this.findReferral(orderId),
       message: "The referral status was synchronized with the order.",
     });
+  }
+
+  async trackAnalyticsClick(request) {
+    const payload = await readJson(request);
+    const code = normalizeCode(payload.code);
+    const campaignSlug = normalizeOptionalCampaignSlug(payload.campaignSlug);
+    const visitorId = cleanText(
+      payload.visitorId,
+      MAX_ANALYTICS_VISITOR_ID_LENGTH
+    );
+    const channel = normalizeAnalyticsChannel(payload.channel);
+
+    if (!code || !visitorId) {
+      throw new RegistryError(
+        "A valid partner code and anonymous visitor ID are required.",
+        400
+      );
+    }
+
+    const partner = this.findActivePartnerByCode(code);
+
+    if (!partner) {
+      throw new RegistryError("That partner link is not active.", 404);
+    }
+
+    const campaign = campaignSlug
+      ? this.findActiveCampaignBySlug(campaignSlug)
+      : null;
+    const campaignValid = !campaignSlug || Boolean(campaign);
+    const destinationPath = campaign?.destinationPath || "/checkout";
+    const clickId = createAnalyticsClickId();
+    const clickedAt = new Date().toISOString();
+
+    this.sql.exec(
+      `INSERT INTO partner_click_events (
+         click_id,
+         visitor_id,
+         partner_account_id,
+         partner_code,
+         campaign_id,
+         campaign_slug,
+         campaign_title,
+         channel,
+         destination_path,
+         clicked_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      clickId,
+      visitorId,
+      partner.accountId,
+      partner.code,
+      campaign?.campaignId || "",
+      campaign?.slug || "",
+      campaign?.title || "",
+      channel,
+      destinationPath,
+      clickedAt
+    );
+
+    return jsonResponse(
+      {
+        success: true,
+        click: {
+          clickId,
+          visitorId,
+          partnerCode: partner.code,
+          campaignSlug: campaign?.slug || "",
+          campaignTitle: campaign?.title || "",
+          campaignRequested: Boolean(campaignSlug),
+          campaignValid,
+          channel,
+          destinationPath,
+          clickedAt,
+        },
+        campaign: campaign ? toCustomerCampaign(campaign) : null,
+        message: campaignValid
+          ? "The partner visit was recorded."
+          : "The partner visit was recorded without an inactive campaign.",
+      },
+      201
+    );
+  }
+
+  getPartnerAnalytics(url) {
+    const accountId = cleanText(url.searchParams.get("accountId"), 150);
+    const period = normalizeAnalyticsPeriod(url.searchParams.get("period"));
+
+    if (!accountId) {
+      throw new RegistryError("A partner account ID is required.", 400);
+    }
+
+    const application = this.findApplication(accountId);
+
+    if (!application) {
+      return jsonResponse({
+        success: true,
+        application: null,
+        analytics: emptyAnalyticsReport(period),
+      });
+    }
+
+    return jsonResponse({
+      success: true,
+      application,
+      analytics: this.buildAnalyticsReport({ accountId, period }),
+    });
+  }
+
+  getAdminAnalytics(url) {
+    const period = normalizeAnalyticsPeriod(url.searchParams.get("period"));
+    const partnerCode = normalizeOptionalCode(
+      url.searchParams.get("partnerCode")
+    );
+    const campaignSlug = normalizeOptionalCampaignSlug(
+      url.searchParams.get("campaign")
+    );
+
+    return jsonResponse({
+      success: true,
+      analytics: this.buildAnalyticsReport({
+        period,
+        partnerCode,
+        campaignSlug,
+        includePartners: true,
+      }),
+    });
+  }
+
+  buildAnalyticsReport({
+    accountId = "",
+    partnerCode = "",
+    campaignSlug = "",
+    period = DEFAULT_ANALYTICS_PERIOD,
+    includePartners = false,
+  } = {}) {
+    const periodInfo = analyticsPeriodInfo(period);
+    const clickFilter = buildAnalyticsWhere({
+      dateColumn: "clicked_at",
+      accountColumn: "partner_account_id",
+      codeColumn: "partner_code",
+      campaignColumn: "campaign_slug",
+      startAt: periodInfo.startAt,
+      accountId,
+      partnerCode,
+      campaignSlug,
+    });
+    const referralFilter = buildAnalyticsWhere({
+      dateColumn: "created_at",
+      accountColumn: "partner_account_id",
+      codeColumn: "partner_code",
+      campaignColumn: "campaign_slug",
+      startAt: periodInfo.startAt,
+      accountId,
+      partnerCode,
+      campaignSlug,
+    });
+
+    const clickSummary = this.sql
+      .exec(
+        `SELECT COUNT(*) AS total_clicks,
+                COUNT(DISTINCT visitor_id) AS unique_visitors
+         FROM partner_click_events
+         ${clickFilter.where}`,
+        ...clickFilter.params
+      )
+      .toArray()[0];
+
+    const referralSummary = this.sql
+      .exec(
+        `SELECT COUNT(*) AS attributed_orders,
+                SUM(CASE WHEN referral_status = 'earned' THEN 1 ELSE 0 END) AS earned_orders,
+                SUM(CASE WHEN referral_status = 'voided' THEN 1 ELSE 0 END) AS voided_orders,
+                SUM(CASE WHEN referral_status = 'earned' THEN order_subtotal_cents ELSE 0 END) AS earned_revenue_cents,
+                SUM(CASE WHEN referral_status = 'earned' THEN commission_amount_cents ELSE 0 END) AS earned_commission_cents
+         FROM partner_referrals
+         ${referralFilter.where}`,
+        ...referralFilter.params
+      )
+      .toArray()[0];
+
+    const campaignClicks = this.sql
+      .exec(
+        `SELECT campaign_slug,
+                MAX(campaign_title) AS campaign_title,
+                COUNT(*) AS total_clicks,
+                COUNT(DISTINCT visitor_id) AS unique_visitors
+         FROM partner_click_events
+         ${clickFilter.where}
+         GROUP BY campaign_slug
+         ORDER BY total_clicks DESC, campaign_slug ASC
+         LIMIT ?`,
+        ...clickFilter.params,
+        MAX_ANALYTICS_BREAKDOWN_ROWS
+      )
+      .toArray()
+      .map(mapAnalyticsCampaignClickRow);
+
+    const campaignOrders = this.sql
+      .exec(
+        `SELECT campaign_slug,
+                MAX(campaign_title) AS campaign_title,
+                COUNT(*) AS attributed_orders,
+                SUM(CASE WHEN referral_status = 'earned' THEN 1 ELSE 0 END) AS earned_orders,
+                SUM(CASE WHEN referral_status = 'voided' THEN 1 ELSE 0 END) AS voided_orders,
+                SUM(CASE WHEN referral_status = 'earned' THEN order_subtotal_cents ELSE 0 END) AS earned_revenue_cents,
+                SUM(CASE WHEN referral_status = 'earned' THEN commission_amount_cents ELSE 0 END) AS earned_commission_cents
+         FROM partner_referrals
+         ${referralFilter.where}
+         GROUP BY campaign_slug
+         ORDER BY attributed_orders DESC, campaign_slug ASC
+         LIMIT ?`,
+        ...referralFilter.params,
+        MAX_ANALYTICS_BREAKDOWN_ROWS
+      )
+      .toArray()
+      .map(mapAnalyticsCampaignOrderRow);
+
+    const channelClicks = this.sql
+      .exec(
+        `SELECT channel,
+                COUNT(*) AS total_clicks,
+                COUNT(DISTINCT visitor_id) AS unique_visitors
+         FROM partner_click_events
+         ${clickFilter.where}
+         GROUP BY channel
+         ORDER BY total_clicks DESC, channel ASC
+         LIMIT ?`,
+        ...clickFilter.params,
+        MAX_ANALYTICS_BREAKDOWN_ROWS
+      )
+      .toArray()
+      .map(mapAnalyticsChannelClickRow);
+
+    const channelOrders = this.sql
+      .exec(
+        `SELECT analytics_channel AS channel,
+                COUNT(*) AS attributed_orders,
+                SUM(CASE WHEN referral_status = 'earned' THEN 1 ELSE 0 END) AS earned_orders,
+                SUM(CASE WHEN referral_status = 'voided' THEN 1 ELSE 0 END) AS voided_orders,
+                SUM(CASE WHEN referral_status = 'earned' THEN order_subtotal_cents ELSE 0 END) AS earned_revenue_cents,
+                SUM(CASE WHEN referral_status = 'earned' THEN commission_amount_cents ELSE 0 END) AS earned_commission_cents
+         FROM partner_referrals
+         ${referralFilter.where}
+         GROUP BY analytics_channel
+         ORDER BY attributed_orders DESC, analytics_channel ASC
+         LIMIT ?`,
+        ...referralFilter.params,
+        MAX_ANALYTICS_BREAKDOWN_ROWS
+      )
+      .toArray()
+      .map(mapAnalyticsChannelOrderRow);
+
+    const dailyClicks = this.sql
+      .exec(
+        `SELECT substr(clicked_at, 1, 10) AS day,
+                COUNT(*) AS total_clicks,
+                COUNT(DISTINCT visitor_id) AS unique_visitors
+         FROM partner_click_events
+         ${clickFilter.where}
+         GROUP BY day
+         ORDER BY day ASC
+         LIMIT ?`,
+        ...clickFilter.params,
+        MAX_ANALYTICS_BREAKDOWN_ROWS
+      )
+      .toArray()
+      .map(mapAnalyticsDailyClickRow);
+
+    const dailyOrders = this.sql
+      .exec(
+        `SELECT substr(created_at, 1, 10) AS day,
+                COUNT(*) AS attributed_orders,
+                SUM(CASE WHEN referral_status = 'earned' THEN 1 ELSE 0 END) AS earned_orders,
+                SUM(CASE WHEN referral_status = 'voided' THEN 1 ELSE 0 END) AS voided_orders,
+                SUM(CASE WHEN referral_status = 'earned' THEN order_subtotal_cents ELSE 0 END) AS earned_revenue_cents,
+                SUM(CASE WHEN referral_status = 'earned' THEN commission_amount_cents ELSE 0 END) AS earned_commission_cents
+         FROM partner_referrals
+         ${referralFilter.where}
+         GROUP BY day
+         ORDER BY day ASC
+         LIMIT ?`,
+        ...referralFilter.params,
+        MAX_ANALYTICS_BREAKDOWN_ROWS
+      )
+      .toArray()
+      .map(mapAnalyticsDailyOrderRow);
+
+    let byPartner = [];
+
+    if (includePartners) {
+      const partnerClicks = this.sql
+        .exec(
+          `SELECT partner_account_id,
+                  MAX(partner_code) AS partner_code,
+                  COUNT(*) AS total_clicks,
+                  COUNT(DISTINCT visitor_id) AS unique_visitors
+           FROM partner_click_events
+           ${clickFilter.where}
+           GROUP BY partner_account_id
+           ORDER BY total_clicks DESC, partner_code ASC
+           LIMIT ?`,
+          ...clickFilter.params,
+          MAX_ANALYTICS_BREAKDOWN_ROWS
+        )
+        .toArray()
+        .map(mapAnalyticsPartnerClickRow);
+
+      const partnerOrders = this.sql
+        .exec(
+          `SELECT partner_account_id,
+                  MAX(partner_code) AS partner_code,
+                  COUNT(*) AS attributed_orders,
+                  SUM(CASE WHEN referral_status = 'earned' THEN 1 ELSE 0 END) AS earned_orders,
+                  SUM(CASE WHEN referral_status = 'voided' THEN 1 ELSE 0 END) AS voided_orders,
+                  SUM(CASE WHEN referral_status = 'earned' THEN order_subtotal_cents ELSE 0 END) AS earned_revenue_cents,
+                  SUM(CASE WHEN referral_status = 'earned' THEN commission_amount_cents ELSE 0 END) AS earned_commission_cents
+           FROM partner_referrals
+           ${referralFilter.where}
+           GROUP BY partner_account_id
+           ORDER BY attributed_orders DESC, partner_code ASC
+           LIMIT ?`,
+          ...referralFilter.params,
+          MAX_ANALYTICS_BREAKDOWN_ROWS
+        )
+        .toArray()
+        .map(mapAnalyticsPartnerOrderRow);
+
+      byPartner = mergeAnalyticsBreakdown(
+        partnerClicks,
+        partnerOrders,
+        (row) => row.partnerAccountId || row.partnerCode
+      );
+    }
+
+    return {
+      period: periodInfo,
+      filters: {
+        accountId,
+        partnerCode,
+        campaignSlug,
+      },
+      summary: combineAnalyticsMetrics(clickSummary, referralSummary),
+      byCampaign: mergeAnalyticsBreakdown(
+        campaignClicks,
+        campaignOrders,
+        (row) => row.campaignSlug || "__general__"
+      ),
+      byChannel: mergeAnalyticsBreakdown(
+        channelClicks,
+        channelOrders,
+        (row) => row.channel || "untracked"
+      ),
+      byPartner,
+      daily: mergeAnalyticsBreakdown(
+        dailyClicks,
+        dailyOrders,
+        (row) => row.day
+      ).sort((left, right) => left.day.localeCompare(right.day)),
+    };
   }
 
   getPartnerSummary(url) {
@@ -3314,6 +3774,274 @@ function toCustomerCampaign(campaign) {
   };
 }
 
+function normalizeOptionalCode(value) {
+  const cleaned = cleanText(value, 20).toUpperCase();
+  return cleaned ? normalizeCode(cleaned) : "";
+}
+
+function normalizeAnalyticsChannel(value) {
+  const channel = cleanText(value || "general", 30).toLowerCase();
+  return ANALYTICS_CHANNELS.has(channel) ? channel : "other";
+}
+
+function normalizeAnalyticsPeriod(value) {
+  const period = cleanText(value || DEFAULT_ANALYTICS_PERIOD, 20).toLowerCase();
+  return ANALYTICS_PERIODS.has(period) ? period : DEFAULT_ANALYTICS_PERIOD;
+}
+
+function analyticsPeriodInfo(periodValue) {
+  const period = normalizeAnalyticsPeriod(periodValue);
+  const endAt = new Date().toISOString();
+
+  if (period === "all") {
+    return {
+      key: period,
+      startAt: "",
+      endAt,
+      label: "All time",
+    };
+  }
+
+  const days = Number.parseInt(period, 10);
+  const start = new Date();
+  start.setUTCDate(start.getUTCDate() - days);
+
+  return {
+    key: period,
+    startAt: start.toISOString(),
+    endAt,
+    label: `Last ${days} days`,
+  };
+}
+
+function buildAnalyticsWhere({
+  dateColumn,
+  accountColumn,
+  codeColumn,
+  campaignColumn,
+  startAt = "",
+  accountId = "",
+  partnerCode = "",
+  campaignSlug = "",
+}) {
+  const conditions = [];
+  const params = [];
+
+  if (startAt) {
+    conditions.push(`${dateColumn} >= ?`);
+    params.push(startAt);
+  }
+
+  if (accountId) {
+    conditions.push(`${accountColumn} = ?`);
+    params.push(accountId);
+  }
+
+  if (partnerCode) {
+    conditions.push(`${codeColumn} = ? COLLATE NOCASE`);
+    params.push(partnerCode);
+  }
+
+  if (campaignSlug) {
+    conditions.push(`${campaignColumn} = ? COLLATE NOCASE`);
+    params.push(campaignSlug);
+  }
+
+  return {
+    where: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "",
+    params,
+  };
+}
+
+function createAnalyticsClickId() {
+  return `CLICK-${Date.now()}-${crypto
+    .randomUUID()
+    .split("-")[0]
+    .toUpperCase()}`;
+}
+
+function baseAnalyticsMetrics() {
+  return {
+    totalClicks: 0,
+    uniqueVisitors: 0,
+    attributedOrders: 0,
+    earnedOrders: 0,
+    voidedOrders: 0,
+    earnedRevenueCents: 0,
+    earnedCommissionCents: 0,
+    conversionRateBps: 0,
+  };
+}
+
+function combineAnalyticsMetrics(clickRow = {}, referralRow = {}) {
+  const totalClicks = Number(
+    clickRow.totalClicks ?? clickRow.total_clicks ?? 0
+  );
+  const uniqueVisitors = Number(
+    clickRow.uniqueVisitors ?? clickRow.unique_visitors ?? 0
+  );
+  const attributedOrders = Number(
+    referralRow.attributedOrders ?? referralRow.attributed_orders ?? 0
+  );
+  const earnedOrders = Number(
+    referralRow.earnedOrders ?? referralRow.earned_orders ?? 0
+  );
+  const voidedOrders = Number(
+    referralRow.voidedOrders ?? referralRow.voided_orders ?? 0
+  );
+  const earnedRevenueCents = Number(
+    referralRow.earnedRevenueCents ?? referralRow.earned_revenue_cents ?? 0
+  );
+  const earnedCommissionCents = Number(
+    referralRow.earnedCommissionCents ??
+      referralRow.earned_commission_cents ??
+      0
+  );
+
+  return {
+    totalClicks,
+    uniqueVisitors,
+    attributedOrders,
+    earnedOrders,
+    voidedOrders,
+    earnedRevenueCents,
+    earnedCommissionCents,
+    conversionRateBps: uniqueVisitors
+      ? Math.round((attributedOrders * 10000) / uniqueVisitors)
+      : 0,
+  };
+}
+
+function mergeAnalyticsBreakdown(clickRows, referralRows, keyFor) {
+  const records = new Map();
+
+  const merge = (row, type) => {
+    const key = keyFor(row);
+    const current = records.get(key) || {
+      ...row,
+      ...baseAnalyticsMetrics(),
+    };
+
+    records.set(key, {
+      ...current,
+      ...row,
+      ...(type === "click"
+        ? combineAnalyticsMetrics(row, current)
+        : combineAnalyticsMetrics(current, row)),
+    });
+  };
+
+  clickRows.forEach((row) => merge(row, "click"));
+  referralRows.forEach((row) => merge(row, "referral"));
+
+  return Array.from(records.values()).sort(
+    (left, right) =>
+      right.totalClicks - left.totalClicks ||
+      right.attributedOrders - left.attributedOrders ||
+      right.earnedRevenueCents - left.earnedRevenueCents
+  );
+}
+
+function mapAnalyticsCampaignClickRow(row) {
+  return {
+    campaignSlug: cleanText(row.campaign_slug, MAX_CAMPAIGN_SLUG_LENGTH),
+    campaignTitle:
+      cleanText(row.campaign_title, MAX_CAMPAIGN_TITLE_LENGTH) ||
+      "General Referral Link",
+    totalClicks: Number(row.total_clicks || 0),
+    uniqueVisitors: Number(row.unique_visitors || 0),
+  };
+}
+
+function mapAnalyticsCampaignOrderRow(row) {
+  return {
+    campaignSlug: cleanText(row.campaign_slug, MAX_CAMPAIGN_SLUG_LENGTH),
+    campaignTitle:
+      cleanText(row.campaign_title, MAX_CAMPAIGN_TITLE_LENGTH) ||
+      "General Referral Link",
+    attributedOrders: Number(row.attributed_orders || 0),
+    earnedOrders: Number(row.earned_orders || 0),
+    voidedOrders: Number(row.voided_orders || 0),
+    earnedRevenueCents: Number(row.earned_revenue_cents || 0),
+    earnedCommissionCents: Number(row.earned_commission_cents || 0),
+  };
+}
+
+function mapAnalyticsChannelClickRow(row) {
+  return {
+    channel: normalizeAnalyticsChannel(row.channel || "untracked"),
+    totalClicks: Number(row.total_clicks || 0),
+    uniqueVisitors: Number(row.unique_visitors || 0),
+  };
+}
+
+function mapAnalyticsChannelOrderRow(row) {
+  return {
+    channel: normalizeAnalyticsChannel(row.channel || "untracked"),
+    attributedOrders: Number(row.attributed_orders || 0),
+    earnedOrders: Number(row.earned_orders || 0),
+    voidedOrders: Number(row.voided_orders || 0),
+    earnedRevenueCents: Number(row.earned_revenue_cents || 0),
+    earnedCommissionCents: Number(row.earned_commission_cents || 0),
+  };
+}
+
+function mapAnalyticsDailyClickRow(row) {
+  return {
+    day: cleanText(row.day, 20),
+    totalClicks: Number(row.total_clicks || 0),
+    uniqueVisitors: Number(row.unique_visitors || 0),
+  };
+}
+
+function mapAnalyticsDailyOrderRow(row) {
+  return {
+    day: cleanText(row.day, 20),
+    attributedOrders: Number(row.attributed_orders || 0),
+    earnedOrders: Number(row.earned_orders || 0),
+    voidedOrders: Number(row.voided_orders || 0),
+    earnedRevenueCents: Number(row.earned_revenue_cents || 0),
+    earnedCommissionCents: Number(row.earned_commission_cents || 0),
+  };
+}
+
+function mapAnalyticsPartnerClickRow(row) {
+  return {
+    partnerAccountId: cleanText(row.partner_account_id, 150),
+    partnerCode: cleanText(row.partner_code, 20),
+    totalClicks: Number(row.total_clicks || 0),
+    uniqueVisitors: Number(row.unique_visitors || 0),
+  };
+}
+
+function mapAnalyticsPartnerOrderRow(row) {
+  return {
+    partnerAccountId: cleanText(row.partner_account_id, 150),
+    partnerCode: cleanText(row.partner_code, 20),
+    attributedOrders: Number(row.attributed_orders || 0),
+    earnedOrders: Number(row.earned_orders || 0),
+    voidedOrders: Number(row.voided_orders || 0),
+    earnedRevenueCents: Number(row.earned_revenue_cents || 0),
+    earnedCommissionCents: Number(row.earned_commission_cents || 0),
+  };
+}
+
+function emptyAnalyticsReport(period = DEFAULT_ANALYTICS_PERIOD) {
+  return {
+    period: analyticsPeriodInfo(period),
+    filters: {
+      accountId: "",
+      partnerCode: "",
+      campaignSlug: "",
+    },
+    summary: baseAnalyticsMetrics(),
+    byCampaign: [],
+    byChannel: [],
+    byPartner: [],
+    daily: [],
+  };
+}
+
 function normalizeApplication(payload) {
   const application = {
     accountId: cleanText(payload.accountId, 150),
@@ -3423,6 +4151,17 @@ function mapReferralRow(row) {
     campaignId: cleanText(row.campaign_id, 120),
     campaignSlug: cleanText(row.campaign_slug, MAX_CAMPAIGN_SLUG_LENGTH),
     campaignTitle: cleanText(row.campaign_title, MAX_CAMPAIGN_TITLE_LENGTH),
+    analyticsChannel: normalizeAnalyticsChannel(
+      row.analytics_channel || "untracked"
+    ),
+    analyticsClickId: cleanText(
+      row.analytics_click_id,
+      MAX_ANALYTICS_CLICK_ID_LENGTH
+    ),
+    analyticsVisitorId: cleanText(
+      row.analytics_visitor_id,
+      MAX_ANALYTICS_VISITOR_ID_LENGTH
+    ),
     requiresAdjustment: Boolean(payoutId && referralStatus === "voided"),
   };
 }
@@ -3449,6 +4188,7 @@ function mapCustomerReferralRow(row) {
     payoutPaidAt: referral.payoutPaidAt,
     campaignSlug: referral.campaignSlug,
     campaignTitle: referral.campaignTitle,
+    analyticsChannel: referral.analyticsChannel,
     requiresAdjustment: referral.requiresAdjustment,
   };
 }

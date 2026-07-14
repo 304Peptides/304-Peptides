@@ -68,6 +68,42 @@ const EMPTY_CAMPAIGN_FORM = {
   displayOrder: "0",
 };
 
+const ANALYTICS_PERIOD_OPTIONS = [
+  ["7", "Last 7 Days"],
+  ["30", "Last 30 Days"],
+  ["90", "Last 90 Days"],
+  ["all", "All Time"],
+];
+
+const EMPTY_ANALYTICS_METRICS = {
+  totalClicks: 0,
+  uniqueVisitors: 0,
+  attributedOrders: 0,
+  earnedOrders: 0,
+  voidedOrders: 0,
+  earnedRevenueCents: 0,
+  earnedCommissionCents: 0,
+  conversionRateBps: 0,
+};
+
+const EMPTY_ANALYTICS_REPORT = {
+  period: {
+    key: "30",
+    label: "Last 30 Days",
+    startAt: "",
+    endAt: "",
+  },
+  filters: {
+    partnerCode: "",
+    campaignSlug: "",
+  },
+  summary: EMPTY_ANALYTICS_METRICS,
+  byPartner: [],
+  byCampaign: [],
+  byChannel: [],
+  daily: [],
+};
+
 function getStoredSecret() {
   try {
     return window.sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
@@ -262,6 +298,99 @@ function normalizeCampaigns(records) {
     });
 }
 
+function normalizeAnalyticsMetrics(metrics) {
+  const source = metrics && typeof metrics === "object" ? metrics : {};
+  return {
+    totalClicks: Math.max(0, Number(source.totalClicks || 0)),
+    uniqueVisitors: Math.max(0, Number(source.uniqueVisitors || 0)),
+    attributedOrders: Math.max(0, Number(source.attributedOrders || 0)),
+    earnedOrders: Math.max(0, Number(source.earnedOrders || 0)),
+    voidedOrders: Math.max(0, Number(source.voidedOrders || 0)),
+    earnedRevenueCents: Math.max(0, Number(source.earnedRevenueCents || 0)),
+    earnedCommissionCents: Math.max(
+      0,
+      Number(source.earnedCommissionCents || 0)
+    ),
+    conversionRateBps: Math.max(0, Number(source.conversionRateBps || 0)),
+  };
+}
+
+function normalizeAnalyticsReport(report) {
+  const source = report && typeof report === "object" ? report : {};
+  const normalizeRows = (rows, extra = () => ({})) =>
+    (Array.isArray(rows) ? rows : [])
+      .filter((row) => row && typeof row === "object")
+      .map((row) => ({
+        ...row,
+        ...extra(row),
+        ...normalizeAnalyticsMetrics(row),
+      }));
+
+  return {
+    ...EMPTY_ANALYTICS_REPORT,
+    ...source,
+    period: {
+      ...EMPTY_ANALYTICS_REPORT.period,
+      ...(source.period || {}),
+      key: String(source.period?.key || "30"),
+      label: String(source.period?.label || "Last 30 Days"),
+    },
+    filters: {
+      partnerCode: String(source.filters?.partnerCode || "").toUpperCase(),
+      campaignSlug: String(source.filters?.campaignSlug || "").toLowerCase(),
+    },
+    summary: normalizeAnalyticsMetrics(source.summary),
+    byPartner: normalizeRows(source.byPartner, (row) => ({
+      partnerCode: String(row.partnerCode || "").toUpperCase(),
+    })).sort((left, right) =>
+      right.totalClicks - left.totalClicks ||
+      left.partnerCode.localeCompare(right.partnerCode)
+    ),
+    byCampaign: normalizeRows(source.byCampaign, (row) => ({
+      campaignSlug: String(row.campaignSlug || "").toLowerCase(),
+      campaignTitle: String(row.campaignTitle || "General Referral Link"),
+    })).sort((left, right) =>
+      right.totalClicks - left.totalClicks ||
+      left.campaignTitle.localeCompare(right.campaignTitle)
+    ),
+    byChannel: normalizeRows(source.byChannel, (row) => ({
+      channel: String(row.channel || "untracked").toLowerCase(),
+    })).sort((left, right) =>
+      right.totalClicks - left.totalClicks ||
+      left.channel.localeCompare(right.channel)
+    ),
+    daily: normalizeRows(source.daily, (row) => ({
+      day: String(row.day || ""),
+    })).sort((left, right) => left.day.localeCompare(right.day)),
+  };
+}
+
+function formatAnalyticsChannel(value) {
+  return ({
+    general: "General Link",
+    qr: "QR Code",
+    facebook: "Facebook",
+    instagram: "Instagram",
+    tiktok: "TikTok",
+    sms: "Text Message",
+    email: "Email",
+    other: "Other",
+    untracked: "Untracked",
+  })[String(value || "untracked").toLowerCase()] || String(value || "Other");
+}
+
+function formatAnalyticsDate(value) {
+  if (!value) return "Unavailable";
+  const date = new Date(`${value}T12:00:00`);
+  return Number.isNaN(date.getTime())
+    ? String(value)
+    : date.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+}
+
 function toLocalDateTimeInput(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -435,6 +564,12 @@ function PartnerHQ({ onNavigate = () => {} }) {
   const [isEditingCampaign, setIsEditingCampaign] = useState(false);
   const [isSavingCampaign, setIsSavingCampaign] = useState(false);
   const [campaignStatusSavingId, setCampaignStatusSavingId] = useState("");
+  const [analytics, setAnalytics] = useState(EMPTY_ANALYTICS_REPORT);
+  const [analyticsPeriod, setAnalyticsPeriod] = useState("30");
+  const [analyticsPartnerCode, setAnalyticsPartnerCode] = useState("");
+  const [analyticsCampaignSlug, setAnalyticsCampaignSlug] = useState("");
+  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState("");
 
   const loadPartnerData = useCallback(
     async (secret = adminSecret) => {
@@ -456,6 +591,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
           leaderboardResponse,
           rewardResponse,
           campaignResponse,
+          analyticsResponse,
         ] = await Promise.all([
           fetch("/api/admin/partner-applications", {
             method: "GET",
@@ -498,6 +634,12 @@ function PartnerHQ({ onNavigate = () => {} }) {
             credentials: "same-origin",
             cache: "no-store",
           }),
+          fetch("/api/admin/partner-analytics?period=30", {
+            method: "GET",
+            headers,
+            credentials: "same-origin",
+            cache: "no-store",
+          }),
         ]);
         const [
           applicationResult,
@@ -506,6 +648,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
           leaderboardResult,
           rewardResult,
           campaignResult,
+          analyticsResult,
         ] = await Promise.all([
           readJson(applicationResponse),
           readJson(referralResponse),
@@ -513,6 +656,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
           readJson(leaderboardResponse),
           readJson(rewardResponse),
           readJson(campaignResponse),
+          readJson(analyticsResponse),
         ]);
         const nextApplications = normalizeApplications(
           applicationResult.applications || applicationResult.records || []
@@ -549,6 +693,11 @@ function PartnerHQ({ onNavigate = () => {} }) {
             campaignResult.campaigns || campaignResult.records || []
           )
         );
+        setAnalytics(normalizeAnalyticsReport(analyticsResult.analytics));
+        setAnalyticsPeriod("30");
+        setAnalyticsPartnerCode("");
+        setAnalyticsCampaignSlug("");
+        setAnalyticsError("");
         setLeaderboardSettings(nextLeaderboardSettings);
         setLeaderboardDraft({
           ...nextLeaderboardSettings,
@@ -577,6 +726,8 @@ function PartnerHQ({ onNavigate = () => {} }) {
         setLeaderboardEntries([]);
         setRewards([]);
         setCampaigns([]);
+        setAnalytics(EMPTY_ANALYTICS_REPORT);
+        setAnalyticsError("");
         setLeaderboardReward(null);
         setIsReady(false);
         setLoadError(error.message || "Partner records could not be loaded.");
@@ -836,6 +987,45 @@ function PartnerHQ({ onNavigate = () => {} }) {
     );
   }, [payoutEligibleReferrals, selectedOrderIds]);
 
+  async function loadAnalytics(event) {
+    event?.preventDefault?.();
+    if (!adminSecret || isLoadingAnalytics) return;
+
+    setIsLoadingAnalytics(true);
+    setAnalyticsError("");
+
+    try {
+      const search = new URLSearchParams({ period: analyticsPeriod });
+      if (analyticsPartnerCode) {
+        search.set("partnerCode", analyticsPartnerCode);
+      }
+      if (analyticsCampaignSlug) {
+        search.set("campaign", analyticsCampaignSlug);
+      }
+
+      const response = await fetch(
+        `/api/admin/partner-analytics?${search.toString()}`,
+        {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${adminSecret}`,
+          },
+          credentials: "same-origin",
+          cache: "no-store",
+        }
+      );
+      const result = await readJson(response);
+      setAnalytics(normalizeAnalyticsReport(result.analytics));
+    } catch (error) {
+      setAnalyticsError(
+        error.message || "Referral analytics could not be loaded."
+      );
+    } finally {
+      setIsLoadingAnalytics(false);
+    }
+  }
+
   function handleUnlock(event) {
     event.preventDefault();
     const cleanedSecret = secretInput.trim();
@@ -858,6 +1048,11 @@ function PartnerHQ({ onNavigate = () => {} }) {
     setLeaderboardEntries([]);
     setRewards([]);
     setCampaigns([]);
+    setAnalytics(EMPTY_ANALYTICS_REPORT);
+    setAnalyticsPeriod("30");
+    setAnalyticsPartnerCode("");
+    setAnalyticsCampaignSlug("");
+    setAnalyticsError("");
     setLeaderboardReward(null);
     setRewardToIssue(null);
     setIsReady(false);
@@ -1702,7 +1897,8 @@ function PartnerHQ({ onNavigate = () => {} }) {
               <h1>Partner HQ</h1>
               <p>
                 Review applications, control partner access, set commission rates,
-                audit referrals, record payouts, and manage monthly and quarterly partner rewards.
+                audit referrals, measure referral traffic and conversion, record payouts,
+                and manage monthly and quarterly partner rewards.
               </p>
             </div>
             <button
@@ -1726,6 +1922,183 @@ function PartnerHQ({ onNavigate = () => {} }) {
           {loadError && <Notice type="error">{loadError}</Notice>}
           {actionError && <Notice type="error">{actionError}</Notice>}
           {actionMessage && <Notice type="success">{actionMessage}</Notice>}
+
+          <section className="partner-hq-panel partner-hq-analytics-panel">
+            <div className="partner-hq-section-heading">
+              <div>
+                <p className="eyebrow">REFERRAL ANALYTICS</p>
+                <h2>Clicks, Visitors And Conversion</h2>
+                <p>
+                  Compare partner links, campaigns, channels and QR scans. Visitors are
+                  counted with anonymous first-party IDs; customer IP addresses are not stored.
+                </p>
+              </div>
+              <span className="partner-hq-source-pill">
+                {analytics.period.label || "Last 30 Days"}
+              </span>
+            </div>
+
+            <form className="partner-hq-analytics-filters" onSubmit={loadAnalytics}>
+              <label className="partner-hq-field">
+                <span>Reporting Period</span>
+                <select
+                  value={analyticsPeriod}
+                  disabled={isLoadingAnalytics}
+                  onChange={(event) => setAnalyticsPeriod(event.target.value)}
+                >
+                  {ANALYTICS_PERIOD_OPTIONS.map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="partner-hq-field">
+                <span>Partner</span>
+                <select
+                  value={analyticsPartnerCode}
+                  disabled={isLoadingAnalytics}
+                  onChange={(event) => setAnalyticsPartnerCode(event.target.value)}
+                >
+                  <option value="">All Partners</option>
+                  {applications
+                    .filter((application) =>
+                      ["approved", "suspended"].includes(application.status)
+                    )
+                    .map((application) => (
+                      <option key={application.accountId} value={application.code}>
+                        {application.code} — {application.firstName} {application.lastName}
+                      </option>
+                    ))}
+                </select>
+              </label>
+
+              <label className="partner-hq-field">
+                <span>Campaign</span>
+                <select
+                  value={analyticsCampaignSlug}
+                  disabled={isLoadingAnalytics}
+                  onChange={(event) => setAnalyticsCampaignSlug(event.target.value)}
+                >
+                  <option value="">All Campaigns And General Links</option>
+                  {campaigns.map((campaign) => (
+                    <option key={campaign.campaignId} value={campaign.slug}>
+                      {campaign.title} ({campaign.slug})
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <button type="submit" className="primary-btn" disabled={isLoadingAnalytics}>
+                {isLoadingAnalytics ? "Loading Analytics..." : "Apply Analytics Filters"}
+              </button>
+            </form>
+
+            {analyticsError && <Notice type="error">{analyticsError}</Notice>}
+
+            <section className="partner-hq-analytics-stats">
+              <StatCard
+                label="Total Clicks"
+                value={analytics.summary.totalClicks.toLocaleString("en-US")}
+                detail="Every tracked link opening"
+              />
+              <StatCard
+                label="Unique Visitors"
+                value={analytics.summary.uniqueVisitors.toLocaleString("en-US")}
+                detail="Anonymous first-party visitors"
+              />
+              <StatCard
+                label="Attributed Orders"
+                value={analytics.summary.attributedOrders.toLocaleString("en-US")}
+                detail={`${analytics.summary.earnedOrders} earned · ${analytics.summary.voidedOrders} voided`}
+              />
+              <StatCard
+                label="Conversion Rate"
+                value={formatPercentFromBasisPoints(analytics.summary.conversionRateBps)}
+                detail="Attributed orders per unique visitor"
+              />
+              <StatCard
+                label="Earned Revenue"
+                value={formatMoneyFromCents(analytics.summary.earnedRevenueCents)}
+                detail="Paid or later referral statuses"
+              />
+              <StatCard
+                label="Earned Commission"
+                value={formatMoneyFromCents(analytics.summary.earnedCommissionCents)}
+                detail="Partner commission generated"
+              />
+            </section>
+
+            <div className="partner-hq-analytics-grid">
+              <AnalyticsTable
+                eyebrow="PARTNER PERFORMANCE"
+                title="Partners"
+                emptyText="Tracked partner traffic will appear after referral links are opened."
+                rows={analytics.byPartner}
+                columns={[
+                  { label: "Partner", render: (row) => row.partnerCode || "Unknown" },
+                  { label: "Clicks", render: (row) => row.totalClicks.toLocaleString("en-US") },
+                  { label: "Visitors", render: (row) => row.uniqueVisitors.toLocaleString("en-US") },
+                  { label: "Orders", render: (row) => row.attributedOrders.toLocaleString("en-US") },
+                  { label: "Conversion", render: (row) => formatPercentFromBasisPoints(row.conversionRateBps) },
+                  { label: "Revenue", render: (row) => formatMoneyFromCents(row.earnedRevenueCents) },
+                  { label: "Commission", render: (row) => formatMoneyFromCents(row.earnedCommissionCents) },
+                ]}
+              />
+
+              <AnalyticsTable
+                eyebrow="CAMPAIGN PERFORMANCE"
+                title="Campaigns"
+                emptyText="Campaign results will appear after campaign links receive traffic."
+                rows={analytics.byCampaign}
+                columns={[
+                  {
+                    label: "Campaign",
+                    render: (row) => (
+                      <span>
+                        <strong>{row.campaignTitle || "General Referral Link"}</strong>
+                        <small>{row.campaignSlug || "general-referral-link"}</small>
+                      </span>
+                    ),
+                  },
+                  { label: "Clicks", render: (row) => row.totalClicks.toLocaleString("en-US") },
+                  { label: "Visitors", render: (row) => row.uniqueVisitors.toLocaleString("en-US") },
+                  { label: "Orders", render: (row) => row.attributedOrders.toLocaleString("en-US") },
+                  { label: "Conversion", render: (row) => formatPercentFromBasisPoints(row.conversionRateBps) },
+                  { label: "Revenue", render: (row) => formatMoneyFromCents(row.earnedRevenueCents) },
+                ]}
+              />
+
+              <AnalyticsTable
+                eyebrow="CHANNEL PERFORMANCE"
+                title="Where Traffic Came From"
+                emptyText="Channel results will appear after tracked platform or QR links are opened."
+                rows={analytics.byChannel}
+                columns={[
+                  { label: "Channel", render: (row) => formatAnalyticsChannel(row.channel) },
+                  { label: "Clicks", render: (row) => row.totalClicks.toLocaleString("en-US") },
+                  { label: "Visitors", render: (row) => row.uniqueVisitors.toLocaleString("en-US") },
+                  { label: "Orders", render: (row) => row.attributedOrders.toLocaleString("en-US") },
+                  { label: "Conversion", render: (row) => formatPercentFromBasisPoints(row.conversionRateBps) },
+                  { label: "Revenue", render: (row) => formatMoneyFromCents(row.earnedRevenueCents) },
+                ]}
+              />
+
+              <AnalyticsTable
+                eyebrow="DAILY TREND"
+                title="Traffic And Orders By Day"
+                emptyText="Daily analytics will appear after the first tracked visit."
+                rows={analytics.daily}
+                columns={[
+                  { label: "Date", render: (row) => formatAnalyticsDate(row.day) },
+                  { label: "Clicks", render: (row) => row.totalClicks.toLocaleString("en-US") },
+                  { label: "Visitors", render: (row) => row.uniqueVisitors.toLocaleString("en-US") },
+                  { label: "Orders", render: (row) => row.attributedOrders.toLocaleString("en-US") },
+                  { label: "Conversion", render: (row) => formatPercentFromBasisPoints(row.conversionRateBps) },
+                  { label: "Revenue", render: (row) => formatMoneyFromCents(row.earnedRevenueCents) },
+                ]}
+              />
+            </div>
+          </section>
 
           <section className="partner-hq-panel partner-hq-settings-panel">
             <div>
@@ -3189,6 +3562,45 @@ function StatusPill({ status }) {
   return <span className={`partner-hq-status partner-hq-status-${status}`}>{String(status || "pending").toUpperCase()}</span>;
 }
 
+function AnalyticsTable({ eyebrow, title, rows, columns, emptyText }) {
+  return (
+    <section className="partner-hq-analytics-table-card">
+      <div className="partner-hq-analytics-table-heading">
+        <div>
+          <p className="eyebrow">{eyebrow}</p>
+          <h3>{title}</h3>
+        </div>
+        <span>{rows.length} row(s)</span>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="partner-hq-analytics-empty">{emptyText}</div>
+      ) : (
+        <div className="partner-hq-analytics-table-wrap">
+          <table className="partner-hq-analytics-table">
+            <thead>
+              <tr>
+                {columns.map((column) => (
+                  <th key={column.label}>{column.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={`${title}-${row.partnerCode || row.campaignSlug || row.channel || row.day || rowIndex}`}>
+                  {columns.map((column) => (
+                    <td key={column.label}>{column.render(row)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ReferralStatusPill({ status }) {
   return <span className={`partner-hq-status partner-hq-referral-status-${status}`}>{String(status || "pending").toUpperCase()}</span>;
 }
@@ -3412,6 +3824,23 @@ const partnerHqCss = `
 .partner-hq-status-draft { border: 1px solid rgba(255,190,80,.35); background: rgba(255,170,50,.1); color: #ffe0a8; }
 .partner-hq-status-published { border: 1px solid rgba(72,214,151,.35); background: rgba(72,214,151,.1); color: #b8f3d8; }
 .partner-hq-status-archived { border: 1px solid rgba(255,95,95,.38); background: rgba(255,70,70,.11); color: #ffcaca; }
+.partner-hq-analytics-panel { border-color: rgba(61,165,255,.3); }
+.partner-hq-analytics-panel > .partner-hq-section-heading p:not(.eyebrow) { max-width: 820px; color: #b6c0c8; line-height: 1.65; }
+.partner-hq-analytics-filters { display: grid; grid-template-columns: minmax(150px,.45fr) minmax(220px,.8fr) minmax(240px,1fr) auto; gap: 12px; align-items: end; margin-top: 20px; }
+.partner-hq-analytics-stats { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin-top: 20px; }
+.partner-hq-analytics-grid { display: grid; gap: 16px; margin-top: 20px; }
+.partner-hq-analytics-table-card { overflow: hidden; border: 1px solid rgba(255,255,255,.09); border-radius: 17px; background: rgba(0,0,0,.16); }
+.partner-hq-analytics-table-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 18px; flex-wrap: wrap; }
+.partner-hq-analytics-table-heading h3 { margin: 4px 0 0; font-size: 24px; }
+.partner-hq-analytics-table-heading > span { color: #8f9aa2; font-size: 12px; font-weight: 800; }
+.partner-hq-analytics-table-wrap { overflow-x: auto; border-top: 1px solid rgba(255,255,255,.07); }
+.partner-hq-analytics-table { width: 100%; min-width: 850px; border-collapse: collapse; }
+.partner-hq-analytics-table th,
+.partner-hq-analytics-table td { padding: 13px 15px; border-bottom: 1px solid rgba(255,255,255,.065); text-align: left; vertical-align: top; }
+.partner-hq-analytics-table th { color: #9ed8ff; background: rgba(255,255,255,.03); font-size: 11px; letter-spacing: .7px; text-transform: uppercase; }
+.partner-hq-analytics-table td { color: #e8edf0; }
+.partner-hq-analytics-table td small { display: block; margin-top: 4px; color: #8f9aa2; }
+.partner-hq-analytics-empty { padding: 30px 18px; border-top: 1px solid rgba(255,255,255,.07); color: #aab5bd; text-align: center; line-height: 1.55; }
 button:disabled { opacity: .5; cursor: not-allowed; }
 @media (max-width: 1080px) {
   .partner-hq-stats { grid-template-columns: repeat(3,minmax(0,1fr)); }
@@ -3421,6 +3850,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   .partner-hq-balance-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .partner-hq-balance-card { grid-template-columns: minmax(0,1fr); }
   .partner-hq-rule-grid { grid-template-columns: minmax(0,1fr); }
+  .partner-hq-analytics-filters { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .partner-hq-analytics-stats { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
 @media (max-width: 760px) {
   .partner-hq-page { padding: 48px 12px; }
@@ -3442,7 +3873,9 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   .partner-hq-period-form,
   .partner-hq-leaderboard-summary,
   .partner-hq-campaign-form-grid,
-  .partner-hq-campaign-channel-grid { grid-template-columns: minmax(0,1fr); }
+  .partner-hq-campaign-channel-grid,
+  .partner-hq-analytics-filters,
+  .partner-hq-analytics-stats { grid-template-columns: minmax(0,1fr); }
   .partner-hq-campaign-wide { grid-column: auto; }
   .partner-hq-card-buttons { flex: 1 1 100%; }
   .partner-hq-hero > button,

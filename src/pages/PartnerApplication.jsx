@@ -88,6 +88,45 @@ const CAMPAIGN_CHANNELS = [
   ["emailCopy", "Email"],
 ];
 
+const CAMPAIGN_FIELD_CHANNELS = {
+  facebookCopy: "facebook",
+  instagramCopy: "instagram",
+  tiktokCopy: "tiktok",
+  smsCopy: "sms",
+  emailCopy: "email",
+};
+
+const ANALYTICS_PERIOD_OPTIONS = [
+  ["7", "Last 7 Days"],
+  ["30", "Last 30 Days"],
+  ["90", "Last 90 Days"],
+  ["all", "All Time"],
+];
+
+const EMPTY_ANALYTICS_METRICS = {
+  totalClicks: 0,
+  uniqueVisitors: 0,
+  attributedOrders: 0,
+  earnedOrders: 0,
+  voidedOrders: 0,
+  earnedRevenueCents: 0,
+  earnedCommissionCents: 0,
+  conversionRateBps: 0,
+};
+
+const EMPTY_ANALYTICS_REPORT = {
+  period: {
+    key: "30",
+    label: "Last 30 Days",
+    startAt: "",
+    endAt: "",
+  },
+  summary: EMPTY_ANALYTICS_METRICS,
+  byCampaign: [],
+  byChannel: [],
+  daily: [],
+};
+
 function normalizeCode(value) {
   return String(value || "")
     .toUpperCase()
@@ -137,6 +176,94 @@ function formatPercentFromBasisPoints(value) {
     minimumFractionDigits: percentage % 1 === 0 ? 0 : 2,
     maximumFractionDigits: 2,
   })}%`;
+}
+
+function normalizeAnalyticsMetrics(metrics) {
+  const source = metrics && typeof metrics === "object" ? metrics : {};
+
+  return {
+    totalClicks: Math.max(0, Number(source.totalClicks || 0)),
+    uniqueVisitors: Math.max(0, Number(source.uniqueVisitors || 0)),
+    attributedOrders: Math.max(0, Number(source.attributedOrders || 0)),
+    earnedOrders: Math.max(0, Number(source.earnedOrders || 0)),
+    voidedOrders: Math.max(0, Number(source.voidedOrders || 0)),
+    earnedRevenueCents: Math.max(0, Number(source.earnedRevenueCents || 0)),
+    earnedCommissionCents: Math.max(
+      0,
+      Number(source.earnedCommissionCents || 0)
+    ),
+    conversionRateBps: Math.max(0, Number(source.conversionRateBps || 0)),
+  };
+}
+
+function normalizeAnalyticsReport(report) {
+  const source = report && typeof report === "object" ? report : {};
+  const normalizeRows = (rows, extra = () => ({})) =>
+    (Array.isArray(rows) ? rows : [])
+      .filter((row) => row && typeof row === "object")
+      .map((row) => ({
+        ...row,
+        ...extra(row),
+        ...normalizeAnalyticsMetrics(row),
+      }));
+
+  return {
+    ...EMPTY_ANALYTICS_REPORT,
+    ...source,
+    period: {
+      ...EMPTY_ANALYTICS_REPORT.period,
+      ...(source.period || {}),
+      key: String(source.period?.key || "30"),
+      label: String(source.period?.label || "Last 30 Days"),
+    },
+    summary: normalizeAnalyticsMetrics(source.summary),
+    byCampaign: normalizeRows(source.byCampaign, (row) => ({
+      campaignSlug: String(row.campaignSlug || "").toLowerCase(),
+      campaignTitle: String(row.campaignTitle || "General Referral Link"),
+    })).sort(
+      (left, right) =>
+        right.totalClicks - left.totalClicks ||
+        left.campaignTitle.localeCompare(right.campaignTitle)
+    ),
+    byChannel: normalizeRows(source.byChannel, (row) => ({
+      channel: String(row.channel || "untracked").toLowerCase(),
+    })).sort(
+      (left, right) =>
+        right.totalClicks - left.totalClicks ||
+        left.channel.localeCompare(right.channel)
+    ),
+    daily: normalizeRows(source.daily, (row) => ({
+      day: String(row.day || ""),
+    })).sort((left, right) => left.day.localeCompare(right.day)),
+  };
+}
+
+function formatAnalyticsChannel(value) {
+  return ({
+    general: "General Link",
+    qr: "QR Code",
+    facebook: "Facebook",
+    instagram: "Instagram",
+    tiktok: "TikTok",
+    sms: "Text Message",
+    email: "Email",
+    other: "Other",
+    untracked: "Untracked",
+  })[String(value || "untracked").toLowerCase()] || String(value || "Other");
+}
+
+function formatAnalyticsDate(value) {
+  if (!value) return "Unavailable";
+
+  const date = new Date(`${value}T12:00:00`);
+
+  return Number.isNaN(date.getTime())
+    ? String(value)
+    : date.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
 }
 
 function formatPayoutType(value) {
@@ -238,20 +365,22 @@ async function readApiJson(response) {
   return result;
 }
 
-function buildReferralLink(code) {
+function buildReferralLink(code, channel = "general") {
   if (!code || typeof window === "undefined") return "";
 
-  return `${window.location.origin}/checkout?ref=${encodeURIComponent(code)}`;
+  const url = new URL("/r", window.location.origin);
+  url.searchParams.set("ref", code);
+  url.searchParams.set("channel", channel || "general");
+  return url.toString();
 }
 
-
-function buildCampaignReferralLink(code, campaign) {
+function buildCampaignReferralLink(code, campaign, channel = "general") {
   if (!code || !campaign?.slug || typeof window === "undefined") return "";
 
-  const destination = campaign.destinationPath || "/checkout";
-  const url = new URL(destination, window.location.origin);
+  const url = new URL("/r", window.location.origin);
   url.searchParams.set("ref", code);
   url.searchParams.set("campaign", campaign.slug);
+  url.searchParams.set("channel", channel || "general");
   return url.toString();
 }
 
@@ -331,6 +460,10 @@ function PartnerApplication({
   const [campaigns, setCampaigns] = useState([]);
   const [isCampaignsLoading, setIsCampaignsLoading] = useState(false);
   const [campaignError, setCampaignError] = useState("");
+  const [analyticsPeriod, setAnalyticsPeriod] = useState("30");
+  const [analytics, setAnalytics] = useState(EMPTY_ANALYTICS_REPORT);
+  const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -432,6 +565,38 @@ function PartnerApplication({
       );
     } finally {
       setIsCampaignsLoading(false);
+    }
+  }
+
+  async function loadAnalytics(period = analyticsPeriod) {
+    if (!isApproved && !isSuspended) {
+      setAnalytics(EMPTY_ANALYTICS_REPORT);
+      return;
+    }
+
+    setIsAnalyticsLoading(true);
+    setAnalyticsError("");
+
+    try {
+      const response = await fetch(
+        `/api/partner/analytics?period=${encodeURIComponent(period)}`,
+        {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          credentials: "same-origin",
+          cache: "no-store",
+        }
+      );
+
+      const result = await readApiJson(response);
+      setApplication((current) => result.application || current);
+      setAnalytics(normalizeAnalyticsReport(result.analytics));
+    } catch (error) {
+      setAnalyticsError(
+        error.message || "Referral analytics could not be loaded."
+      );
+    } finally {
+      setIsAnalyticsLoading(false);
     }
   }
 
@@ -576,6 +741,15 @@ function PartnerApplication({
 
     loadCampaigns();
   }, [isApproved]);
+
+  useEffect(() => {
+    if (!isApproved && !isSuspended) {
+      setAnalytics(EMPTY_ANALYTICS_REPORT);
+      return;
+    }
+
+    loadAnalytics(analyticsPeriod);
+  }, [isApproved, isSuspended, analyticsPeriod]);
 
   useEffect(() => {
     if (lockedApplication) return undefined;
@@ -936,6 +1110,202 @@ function PartnerApplication({
                 The signed-in partner account cannot use its own code. Referral
                 attribution credits the partner only and leaves the customer subtotal unchanged.
               </span>
+            </div>
+          </section>
+
+          <section className="partner-analytics-panel">
+            <div className="partner-section-heading">
+              <div>
+                <p className="eyebrow">REFERRAL ANALYTICS</p>
+                <h2>Clicks, Visitors And Conversion</h2>
+                <p className="partner-analytics-intro">
+                  See how your general link, campaign links and QR codes perform.
+                  Unique visitors use anonymous first-party IDs; customer IP addresses
+                  are not stored.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => loadAnalytics(analyticsPeriod)}
+                disabled={isAnalyticsLoading}
+              >
+                {isAnalyticsLoading ? "Refreshing..." : "Refresh Analytics"}
+              </button>
+            </div>
+
+            <div
+              className="partner-analytics-period-tabs"
+              role="tablist"
+              aria-label="Referral analytics period"
+            >
+              {ANALYTICS_PERIOD_OPTIONS.map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={analyticsPeriod === value ? "active" : ""}
+                  onClick={() => setAnalyticsPeriod(value)}
+                  disabled={isAnalyticsLoading}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {analyticsError && (
+              <div className="partner-error" role="alert">
+                {analyticsError}
+              </div>
+            )}
+
+            <section className="partner-analytics-stats">
+              <MetricCard
+                label="Total Clicks"
+                value={analytics.summary.totalClicks.toLocaleString("en-US")}
+                detail="Every tracked link opening"
+              />
+              <MetricCard
+                label="Unique Visitors"
+                value={analytics.summary.uniqueVisitors.toLocaleString("en-US")}
+                detail="Anonymous first-party visitors"
+              />
+              <MetricCard
+                label="Attributed Orders"
+                value={analytics.summary.attributedOrders.toLocaleString("en-US")}
+                detail={`${analytics.summary.earnedOrders} earned · ${analytics.summary.voidedOrders} voided`}
+              />
+              <MetricCard
+                label="Conversion Rate"
+                value={formatPercentFromBasisPoints(
+                  analytics.summary.conversionRateBps
+                )}
+                detail="Attributed orders per unique visitor"
+              />
+              <MetricCard
+                label="Earned Revenue"
+                value={formatMoneyFromCents(
+                  analytics.summary.earnedRevenueCents
+                )}
+                detail="Paid or later referral statuses"
+              />
+              <MetricCard
+                label="Earned Commission"
+                value={formatMoneyFromCents(
+                  analytics.summary.earnedCommissionCents
+                )}
+                detail={analytics.period.label || "Selected reporting period"}
+              />
+            </section>
+
+            <div className="partner-analytics-grid">
+              <AnalyticsTable
+                eyebrow="CAMPAIGN PERFORMANCE"
+                title="Campaigns And General Links"
+                emptyText="Campaign results will appear after your tracked links receive traffic."
+                rows={analytics.byCampaign}
+                columns={[
+                  {
+                    label: "Campaign",
+                    render: (row) => (
+                      <span>
+                        <strong>{row.campaignTitle || "General Referral Link"}</strong>
+                        <small>{row.campaignSlug || "general-referral-link"}</small>
+                      </span>
+                    ),
+                  },
+                  {
+                    label: "Clicks",
+                    render: (row) => row.totalClicks.toLocaleString("en-US"),
+                  },
+                  {
+                    label: "Visitors",
+                    render: (row) => row.uniqueVisitors.toLocaleString("en-US"),
+                  },
+                  {
+                    label: "Orders",
+                    render: (row) => row.attributedOrders.toLocaleString("en-US"),
+                  },
+                  {
+                    label: "Conversion",
+                    render: (row) =>
+                      formatPercentFromBasisPoints(row.conversionRateBps),
+                  },
+                  {
+                    label: "Revenue",
+                    render: (row) => formatMoneyFromCents(row.earnedRevenueCents),
+                  },
+                ]}
+              />
+
+              <AnalyticsTable
+                eyebrow="CHANNEL PERFORMANCE"
+                title="Where Your Traffic Came From"
+                emptyText="Channel results will appear after platform links or QR codes are opened."
+                rows={analytics.byChannel}
+                columns={[
+                  {
+                    label: "Channel",
+                    render: (row) => formatAnalyticsChannel(row.channel),
+                  },
+                  {
+                    label: "Clicks",
+                    render: (row) => row.totalClicks.toLocaleString("en-US"),
+                  },
+                  {
+                    label: "Visitors",
+                    render: (row) => row.uniqueVisitors.toLocaleString("en-US"),
+                  },
+                  {
+                    label: "Orders",
+                    render: (row) => row.attributedOrders.toLocaleString("en-US"),
+                  },
+                  {
+                    label: "Conversion",
+                    render: (row) =>
+                      formatPercentFromBasisPoints(row.conversionRateBps),
+                  },
+                  {
+                    label: "Commission",
+                    render: (row) =>
+                      formatMoneyFromCents(row.earnedCommissionCents),
+                  },
+                ]}
+              />
+
+              <AnalyticsTable
+                eyebrow="DAILY TREND"
+                title="Traffic And Orders By Day"
+                emptyText="Daily analytics will appear after the first tracked visit."
+                rows={analytics.daily}
+                columns={[
+                  {
+                    label: "Date",
+                    render: (row) => formatAnalyticsDate(row.day),
+                  },
+                  {
+                    label: "Clicks",
+                    render: (row) => row.totalClicks.toLocaleString("en-US"),
+                  },
+                  {
+                    label: "Visitors",
+                    render: (row) => row.uniqueVisitors.toLocaleString("en-US"),
+                  },
+                  {
+                    label: "Orders",
+                    render: (row) => row.attributedOrders.toLocaleString("en-US"),
+                  },
+                  {
+                    label: "Conversion",
+                    render: (row) =>
+                      formatPercentFromBasisPoints(row.conversionRateBps),
+                  },
+                  {
+                    label: "Revenue",
+                    render: (row) => formatMoneyFromCents(row.earnedRevenueCents),
+                  },
+                ]}
+              />
             </div>
           </section>
 
@@ -1817,8 +2187,17 @@ function CampaignCard({ campaign, partnerCode }) {
   );
   const [copyMessage, setCopyMessage] = useState("");
   const [qrDataUrl, setQrDataUrl] = useState("");
+  const selectedChannel = CAMPAIGN_FIELD_CHANNELS[selectedField] || "general";
   const referralLink = useMemo(
-    () => buildCampaignReferralLink(partnerCode, campaign),
+    () => buildCampaignReferralLink(partnerCode, campaign, selectedChannel),
+    [partnerCode, campaign, selectedChannel]
+  );
+  const generalReferralLink = useMemo(
+    () => buildCampaignReferralLink(partnerCode, campaign, "general"),
+    [partnerCode, campaign]
+  );
+  const qrReferralLink = useMemo(
+    () => buildCampaignReferralLink(partnerCode, campaign, "qr"),
     [partnerCode, campaign]
   );
   const personalizedCopy = useMemo(
@@ -1837,12 +2216,12 @@ function CampaignCard({ campaign, partnerCode }) {
   useEffect(() => {
     let active = true;
 
-    if (!referralLink) {
+    if (!qrReferralLink) {
       setQrDataUrl("");
       return undefined;
     }
 
-    QRCode.toDataURL(referralLink, {
+    QRCode.toDataURL(qrReferralLink, {
       width: 320,
       margin: 2,
       errorCorrectionLevel: "M",
@@ -1857,7 +2236,7 @@ function CampaignCard({ campaign, partnerCode }) {
     return () => {
       active = false;
     };
-  }, [referralLink]);
+  }, [qrReferralLink]);
 
   async function handleCopy(value, successText) {
     setCopyMessage("");
@@ -1926,7 +2305,7 @@ function CampaignCard({ campaign, partnerCode }) {
 
             <a
               className="secondary-btn partner-anchor-button"
-              href={referralLink}
+              href={generalReferralLink}
               target="_blank"
               rel="noreferrer"
             >
@@ -2027,6 +2406,49 @@ function CampaignCard({ campaign, partnerCode }) {
         </div>
       )}
     </article>
+  );
+}
+
+function AnalyticsTable({ eyebrow, title, rows, columns, emptyText }) {
+  return (
+    <section className="partner-analytics-table-card">
+      <div className="partner-analytics-table-heading">
+        <div>
+          <p className="eyebrow">{eyebrow}</p>
+          <h3>{title}</h3>
+        </div>
+        <span>{rows.length} row(s)</span>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="partner-analytics-empty">{emptyText}</div>
+      ) : (
+        <div className="partner-analytics-table-wrap">
+          <table className="partner-analytics-table">
+            <thead>
+              <tr>
+                {columns.map((column) => (
+                  <th key={column.label}>{column.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr
+                  key={`${title}-${
+                    row.campaignSlug || row.channel || row.day || rowIndex
+                  }`}
+                >
+                  {columns.map((column) => (
+                    <td key={column.label}>{column.render(row)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -3117,6 +3539,132 @@ button:disabled {
   white-space: pre-wrap;
 }
 
+.partner-analytics-panel {
+  padding: 28px;
+  border: 1px solid rgba(61, 165, 255, 0.3);
+  border-radius: 24px;
+  background: linear-gradient(145deg, rgba(61, 165, 255, 0.08), rgba(0, 0, 0, 0.2));
+}
+
+.partner-analytics-intro {
+  max-width: 820px;
+  color: #b6c0c8;
+  line-height: 1.65;
+}
+
+.partner-analytics-period-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.partner-analytics-period-tabs button {
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #b7c1c8;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.partner-analytics-period-tabs button.active {
+  border-color: rgba(61, 165, 255, 0.55);
+  background: rgba(61, 165, 255, 0.18);
+  color: #d9efff;
+}
+
+.partner-analytics-period-tabs button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.partner-analytics-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.partner-analytics-grid {
+  display: grid;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.partner-analytics-table-card {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 17px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.partner-analytics-table-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px;
+  flex-wrap: wrap;
+}
+
+.partner-analytics-table-heading h3 {
+  margin: 4px 0 0;
+  font-size: 24px;
+}
+
+.partner-analytics-table-heading > span {
+  color: #8f9aa2;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.partner-analytics-table-wrap {
+  overflow-x: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.partner-analytics-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+
+.partner-analytics-table th,
+.partner-analytics-table td {
+  padding: 13px 15px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  text-align: left;
+  vertical-align: top;
+}
+
+.partner-analytics-table th {
+  color: #9ed8ff;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 11px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.partner-analytics-table td {
+  color: #e8edf0;
+}
+
+.partner-analytics-table td small {
+  display: block;
+  margin-top: 4px;
+  color: #8f9aa2;
+}
+
+.partner-analytics-empty {
+  padding: 30px 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  color: #aab5bd;
+  text-align: center;
+  line-height: 1.55;
+}
+
 @media (max-width: 960px) {
   .partner-campaign-content-grid {
     grid-template-columns: 1fr;
@@ -3133,7 +3681,8 @@ button:disabled {
   .partner-dashboard-grid,
   .partner-payout-progress-grid,
   .partner-own-rank-metrics,
-  .partner-leaderboard-rule-card {
+  .partner-leaderboard-rule-card,
+  .partner-analytics-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -3144,6 +3693,7 @@ button:disabled {
 
 @media (max-width: 680px) {
   .partner-marketing-panel,
+  .partner-analytics-panel,
   .partner-campaign-card {
     padding: 18px;
   }
@@ -3168,7 +3718,8 @@ button:disabled {
   .partner-payout-status-panel,
   .partner-payout-history-panel,
   .partner-leaderboard-panel,
-  .partner-reward-history-panel {
+  .partner-reward-history-panel,
+  .partner-analytics-panel {
     padding: 20px;
     border-radius: 19px;
   }
@@ -3179,6 +3730,7 @@ button:disabled {
   .partner-payout-progress-grid,
   .partner-own-rank-metrics,
   .partner-leaderboard-rule-card,
+  .partner-analytics-stats,
   .partner-link-row {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -3188,11 +3740,13 @@ button:disabled {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .partner-period-tabs {
+  .partner-period-tabs,
+  .partner-analytics-period-tabs {
     width: 100%;
   }
 
-  .partner-period-tabs button {
+  .partner-period-tabs button,
+  .partner-analytics-period-tabs button {
     flex: 1;
   }
 
