@@ -1,4 +1,4 @@
-import {
+﻿import {
   useCallback,
   useEffect,
   useMemo,
@@ -329,7 +329,7 @@ function getReferralCodeError(code) {
   }
 
   if (code.length < 4 || code.length > 20) {
-    return "Referral codes must contain 4–20 characters.";
+    return "Referral codes must contain 4â€“20 characters.";
   }
 
   if (!/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(code)) {
@@ -1163,7 +1163,7 @@ function Checkout({
                 >
                   <strong>{item.name}</strong>
                   <span>
-                    {item.codeName} · {item.strength}
+                    {item.codeName} Â· {item.strength}
                   </span>
                 </div>
               ))}
@@ -1399,7 +1399,7 @@ function Checkout({
                         />
 
                         <span className="checkout-payment-check">
-                          ✓
+                          âœ“
                         </span>
 
                         <img
@@ -1426,7 +1426,7 @@ function Checkout({
                 <p className="eyebrow">
                   PARTNER REFERRAL
                 </p>
-                <h2>Referral Code — Optional</h2>
+                <h2>Referral Code â€” Optional</h2>
 
                 <p className="checkout-section-copy">
                   Enter an approved partner code to
@@ -1498,12 +1498,9 @@ function Checkout({
                 )}
 
                 <div className="checkout-referral-note">
-                  <strong>No self-referrals</strong>
-
+                  <strong>Partner own-code orders</strong>
                   <span>
-                    Partners cannot use their own code
-                    on an order placed through the same
-                    customer account.
+                    Partners may use their own code for tier progression. Own-code orders earn no commission, discount, payout credit, leaderboard credit, or reward credit.
                   </span>
                 </div>
               </section>
@@ -1598,7 +1595,7 @@ function Checkout({
                         <strong>{item.name}</strong>
 
                         <p>
-                          {item.codeName} ·{" "}
+                          {item.codeName} Â·{" "}
                           {item.strength}
                         </p>
 
@@ -1660,7 +1657,7 @@ function Checkout({
 
               <div className="checkout-final-total-note">
                 <strong>
-                  This is an order request—not a payment.
+                  This is an order requestâ€”not a payment.
                 </strong>
 
                 <span>

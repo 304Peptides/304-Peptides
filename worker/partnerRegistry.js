@@ -187,6 +187,8 @@ export class PartnerRegistry extends DurableObject {
         order_subtotal_cents INTEGER NOT NULL,
         commission_rate_bps INTEGER NOT NULL,
         commission_amount_cents INTEGER NOT NULL,
+        is_self_use INTEGER NOT NULL DEFAULT 0,
+        tier_progress_eligible INTEGER NOT NULL DEFAULT 1,
         referral_status TEXT NOT NULL,
         order_status TEXT NOT NULL,
         created_at TEXT NOT NULL,
@@ -346,6 +348,7 @@ export class PartnerRegistry extends DurableObject {
 
     this.ensureReferralCampaignColumns();
     this.ensureReferralAnalyticsColumns();
+    this.ensureReferralSelfUseColumns();
 
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS partner_click_events (
@@ -423,6 +426,25 @@ export class PartnerRegistry extends DurableObject {
       ["analytics_visitor_id", "TEXT NOT NULL DEFAULT ''"],
       ["analytics_channel", "TEXT NOT NULL DEFAULT ''"],
       ["analytics_click_id", "TEXT NOT NULL DEFAULT ''"],
+    ]) {
+      if (!names.has(name)) {
+        this.sql.exec(
+          `ALTER TABLE partner_referrals ADD COLUMN ${name} ${definition}`
+        );
+      }
+    }
+  }
+
+  ensureReferralSelfUseColumns() {
+    const columns = this.sql
+      .exec("PRAGMA table_info(partner_referrals)")
+      .toArray();
+
+    const names = new Set(columns.map((column) => column.name));
+
+    for (const [name, definition] of [
+      ["is_self_use", "INTEGER NOT NULL DEFAULT 0"],
+      ["tier_progress_eligible", "INTEGER NOT NULL DEFAULT 1"],
     ]) {
       if (!names.has(name)) {
         this.sql.exec(
@@ -805,15 +827,7 @@ export class PartnerRegistry extends DurableObject {
       });
     }
 
-    if (partner.accountId === customerAccountId) {
-      return jsonResponse({
-        success: true,
-        valid: false,
-        code,
-        reason: "self_referral",
-        message: "You cannot use your own partner code on your order.",
-      });
-    }
+    const selfUse = partner.accountId === customerAccountId;
 
     const campaign = submittedCampaignSlug
       ? this.findActiveCampaignBySlug(submittedCampaignSlug)
@@ -823,9 +837,13 @@ export class PartnerRegistry extends DurableObject {
       success: true,
       valid: true,
       code: partner.code,
-      reason: "active",
-      message: "Referral code applied. The order subtotal is unchanged.",
-      commissionRateBps: partner.commissionRateBps,
+      reason: selfUse ? "self_use" : "active",
+      message: selfUse
+        ? "Your partner code was applied for tier progression only. This order earns no commission."
+        : "Referral code applied. The order subtotal is unchanged.",
+      commissionRateBps: selfUse ? 0 : partner.commissionRateBps,
+      selfUse,
+      tierProgressEligible: true,
       campaignRequested: Boolean(submittedCampaignSlug),
       campaignValid: Boolean(campaign),
       campaign: campaign ? toCustomerCampaign(campaign) : null,
@@ -869,12 +887,8 @@ export class PartnerRegistry extends DurableObject {
       throw new RegistryError("That referral code is not active.", 409);
     }
 
-    if (partner.accountId === customerAccountId) {
-      throw new RegistryError(
-        "A partner cannot receive credit for their own order.",
-        409
-      );
-    }
+    const isSelfUse = partner.accountId === customerAccountId;
+    const tierProgressEligible = true;
 
     const campaign = campaignSlug
       ? this.findActiveCampaignBySlug(campaignSlug)
@@ -882,9 +896,14 @@ export class PartnerRegistry extends DurableObject {
 
     const now = new Date().toISOString();
     const referralStatus = classifyReferralStatus(orderStatus);
-    const commissionAmountCents = Math.round(
-      (orderSubtotalCents * partner.commissionRateBps) / 10000
-    );
+    const capturedCommissionRateBps = isSelfUse
+      ? 0
+      : partner.commissionRateBps;
+    const commissionAmountCents = isSelfUse
+      ? 0
+      : Math.round(
+          (orderSubtotalCents * capturedCommissionRateBps) / 10000
+        );
 
     let savedReferral;
 
@@ -940,6 +959,8 @@ export class PartnerRegistry extends DurableObject {
             order_subtotal_cents,
             commission_rate_bps,
             commission_amount_cents,
+            is_self_use,
+            tier_progress_eligible,
             referral_status,
             order_status,
             created_at,
@@ -952,15 +973,17 @@ export class PartnerRegistry extends DurableObject {
             analytics_visitor_id,
             analytics_channel,
             analytics_click_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           orderId,
           partner.accountId,
           partner.code,
           customerAccountId,
           customerEmail,
           orderSubtotalCents,
-          partner.commissionRateBps,
+          capturedCommissionRateBps,
           commissionAmountCents,
+          isSelfUse ? 1 : 0,
+          tierProgressEligible ? 1 : 0,
           referralStatus,
           orderStatus,
           now,
@@ -983,7 +1006,9 @@ export class PartnerRegistry extends DurableObject {
       {
         success: true,
         referral: savedReferral,
-        message: "The referral was attached to the order.",
+        message: isSelfUse
+          ? "The order was recorded as self-use tier credit with no commission."
+          : "The referral was attached to the order.",
       },
       201
     );
@@ -1194,6 +1219,7 @@ export class PartnerRegistry extends DurableObject {
       accountId,
       partnerCode,
       campaignSlug,
+      extraConditions: ["is_self_use = 0"],
     });
 
     const clickSummary = this.sql
@@ -1429,19 +1455,21 @@ export class PartnerRegistry extends DurableObject {
     const summaryRows = this.sql
       .exec(
         `SELECT
-           COUNT(*) AS total_count,
-           SUM(CASE WHEN r.referral_status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
-           SUM(CASE WHEN r.referral_status = 'earned' THEN 1 ELSE 0 END) AS earned_count,
-           SUM(CASE WHEN r.referral_status = 'voided' THEN 1 ELSE 0 END) AS voided_count,
-           SUM(CASE WHEN r.referral_status = 'pending' THEN r.commission_amount_cents ELSE 0 END) AS pending_commission_cents,
-           SUM(CASE WHEN r.referral_status = 'earned' THEN r.commission_amount_cents ELSE 0 END) AS earned_commission_cents,
-           SUM(CASE WHEN r.referral_status = 'voided' THEN r.commission_amount_cents ELSE 0 END) AS voided_commission_cents,
-           SUM(CASE WHEN r.referral_status = 'earned' THEN r.order_subtotal_cents ELSE 0 END) AS earned_revenue_cents,
-           SUM(CASE WHEN r.referral_status = 'earned' AND pi.order_id IS NULL THEN 1 ELSE 0 END) AS available_referral_count,
-           SUM(CASE WHEN r.referral_status = 'earned' AND pi.order_id IS NULL THEN r.commission_amount_cents ELSE 0 END) AS available_commission_cents,
-           SUM(CASE WHEN pi.order_id IS NOT NULL THEN 1 ELSE 0 END) AS paid_referral_count,
-           SUM(CASE WHEN pi.order_id IS NOT NULL THEN pi.commission_amount_cents ELSE 0 END) AS paid_commission_cents,
-           SUM(CASE WHEN r.referral_status = 'voided' AND pi.order_id IS NOT NULL THEN 1 ELSE 0 END) AS adjustment_required_count
+           SUM(CASE WHEN r.is_self_use = 0 THEN 1 ELSE 0 END) AS total_count,
+           SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
+           SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'earned' THEN 1 ELSE 0 END) AS earned_count,
+           SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'voided' THEN 1 ELSE 0 END) AS voided_count,
+           SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'pending' THEN r.commission_amount_cents ELSE 0 END) AS pending_commission_cents,
+           SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'earned' THEN r.commission_amount_cents ELSE 0 END) AS earned_commission_cents,
+           SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'voided' THEN r.commission_amount_cents ELSE 0 END) AS voided_commission_cents,
+           SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'earned' THEN r.order_subtotal_cents ELSE 0 END) AS earned_revenue_cents,
+           SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'earned' AND pi.order_id IS NULL THEN 1 ELSE 0 END) AS available_referral_count,
+           SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'earned' AND pi.order_id IS NULL THEN r.commission_amount_cents ELSE 0 END) AS available_commission_cents,
+           SUM(CASE WHEN r.is_self_use = 0 AND pi.order_id IS NOT NULL THEN 1 ELSE 0 END) AS paid_referral_count,
+           SUM(CASE WHEN r.is_self_use = 0 AND pi.order_id IS NOT NULL THEN pi.commission_amount_cents ELSE 0 END) AS paid_commission_cents,
+           SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'voided' AND pi.order_id IS NOT NULL THEN 1 ELSE 0 END) AS adjustment_required_count,
+           SUM(CASE WHEN r.tier_progress_eligible = 1 AND r.referral_status = 'earned' THEN 1 ELSE 0 END) AS tier_progress_order_count,
+           SUM(CASE WHEN r.is_self_use = 1 AND r.tier_progress_eligible = 1 AND r.referral_status = 'earned' THEN 1 ELSE 0 END) AS self_use_tier_order_count
          FROM partner_referrals r
          LEFT JOIN partner_payout_items pi
            ON pi.order_id = r.order_id
@@ -1876,6 +1904,8 @@ export class PartnerRegistry extends DurableObject {
            ON pi.order_id = r.order_id
          WHERE r.partner_account_id = ?
            AND r.referral_status = 'earned'
+           AND r.is_self_use = 0
+           AND r.commission_amount_cents > 0
            AND pi.order_id IS NULL
          ORDER BY r.earned_at ASC, r.created_at ASC`,
         accountId
@@ -1935,6 +1965,8 @@ export class PartnerRegistry extends DurableObject {
             !currentReferral ||
             currentReferral.partnerAccountId !== accountId ||
             currentReferral.referralStatus !== "earned" ||
+            currentReferral.isSelfUse ||
+            currentReferral.commissionAmountCents <= 0 ||
             existingItem
           ) {
             throw new RegistryError(
@@ -2601,6 +2633,7 @@ export class PartnerRegistry extends DurableObject {
              FROM partner_campaigns c
              LEFT JOIN partner_referrals r
                ON r.campaign_id = c.campaign_id
+              AND r.is_self_use = 0
              WHERE c.status = 'published'
                AND (c.starts_at = '' OR c.starts_at <= ?)
                AND (c.ends_at = '' OR c.ends_at > ?)
@@ -2622,6 +2655,7 @@ export class PartnerRegistry extends DurableObject {
              FROM partner_campaigns c
              LEFT JOIN partner_referrals r
                ON r.campaign_id = c.campaign_id
+              AND r.is_self_use = 0
              GROUP BY c.campaign_id
              ORDER BY
                CASE c.status
@@ -2650,6 +2684,7 @@ export class PartnerRegistry extends DurableObject {
          FROM partner_campaigns c
          LEFT JOIN partner_referrals r
            ON r.campaign_id = c.campaign_id
+          AND r.is_self_use = 0
          WHERE c.campaign_id = ?
          GROUP BY c.campaign_id
          LIMIT 1`,
@@ -2671,6 +2706,7 @@ export class PartnerRegistry extends DurableObject {
          FROM partner_campaigns c
          LEFT JOIN partner_referrals r
            ON r.campaign_id = c.campaign_id
+          AND r.is_self_use = 0
          WHERE c.slug = ? COLLATE NOCASE
          GROUP BY c.campaign_id
          LIMIT 1`,
@@ -2711,6 +2747,7 @@ export class PartnerRegistry extends DurableObject {
          INNER JOIN partner_applications a
            ON a.account_id = r.partner_account_id
          WHERE r.referral_status = 'earned'
+           AND r.is_self_use = 0
            AND r.earned_at >= ?
            AND r.earned_at < ?
            AND a.status = 'approved'
@@ -3823,6 +3860,7 @@ function buildAnalyticsWhere({
   accountId = "",
   partnerCode = "",
   campaignSlug = "",
+  extraConditions = [],
 }) {
   const conditions = [];
   const params = [];
@@ -3845,6 +3883,12 @@ function buildAnalyticsWhere({
   if (campaignSlug) {
     conditions.push(`${campaignColumn} = ? COLLATE NOCASE`);
     params.push(campaignSlug);
+  }
+
+  for (const condition of extraConditions) {
+    if (condition) {
+      conditions.push(condition);
+    }
   }
 
   return {
@@ -4129,6 +4173,10 @@ function mapReferralRow(row) {
     orderSubtotalCents: Number(row.order_subtotal_cents || 0),
     commissionRateBps: Number(row.commission_rate_bps || 0),
     commissionAmountCents: Number(row.commission_amount_cents || 0),
+    isSelfUse: Boolean(Number(row.is_self_use || 0)),
+    tierProgressEligible: Boolean(
+      Number(row.tier_progress_eligible ?? 1)
+    ),
     referralStatus: REFERRAL_STATUSES.has(referralStatus)
       ? referralStatus
       : "pending",
@@ -4175,6 +4223,8 @@ function mapCustomerReferralRow(row) {
     orderSubtotalCents: referral.orderSubtotalCents,
     commissionRateBps: referral.commissionRateBps,
     commissionAmountCents: referral.commissionAmountCents,
+    isSelfUse: referral.isSelfUse,
+    tierProgressEligible: referral.tierProgressEligible,
     referralStatus: referral.referralStatus,
     commissionStatus: referral.commissionStatus,
     orderStatus: referral.orderStatus,
@@ -4221,6 +4271,8 @@ function mapSummaryRow(row) {
     paidReferralCount: Number(row.paid_referral_count || 0),
     paidCommissionCents: Number(row.paid_commission_cents || 0),
     adjustmentRequiredCount: Number(row.adjustment_required_count || 0),
+    tierProgressOrderCount: Number(row.tier_progress_order_count || 0),
+    selfUseTierOrderCount: Number(row.self_use_tier_order_count || 0),
   };
 }
 
@@ -4239,6 +4291,8 @@ function emptyReferralSummary() {
     paidReferralCount: 0,
     paidCommissionCents: 0,
     adjustmentRequiredCount: 0,
+    tierProgressOrderCount: 0,
+    selfUseTierOrderCount: 0,
   };
 }
 

@@ -1,4 +1,4 @@
-import coreWorker from "./core.js";
+﻿import coreWorker from "./core.js";
 
 export { PartnerRegistry } from "./partnerRegistry.js";
 
@@ -867,6 +867,8 @@ async function handleReferralValidationRequest(request, env, url) {
           : "That referral code is not active."),
       discountAmount: 0,
       changesOrderTotal: false,
+      selfUse: Boolean(result.selfUse),
+      tierProgressEligible: Boolean(result.tierProgressEligible),
       campaignRequested: Boolean(result.campaignRequested),
       campaignValid: Boolean(result.campaignValid),
       campaign: toCustomerCampaignRecord(result.campaign),
@@ -1712,6 +1714,9 @@ async function handleOrderWithReferral(request, env, context) {
 
       validatedReferral = {
         code: cleanText(result.code || code, MAX_REFERRAL_CODE_LENGTH),
+        selfUse: Boolean(result.selfUse),
+        tierProgressEligible: Boolean(result.tierProgressEligible),
+        validationMessage: cleanText(result.message, 500),
         campaign:
           result.campaignValid && result.campaign
             ? toCustomerCampaignRecord(result.campaign)
@@ -1820,8 +1825,11 @@ async function handleOrderWithReferral(request, env, context) {
           success: true,
           code: referral.partnerCode,
           status: referral.referralStatus,
-          message:
-            "Referral code recorded. The order subtotal was not changed.",
+          selfUse: Boolean(referral.isSelfUse),
+          tierProgressEligible: Boolean(referral.tierProgressEligible),
+          message: referral.isSelfUse
+            ? "Your partner code was recorded for tier progression only. This order earns no commission."
+            : "Referral code recorded. The order subtotal was not changed.",
           changesOrderTotal: false,
           discountAmount: 0,
           campaign: referral.campaignSlug
@@ -2072,6 +2080,8 @@ function toCustomerReferralSummary(summary) {
     paidReferralCount: Number(source.paidReferralCount || 0),
     paidCommissionCents: Number(source.paidCommissionCents || 0),
     adjustmentRequiredCount: Number(source.adjustmentRequiredCount || 0),
+    tierProgressOrderCount: Number(source.tierProgressOrderCount || 0),
+    selfUseTierOrderCount: Number(source.selfUseTierOrderCount || 0),
     minimumPayoutCents: Number(source.minimumPayoutCents || 0),
     payoutEligible: Boolean(source.payoutEligible),
     amountUntilEligibleCents: Number(source.amountUntilEligibleCents || 0),
@@ -2089,6 +2099,8 @@ function toCustomerReferralRecord(referral) {
     orderSubtotalCents: Number(referral.orderSubtotalCents || 0),
     commissionRateBps: Number(referral.commissionRateBps || 0),
     commissionAmountCents: Number(referral.commissionAmountCents || 0),
+    isSelfUse: Boolean(referral.isSelfUse),
+    tierProgressEligible: Boolean(referral.tierProgressEligible),
     referralStatus: cleanText(referral.referralStatus || "pending", 30),
     commissionStatus: cleanText(
       referral.commissionStatus || referral.referralStatus || "pending",
@@ -2647,7 +2659,7 @@ function validateCampaignSlug(value) {
 
   if (slug.length < 3 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
     throw new ApiRequestError(
-      "Campaign slugs must contain 3–60 lowercase letters, numbers, or single hyphens.",
+      "Campaign slugs must contain 3â€“60 lowercase letters, numbers, or single hyphens.",
       400
     );
   }
@@ -3148,7 +3160,7 @@ function validatePartnerCode(value) {
     code.length > MAX_PARTNER_CODE_LENGTH
   ) {
     throw new ApiRequestError(
-      `Partner codes must contain ${MIN_PARTNER_CODE_LENGTH}–${MAX_PARTNER_CODE_LENGTH} characters.`,
+      `Partner codes must contain ${MIN_PARTNER_CODE_LENGTH}â€“${MAX_PARTNER_CODE_LENGTH} characters.`,
       400
     );
   }

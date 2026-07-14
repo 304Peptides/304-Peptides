@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 
 const platformOptions = [
@@ -14,12 +14,12 @@ const platformOptions = [
 
 const audienceOptions = [
   "Under 500",
-  "500–1,999",
-  "2,000–4,999",
-  "5,000–9,999",
-  "10,000–24,999",
-  "25,000–49,999",
-  "50,000–99,999",
+  "500â€“1,999",
+  "2,000â€“4,999",
+  "5,000â€“9,999",
+  "10,000â€“24,999",
+  "25,000â€“49,999",
+  "50,000â€“99,999",
   "100,000+",
 ];
 
@@ -138,7 +138,7 @@ function normalizeCode(value) {
 
 function getLocalCodeError(code) {
   if (!code) return "Choose your affiliate code.";
-  if (code.length < 4 || code.length > 20) return "Use 4–20 characters.";
+  if (code.length < 4 || code.length > 20) return "Use 4â€“20 characters.";
   if (!/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(code)) {
     return "Use letters, numbers, and single hyphens only.";
   }
@@ -951,7 +951,7 @@ function PartnerApplication({
               className="secondary-btn"
               onClick={() => onNavigate("dashboard")}
             >
-              ← Research Hub
+              â† Research Hub
             </button>
 
             <StatusPill status={application.status} />
@@ -1009,6 +1009,12 @@ function PartnerApplication({
               label="Paid Commission"
               value={formatMoneyFromCents(summary.paidCommissionCents)}
               detail={`${summary.paidReferralCount} paid referral(s)`}
+            />
+
+            <MetricCard
+              label="Tier Progress Orders"
+              value={summary.tierProgressOrderCount || 0}
+              detail={`${summary.selfUseTierOrderCount || 0} own-code order(s)`}
             />
 
             <MetricCard
@@ -1105,10 +1111,10 @@ function PartnerApplication({
             )}
 
             <div className="partner-share-note">
-              <strong>No self-referrals or checkout discount</strong>
+              <strong>Own-code orders count toward tier progression</strong>
               <span>
-                The signed-in partner account cannot use its own code. Referral
-                attribution credits the partner only and leaves the customer subtotal unchanged.
+                You may use your own code. Own-code orders earn no commission,
+                customer discount, payout credit, leaderboard credit, or reward credit.
               </span>
             </div>
           </section>
@@ -1173,7 +1179,7 @@ function PartnerApplication({
               <MetricCard
                 label="Attributed Orders"
                 value={analytics.summary.attributedOrders.toLocaleString("en-US")}
-                detail={`${analytics.summary.earnedOrders} earned · ${analytics.summary.voidedOrders} voided`}
+                detail={`${analytics.summary.earnedOrders} earned Â· ${analytics.summary.voidedOrders} voided`}
               />
               <MetricCard
                 label="Conversion Rate"
@@ -1500,11 +1506,11 @@ function PartnerApplication({
                   <p>
                     {formatRewardType(leaderboardData.reward.rewardType)}
                     {leaderboardData.reward.rewardType !== "swag"
-                      ? ` — ${formatMoneyFromCents(
+                      ? ` â€” ${formatMoneyFromCents(
                           leaderboardData.reward.rewardAmountCents
                         )}`
                       : leaderboardData.reward.rewardDescription
-                      ? ` — ${leaderboardData.reward.rewardDescription}`
+                      ? ` â€” ${leaderboardData.reward.rewardDescription}`
                       : ""}
                   </p>
                 </div>
@@ -1544,7 +1550,7 @@ function PartnerApplication({
                         <span>{entry.partnerCode}</span>
                         <small>
                           {entry.referralCount} earned referral(s)
-                          {isCurrentPartner ? " · Your code" : ""}
+                          {isCurrentPartner ? " Â· Your code" : ""}
                         </small>
                       </div>
 
@@ -1719,6 +1725,15 @@ function PartnerApplication({
                             referral.campaignTitle ||
                             referral.campaignSlug ||
                             "Direct referral"
+                          }
+                        />
+
+                        <RecordBox
+                          label="Credit Type"
+                          value={
+                            referral.isSelfUse
+                              ? "Tier progression only"
+                              : "Commission referral"
                           }
                         />
 
@@ -1918,7 +1933,7 @@ function PartnerApplication({
             className="secondary-btn"
             onClick={() => onNavigate("dashboard")}
           >
-            ← Research Hub
+            â† Research Hub
           </button>
 
           <span className={eligibility?.eligible ? "partner-eligible" : "partner-ineligible"}>
@@ -1986,7 +2001,7 @@ function PartnerApplication({
                   </div>
 
                   <small>
-                    4–20 characters. Letters, numbers, and single hyphens only.
+                    4â€“20 characters. Letters, numbers, and single hyphens only.
                     Codes are not case-sensitive.
                   </small>
 
@@ -2026,7 +2041,7 @@ function PartnerApplication({
                   />
 
                   <label className="partner-field partner-full-field">
-                    <span>Profile or Page URL — Optional</span>
+                    <span>Profile or Page URL â€” Optional</span>
                     <input
                       name="profileUrl"
                       type="url"
@@ -2060,7 +2075,7 @@ function PartnerApplication({
                 </label>
 
                 <label className="partner-field">
-                  <span>Relevant Experience — Optional</span>
+                  <span>Relevant Experience â€” Optional</span>
                   <textarea
                     name="experience"
                     rows="4"
@@ -2156,17 +2171,17 @@ function PartnerApplication({
               </section>
 
               <section className="partner-sidebar-note">
-                <strong>No self-referrals</strong>
+                <strong>Partner own-code orders</strong>
                 <p>
-                  A partner cannot earn commission or customer discounts by using
-                  their own code.
+                  Partners may use their own code for tier progression. These orders
+                  earn no commission, discount, payout, leaderboard, or reward credit.
                 </p>
               </section>
 
               <section className="partner-sidebar-note">
                 <strong>For Research Use Only</strong>
                 <p>
-                  Partner content must describe products only within the site’s
+                  Partner content must describe products only within the siteâ€™s
                   research-use framework and must not promote human consumption.
                 </p>
               </section>
