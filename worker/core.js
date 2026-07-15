@@ -12,6 +12,14 @@ const MAX_DOCUMENT_NOTES_LENGTH = 2000;
 const MAX_ORDER_ADMIN_REQUEST_LENGTH = 10000;
 const MAX_ORDER_STATUS_LENGTH = 100;
 const MAX_ORDER_ADMIN_NOTES_LENGTH = 2000;
+const MAX_ORDER_WORKFLOW_REQUEST_LENGTH = 30000;
+const MAX_ORDER_PAYMENT_LINK_LENGTH = 2048;
+const MAX_ORDER_PAYMENT_DESTINATION_LENGTH = 300;
+const MAX_ORDER_PAYMENT_REFERENCE_LENGTH = 200;
+const MAX_ORDER_RESTOCK_NOTE_LENGTH = 1000;
+const MAX_ORDER_WORKFLOW_MESSAGE_LENGTH = 1000;
+const MAX_ORDER_AMOUNT_CENTS = 10000000;
+const ORDER_WORKFLOW_HISTORY_LIMIT = 100;
 
 const MAX_AUTH_REQUEST_LENGTH = 20000;
 const MAX_ACCOUNT_NAME_LENGTH = 100;
@@ -90,6 +98,19 @@ export default {
       )
     ) {
       return handleAdminDocumentsRequest(
+        request,
+        env,
+        url
+      );
+    }
+
+    if (
+      url.pathname ===
+        "/api/admin/order-actions/invoice" ||
+      url.pathname ===
+        "/api/admin/order-actions/payment-received"
+    ) {
+      return handleAdminOrderWorkflowAction(
         request,
         env,
         url
@@ -751,6 +772,1071 @@ function toPublicDocumentRecord(
     updatedAt:
       record.updatedAt,
   };
+}
+
+/* -------------------------------------------------- */
+/* ADMIN ORDER INVOICE AND PAYMENT WORKFLOW           */
+/* -------------------------------------------------- */
+
+async function handleAdminOrderWorkflowAction(
+  request,
+  env,
+  url
+) {
+  try {
+    validateStorage(env);
+    requireSameOrigin(request);
+
+    await requireAdmin(
+      request,
+      env
+    );
+
+    validateOrderWorkflowEnvironment(
+      env
+    );
+
+    if (
+      request.method !==
+      "POST"
+    ) {
+      throw new ApiRequestError(
+        "Method not allowed.",
+        405
+      );
+    }
+
+    validateJsonContentType(
+      request
+    );
+
+    const body =
+      await readJsonRequest(
+        request,
+        MAX_ORDER_WORKFLOW_REQUEST_LENGTH,
+        "order workflow action"
+      );
+
+    const orderId =
+      normalizeOrderId(
+        body.orderId
+      );
+
+    const order =
+      await getOrderRecord(
+        env,
+        orderId
+      );
+
+    if (
+      !order
+    ) {
+      throw new ApiRequestError(
+        "Order record not found.",
+        404
+      );
+    }
+
+    const actor =
+      getOrderWorkflowAdminActor(
+        request
+      );
+
+    if (
+      url.pathname ===
+      "/api/admin/order-actions/invoice"
+    ) {
+      return await processInvoiceWorkflowAction(
+        env,
+        order,
+        body,
+        actor
+      );
+    }
+
+    if (
+      url.pathname ===
+      "/api/admin/order-actions/payment-received"
+    ) {
+      return await processPaymentReceivedWorkflowAction(
+        env,
+        order,
+        body,
+        actor
+      );
+    }
+
+    throw new ApiRequestError(
+      "Order workflow route not found.",
+      404
+    );
+  } catch (
+    error
+  ) {
+    console.error(
+      "Admin order workflow error:",
+      error
+    );
+
+    return handleApiError(
+      error
+    );
+  }
+}
+
+function validateOrderWorkflowEnvironment(
+  env
+) {
+  if (
+    !env.ORDER_WEB_APP_URL ||
+    !env.ORDER_API_SECRET
+  ) {
+    throw new ApiRequestError(
+      "The Google Workspace order service has not been configured.",
+      500
+    );
+  }
+
+  if (
+    String(
+      env.ORDER_WORKFLOW_ACTIONS_ENABLED ||
+      ""
+    ).toLowerCase() !==
+    "true"
+  ) {
+    throw new ApiRequestError(
+      "Invoice and payment emails are disabled until the Google Workspace workflow update is complete.",
+      503
+    );
+  }
+}
+
+async function processInvoiceWorkflowAction(
+  env,
+  order,
+  body,
+  actor
+) {
+  const orderId =
+    normalizeOrderId(
+      order.orderId ||
+      order.id
+    );
+
+  const existingInvoice =
+    order.invoice &&
+    typeof order.invoice ===
+      "object"
+      ? order.invoice
+      : {};
+
+  const isResend =
+    Boolean(
+      existingInvoice.firstSentAt ||
+      existingInvoice.sentAt
+    );
+
+  if (
+    isResend &&
+    body.confirmResend !==
+      true
+  ) {
+    throw new ApiRequestError(
+      "An invoice has already been sent for this order. Confirm the resend before sending it again.",
+      409
+    );
+  }
+
+  const paymentMethod =
+    normalizeWorkflowPaymentMethod(
+      body.paymentMethod ||
+      existingInvoice.paymentMethod ||
+      order.preferredPaymentLabel ||
+      order.paymentMethod
+    );
+
+  const paymentLink =
+    normalizeWorkflowPaymentLink(
+      body.paymentLink
+    );
+
+  const paymentDestination =
+    cleanText(
+      body.paymentDestination,
+      MAX_ORDER_PAYMENT_DESTINATION_LENGTH
+    );
+
+  if (
+    !paymentLink &&
+    !paymentDestination
+  ) {
+    throw new ApiRequestError(
+      "Enter a payment link or payment destination before sending the invoice.",
+      400
+    );
+  }
+
+  const defaultSubtotalCents =
+    Math.round(
+      Number(
+        order.subtotal ||
+        0
+      ) * 100
+    );
+
+  const subtotalCents =
+    normalizeWorkflowMoneyCents(
+      body.subtotalCents,
+      defaultSubtotalCents,
+      "invoice subtotal"
+    );
+
+  const shippingCents =
+    normalizeWorkflowMoneyCents(
+      body.shippingCents,
+      0,
+      "shipping amount"
+    );
+
+  const taxCents =
+    normalizeWorkflowMoneyCents(
+      body.taxCents,
+      0,
+      "tax amount"
+    );
+
+  const totalCents =
+    subtotalCents +
+    shippingCents +
+    taxCents;
+
+  if (
+    totalCents <= 0 ||
+    totalCents >
+      MAX_ORDER_AMOUNT_CENTS
+  ) {
+    throw new ApiRequestError(
+      "The invoice total is invalid.",
+      400
+    );
+  }
+
+  const now =
+    new Date().toISOString();
+
+  const eventId =
+    createOrderWorkflowEventId(
+      "invoice"
+    );
+
+  const event = {
+    eventId,
+    type:
+      "invoice_sent",
+    state:
+      "sending",
+    createdAt:
+      now,
+    createdBy:
+      actor,
+    resend:
+      isResend,
+  };
+
+  const pendingOrder = {
+    ...order,
+
+    workflowPending:
+      event,
+
+    updatedAt:
+      now,
+  };
+
+  await putOrderRecord(
+    env,
+    pendingOrder
+  );
+
+  const invoicePayload = {
+    orderId,
+
+    subtotalCents,
+
+    shippingCents,
+
+    taxCents,
+
+    totalCents,
+
+    paymentMethod,
+
+    paymentLink,
+
+    paymentDestination,
+
+    paymentNote:
+      orderId,
+
+    paymentNoteInstruction:
+      `Enter only order number ${orderId} in the payment note. Do not include your name, product names, or any other information.`,
+
+    sentAt:
+      now,
+
+    sentBy:
+      actor,
+
+    resend:
+      isResend,
+  };
+
+  try {
+    const serviceResult =
+      await sendOrderWorkflowToWorkspace(
+        env,
+        {
+          action:
+            "send_invoice",
+
+          eventId,
+
+          order:
+            pendingOrder,
+
+          invoice:
+            invoicePayload,
+        }
+      );
+
+    const sendCount =
+      Number(
+        existingInvoice.sendCount ||
+        0
+      ) + 1;
+
+    const completedEvent = {
+      ...event,
+
+      state:
+        "sent",
+
+      completedAt:
+        new Date().toISOString(),
+
+      serviceMessage:
+        cleanText(
+          serviceResult.message ||
+          "Invoice email sent.",
+          MAX_ORDER_WORKFLOW_MESSAGE_LENGTH
+        ),
+    };
+
+    const updatedOrder = {
+      ...order,
+
+      status:
+        "Invoice Sent",
+
+      invoice: {
+        ...existingInvoice,
+
+        ...invoicePayload,
+
+        firstSentAt:
+          existingInvoice.firstSentAt ||
+          existingInvoice.sentAt ||
+          now,
+
+        lastSentAt:
+          now,
+
+        sentAt:
+          existingInvoice.sentAt ||
+          now,
+
+        sendCount,
+
+        lastEventId:
+          eventId,
+
+        lastSentBy:
+          actor,
+      },
+
+      invoiceHistory:
+        appendOrderWorkflowHistory(
+          order.invoiceHistory,
+          completedEvent
+        ),
+
+      workflowHistory:
+        appendOrderWorkflowHistory(
+          order.workflowHistory,
+          completedEvent
+        ),
+
+      workflowPending:
+        null,
+
+      updatedAt:
+        completedEvent.completedAt,
+    };
+
+    await putOrderRecord(
+      env,
+      updatedOrder
+    );
+
+    return jsonResponse({
+      success:
+        true,
+
+      order:
+        updatedOrder,
+
+      record:
+        updatedOrder,
+
+      invoice:
+        updatedOrder.invoice,
+
+      message:
+        isResend
+          ? `Invoice for order ${orderId} was resent.`
+          : `Invoice for order ${orderId} was sent.`,
+    });
+  } catch (
+    error
+  ) {
+    await recordFailedOrderWorkflowAction(
+      env,
+      order,
+      event,
+      error
+    );
+
+    throw error;
+  }
+}
+
+async function processPaymentReceivedWorkflowAction(
+  env,
+  order,
+  body,
+  actor
+) {
+  const orderId =
+    normalizeOrderId(
+      order.orderId ||
+      order.id
+    );
+
+  const existingPayment =
+    order.payment &&
+    typeof order.payment ===
+      "object"
+      ? order.payment
+      : {};
+
+  const isResend =
+    Boolean(
+      existingPayment.receivedAt
+    );
+
+  if (
+    isResend &&
+    body.confirmResend !==
+      true
+  ) {
+    throw new ApiRequestError(
+      "Payment has already been recorded for this order. Confirm the resend before sending another payment confirmation.",
+      409
+    );
+  }
+
+  const invoice =
+    order.invoice &&
+    typeof order.invoice ===
+      "object"
+      ? order.invoice
+      : {};
+
+  const defaultAmountCents =
+    Number(
+      invoice.totalCents
+    ) ||
+    Math.round(
+      Number(
+        order.subtotal ||
+        0
+      ) * 100
+    );
+
+  const amountCents =
+    normalizeWorkflowMoneyCents(
+      body.amountCents,
+      defaultAmountCents,
+      "payment amount"
+    );
+
+  if (
+    amountCents <= 0
+  ) {
+    throw new ApiRequestError(
+      "The payment amount must be greater than zero.",
+      400
+    );
+  }
+
+  const paymentMethod =
+    normalizeWorkflowPaymentMethod(
+      body.paymentMethod ||
+      existingPayment.paymentMethod ||
+      invoice.paymentMethod ||
+      order.preferredPaymentLabel ||
+      order.paymentMethod
+    );
+
+  const fulfillmentType =
+    normalizeWorkflowFulfillmentType(
+      body.fulfillmentType
+    );
+
+  const referenceNumber =
+    cleanText(
+      body.referenceNumber,
+      MAX_ORDER_PAYMENT_REFERENCE_LENGTH
+    );
+
+  const restockNote =
+    cleanMultilineText(
+      body.restockNote,
+      MAX_ORDER_RESTOCK_NOTE_LENGTH
+    );
+
+  const now =
+    new Date().toISOString();
+
+  const eventId =
+    createOrderWorkflowEventId(
+      "payment"
+    );
+
+  const event = {
+    eventId,
+    type:
+      "payment_received",
+    state:
+      "sending",
+    createdAt:
+      now,
+    createdBy:
+      actor,
+    resend:
+      isResend,
+  };
+
+  const pendingOrder = {
+    ...order,
+
+    workflowPending:
+      event,
+
+    updatedAt:
+      now,
+  };
+
+  await putOrderRecord(
+    env,
+    pendingOrder
+  );
+
+  const fulfillment = {
+    type:
+      fulfillmentType,
+
+    label:
+      fulfillmentType ===
+      "preorder"
+        ? "Preorder"
+        : "In Stock",
+
+    restockNote:
+      fulfillmentType ===
+      "preorder"
+        ? restockNote
+        : "",
+  };
+
+  const paymentPayload = {
+    orderId,
+
+    amountCents,
+
+    paymentMethod,
+
+    referenceNumber,
+
+    receivedAt:
+      existingPayment.receivedAt ||
+      now,
+
+    confirmationSentAt:
+      now,
+
+    recordedBy:
+      existingPayment.recordedBy ||
+      actor,
+
+    confirmationSentBy:
+      actor,
+
+    resend:
+      isResend,
+  };
+
+  try {
+    const serviceResult =
+      await sendOrderWorkflowToWorkspace(
+        env,
+        {
+          action:
+            "payment_received",
+
+          eventId,
+
+          order:
+            pendingOrder,
+
+          payment:
+            paymentPayload,
+
+          fulfillment,
+        }
+      );
+
+    const confirmationCount =
+      Number(
+        existingPayment.confirmationCount ||
+        0
+      ) + 1;
+
+    const completedEvent = {
+      ...event,
+
+      state:
+        "sent",
+
+      completedAt:
+        new Date().toISOString(),
+
+      serviceMessage:
+        cleanText(
+          serviceResult.message ||
+          "Payment confirmation email sent.",
+          MAX_ORDER_WORKFLOW_MESSAGE_LENGTH
+        ),
+    };
+
+    const updatedOrder = {
+      ...order,
+
+      status:
+        fulfillmentType ===
+        "preorder"
+          ? "Paid — Awaiting Restock"
+          : "Paid — Awaiting Shipment",
+
+      payment: {
+        ...existingPayment,
+
+        ...paymentPayload,
+
+        confirmationCount,
+
+        lastEventId:
+          eventId,
+      },
+
+      fulfillment,
+
+      paymentHistory:
+        appendOrderWorkflowHistory(
+          order.paymentHistory,
+          completedEvent
+        ),
+
+      workflowHistory:
+        appendOrderWorkflowHistory(
+          order.workflowHistory,
+          completedEvent
+        ),
+
+      workflowPending:
+        null,
+
+      updatedAt:
+        completedEvent.completedAt,
+    };
+
+    await putOrderRecord(
+      env,
+      updatedOrder
+    );
+
+    return jsonResponse({
+      success:
+        true,
+
+      order:
+        updatedOrder,
+
+      record:
+        updatedOrder,
+
+      payment:
+        updatedOrder.payment,
+
+      fulfillment:
+        updatedOrder.fulfillment,
+
+      message:
+        isResend
+          ? `Payment confirmation for order ${orderId} was resent.`
+          : `Payment for order ${orderId} was recorded and confirmed.`,
+    });
+  } catch (
+    error
+  ) {
+    await recordFailedOrderWorkflowAction(
+      env,
+      order,
+      event,
+      error
+    );
+
+    throw error;
+  }
+}
+
+async function sendOrderWorkflowToWorkspace(
+  env,
+  payload
+) {
+  const response =
+    await fetch(
+      env.ORDER_WEB_APP_URL,
+      {
+        method:
+          "POST",
+
+        redirect:
+          "follow",
+
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+
+        body:
+          JSON.stringify({
+            secret:
+              env.ORDER_API_SECRET,
+
+            ...payload,
+          }),
+      }
+    );
+
+  const responseText =
+    await response.text();
+
+  let result;
+
+  try {
+    result =
+      JSON.parse(
+        responseText
+      );
+  } catch {
+    throw new ApiRequestError(
+      "The Google Workspace order service returned an invalid response.",
+      502
+    );
+  }
+
+  if (
+    !response.ok ||
+    !result.success
+  ) {
+    throw new ApiRequestError(
+      result.error ||
+      "The Google Workspace email could not be sent.",
+      502
+    );
+  }
+
+  return result;
+}
+
+async function recordFailedOrderWorkflowAction(
+  env,
+  originalOrder,
+  event,
+  error
+) {
+  const failedAt =
+    new Date().toISOString();
+
+  const failedEvent = {
+    ...event,
+
+    state:
+      "failed",
+
+    failedAt,
+
+    error:
+      cleanText(
+        error?.message ||
+        "The workflow action failed.",
+        MAX_ORDER_WORKFLOW_MESSAGE_LENGTH
+      ),
+  };
+
+  const failedOrder = {
+    ...originalOrder,
+
+    workflowPending:
+      failedEvent,
+
+    workflowHistory:
+      appendOrderWorkflowHistory(
+        originalOrder.workflowHistory,
+        failedEvent
+      ),
+
+    updatedAt:
+      failedAt,
+  };
+
+  try {
+    await putOrderRecord(
+      env,
+      failedOrder
+    );
+  } catch (
+    storageError
+  ) {
+    console.error(
+      "Failed order workflow state could not be stored:",
+      storageError
+    );
+  }
+}
+
+function normalizeWorkflowPaymentMethod(
+  value
+) {
+  const normalized =
+    cleanText(
+      value,
+      100
+    )
+      .toLowerCase()
+      .replace(
+        /[\s_-]+/g,
+        ""
+      );
+
+  const methods = {
+    zelle:
+      "Zelle",
+
+    venmo:
+      "Venmo",
+
+    cashapp:
+      "Cash App",
+  };
+
+  const paymentMethod =
+    methods[
+      normalized
+    ] ||
+    "";
+
+  if (
+    !paymentMethod
+  ) {
+    throw new ApiRequestError(
+      "Choose Zelle, Venmo, or Cash App as the invoice payment method.",
+      400
+    );
+  }
+
+  return paymentMethod;
+}
+
+function normalizeWorkflowPaymentLink(
+  value
+) {
+  const paymentLink =
+    cleanText(
+      value,
+      MAX_ORDER_PAYMENT_LINK_LENGTH
+    );
+
+  if (
+    !paymentLink
+  ) {
+    return "";
+  }
+
+  let parsed;
+
+  try {
+    parsed =
+      new URL(
+        paymentLink
+      );
+  } catch {
+    throw new ApiRequestError(
+      "Enter a valid payment link.",
+      400
+    );
+  }
+
+  if (
+    parsed.protocol !==
+    "https:"
+  ) {
+    throw new ApiRequestError(
+      "The payment link must use HTTPS.",
+      400
+    );
+  }
+
+  return parsed.toString();
+}
+
+function normalizeWorkflowMoneyCents(
+  value,
+  fallback,
+  label
+) {
+  const selected =
+    value === undefined ||
+    value === null ||
+    value === ""
+      ? fallback
+      : value;
+
+  const amount =
+    Number(
+      selected
+    );
+
+  if (
+    !Number.isInteger(
+      amount
+    ) ||
+    amount < 0 ||
+    amount >
+      MAX_ORDER_AMOUNT_CENTS
+  ) {
+    throw new ApiRequestError(
+      `The ${label} is invalid.`,
+      400
+    );
+  }
+
+  return amount;
+}
+
+function normalizeWorkflowFulfillmentType(
+  value
+) {
+  const normalized =
+    cleanText(
+      value,
+      50
+    )
+      .toLowerCase()
+      .replace(
+        /[\s-]+/g,
+        "_"
+      );
+
+  if (
+    normalized ===
+      "in_stock" ||
+    normalized ===
+      "instock"
+  ) {
+    return "in_stock";
+  }
+
+  if (
+    normalized ===
+    "preorder"
+  ) {
+    return "preorder";
+  }
+
+  throw new ApiRequestError(
+    "Choose In Stock or Preorder before confirming payment.",
+    400
+  );
+}
+
+function appendOrderWorkflowHistory(
+  history,
+  event
+) {
+  return [
+    ...(
+      Array.isArray(
+        history
+      )
+        ? history
+        : []
+    ),
+
+    event,
+  ].slice(
+    -ORDER_WORKFLOW_HISTORY_LIMIT
+  );
+}
+
+function createOrderWorkflowEventId(
+  prefix
+) {
+  const randomId =
+    typeof crypto.randomUUID ===
+      "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random()
+          .toString(16)
+          .slice(2)}`;
+
+  return `${prefix}-${randomId}`;
+}
+
+function getOrderWorkflowAdminActor(
+  request
+) {
+  return cleanText(
+    request.headers.get(
+      "Cf-Access-Authenticated-User-Email"
+    ) ||
+    request.headers.get(
+      "CF-Access-Authenticated-User-Email"
+    ) ||
+    "authorized administrator",
+    254
+  );
 }
 
 /* -------------------------------------------------- */
