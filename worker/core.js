@@ -1360,13 +1360,16 @@ async function processPaymentReceivedWorkflowAction(
       fulfillmentType ===
       "preorder"
         ? "Preorder"
-        : "In Stock",
+        : fulfillmentType ===
+            "mixed"
+          ? "Mixed Order"
+          : "In Stock",
 
     restockNote:
       fulfillmentType ===
-      "preorder"
-        ? restockNote
-        : "",
+      "in_stock"
+        ? ""
+        : restockNote,
   };
 
   const paymentPayload = {
@@ -1444,9 +1447,9 @@ async function processPaymentReceivedWorkflowAction(
 
       status:
         fulfillmentType ===
-        "preorder"
-          ? "Paid — Awaiting Restock"
-          : "Paid — Awaiting Shipment",
+        "in_stock"
+          ? "Paid — Awaiting Shipment"
+          : "Paid — Awaiting Restock",
 
       payment: {
         ...existingPayment,
@@ -1785,8 +1788,17 @@ function normalizeWorkflowFulfillmentType(
     return "preorder";
   }
 
+  if (
+    normalized ===
+      "mixed" ||
+    normalized ===
+      "mixed_order"
+  ) {
+    return "mixed";
+  }
+
   throw new ApiRequestError(
-    "Choose In Stock or Preorder before confirming payment.",
+    "Choose In Stock, Preorder, or Mixed Order before confirming payment.",
     400
   );
 }
@@ -3816,6 +3828,32 @@ function toPublicAccount(
 function toCustomerOrderRecord(
   order
 ) {
+  const invoice =
+    order.invoice &&
+    typeof order.invoice ===
+      "object"
+      ? order.invoice
+      : {};
+
+  const payment =
+    order.payment &&
+    typeof order.payment ===
+      "object"
+      ? order.payment
+      : {};
+
+  const fulfillment =
+    order.fulfillment &&
+    typeof order.fulfillment ===
+      "object"
+      ? order.fulfillment
+      : {};
+
+  const paymentReceivedForCustomer =
+    Boolean(
+      payment.receivedAt
+    );
+
   return {
     id:
       order.orderId ||
@@ -3872,6 +3910,145 @@ function toCustomerOrderRecord(
         order.totalQuantity ||
           0
       ),
+
+    invoice:
+      Object.keys(
+        invoice
+      ).length
+        ? {
+            subtotalCents:
+              Number(
+                invoice.subtotalCents ||
+                  0
+              ),
+
+            shippingCents:
+              Number(
+                invoice.shippingCents ||
+                  0
+              ),
+
+            taxCents:
+              Number(
+                invoice.taxCents ||
+                  0
+              ),
+
+            totalCents:
+              Number(
+                invoice.totalCents ||
+                  0
+              ),
+
+            paymentMethod:
+              cleanText(
+                invoice.paymentMethod,
+                100
+              ),
+
+            paymentLink:
+              paymentReceivedForCustomer
+                ? ""
+                : cleanText(
+                    invoice.paymentLink,
+                    MAX_ORDER_PAYMENT_LINK_LENGTH
+                  ),
+
+            paymentDestination:
+              paymentReceivedForCustomer
+                ? ""
+                : cleanText(
+                    invoice.paymentDestination,
+                    MAX_ORDER_PAYMENT_DESTINATION_LENGTH
+                  ),
+
+            paymentNote:
+              cleanText(
+                invoice.paymentNote,
+                100
+              ),
+
+            paymentNoteInstruction:
+              cleanText(
+                invoice.paymentNoteInstruction,
+                500
+              ),
+
+            firstSentAt:
+              invoice.firstSentAt ||
+              invoice.sentAt ||
+              "",
+
+            lastSentAt:
+              invoice.lastSentAt ||
+              invoice.sentAt ||
+              "",
+
+            sendCount:
+              Number(
+                invoice.sendCount ||
+                  0
+              ),
+          }
+        : null,
+
+    payment:
+      Object.keys(
+        payment
+      ).length
+        ? {
+            amountCents:
+              Number(
+                payment.amountCents ||
+                  0
+              ),
+
+            paymentMethod:
+              cleanText(
+                payment.paymentMethod,
+                100
+              ),
+
+            receivedAt:
+              payment.receivedAt ||
+              "",
+
+            confirmationSentAt:
+              payment.confirmationSentAt ||
+              "",
+
+            confirmationCount:
+              Number(
+                payment.confirmationCount ||
+                  0
+              ),
+          }
+        : null,
+
+    fulfillment:
+      Object.keys(
+        fulfillment
+      ).length
+        ? {
+            type:
+              cleanText(
+                fulfillment.type,
+                50
+              ),
+
+            label:
+              cleanText(
+                fulfillment.label,
+                100
+              ),
+
+            restockNote:
+              cleanMultilineText(
+                fulfillment.restockNote,
+                MAX_ORDER_RESTOCK_NOTE_LENGTH
+              ),
+          }
+        : null,
   };
 }
 
