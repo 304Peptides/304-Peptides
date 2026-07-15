@@ -17,6 +17,27 @@ const REFERRAL_FILTERS = [
   ["paid", "Paid Out"],
   ["voided", "Voided"],
 ];
+const RISK_FILTERS = [
+  ["all", "All Reviews"],
+  ["new", "New"],
+  ["reviewing", "Reviewing"],
+  ["cleared", "Cleared"],
+  ["confirmed_abuse", "Confirmed Abuse"],
+];
+
+const RISK_SEVERITIES = [
+  ["low", "Low"],
+  ["medium", "Medium"],
+  ["high", "High"],
+  ["critical", "Critical"],
+];
+
+const EMPTY_RISK_COUNTS = {
+  new: 0,
+  reviewing: 0,
+  cleared: 0,
+  confirmedAbuse: 0,
+};
 
 const EMPTY_SETTINGS = {
   minimumPayoutCents: 5000,
@@ -206,6 +227,16 @@ function normalizeReferrals(records) {
       isSelfUse: Boolean(record.isSelfUse),
       tierProgressEligible: Boolean(record.tierProgressEligible),
       payoutId: String(record.payoutId || ""),
+      payoutHold: Boolean(record.payoutHold),
+      payoutHoldReason: String(
+        record.payoutHoldReason || ""
+      ),
+      payoutHoldAt: String(
+        record.payoutHoldAt || ""
+      ),
+      payoutHoldBy: String(
+        record.payoutHoldBy || ""
+      ),
       requiresAdjustment: Boolean(record.requiresAdjustment),
     }))
     .sort((left, right) =>
@@ -215,6 +246,88 @@ function normalizeReferrals(records) {
     );
 }
 
+function normalizeRiskFlags(records) {
+  const priority = {
+    new: 0,
+    reviewing: 1,
+    confirmed_abuse: 2,
+    cleared: 3,
+  };
+
+  return (Array.isArray(records) ? records : [])
+    .filter(
+      (record) =>
+        record &&
+        typeof record === "object"
+    )
+    .map((record) => ({
+      ...record,
+      flagId: String(record.flagId || ""),
+      orderId: String(
+        record.orderId || ""
+      ).toUpperCase(),
+      partnerCode: String(
+        record.partnerCode || ""
+      ).toUpperCase(),
+      status: String(
+        record.status || "new"
+      ).toLowerCase(),
+      severity: String(
+        record.severity || "medium"
+      ).toLowerCase(),
+      flagType: String(
+        record.flagType || "manual_review"
+      ).toLowerCase(),
+      source: String(
+        record.source || "manual"
+      ).toLowerCase(),
+      payoutHoldRecommended: Boolean(
+        record.payoutHoldRecommended
+      ),
+      history: Array.isArray(record.history)
+        ? record.history
+        : [],
+    }))
+    .sort((left, right) => {
+      const statusDifference =
+        (priority[left.status] ?? 9) -
+        (priority[right.status] ?? 9);
+
+      return statusDifference !== 0
+        ? statusDifference
+        : String(
+            right.updatedAt ||
+            right.createdAt ||
+            ""
+          ).localeCompare(
+            String(
+              left.updatedAt ||
+              left.createdAt ||
+              ""
+            )
+          );
+    });
+}
+
+function normalizeRiskCounts(counts) {
+  const source =
+    counts && typeof counts === "object"
+      ? counts
+      : {};
+
+  return {
+    new: Number(source.new || 0),
+    reviewing: Number(
+      source.reviewing || 0
+    ),
+    cleared: Number(source.cleared || 0),
+    confirmedAbuse: Number(
+      source.confirmedAbuse ||
+      source.confirmed_abuse ||
+      0
+    ),
+  };
+}
 function normalizePayouts(records) {
   return (Array.isArray(records) ? records : [])
     .filter((record) => record && typeof record === "object")
@@ -495,6 +608,24 @@ function PartnerHQ({ onNavigate = () => {} }) {
   const [secretInput, setSecretInput] = useState("");
   const [applications, setApplications] = useState([]);
   const [referrals, setReferrals] = useState([]);
+  const [riskFlags, setRiskFlags] = useState([]);
+  const [riskStatusCounts, setRiskStatusCounts] =
+    useState(EMPTY_RISK_COUNTS);
+  const [riskSearch, setRiskSearch] = useState("");
+  const [riskStatus, setRiskStatus] =
+    useState("all");
+  const [
+    expandedRiskFlagId,
+    setExpandedRiskFlagId,
+  ] = useState("");
+  const [riskDrafts, setRiskDrafts] =
+    useState({});
+  const [riskSavingId, setRiskSavingId] =
+    useState("");
+  const [
+    holdSavingOrderId,
+    setHoldSavingOrderId,
+  ] = useState("");
   const [payouts, setPayouts] = useState([]);
   const [settings, setSettings] = useState(EMPTY_SETTINGS);
   const [thresholdDraft, setThresholdDraft] = useState("50");
@@ -589,6 +720,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
         const [
           applicationResponse,
           referralResponse,
+          riskResponse,
           payoutResponse,
           leaderboardResponse,
           rewardResponse,
@@ -602,6 +734,11 @@ function PartnerHQ({ onNavigate = () => {} }) {
             cache: "no-store",
           }),
           fetch("/api/admin/partner-referrals", {
+            method: "GET",
+            headers,
+            credentials: "same-origin",
+            cache: "no-store",
+          }),          fetch("/api/admin/partner-risk-flags", {
             method: "GET",
             headers,
             credentials: "same-origin",
@@ -646,6 +783,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
         const [
           applicationResult,
           referralResult,
+          riskResult,
           payoutResult,
           leaderboardResult,
           rewardResult,
@@ -654,6 +792,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
         ] = await Promise.all([
           readJson(applicationResponse),
           readJson(referralResponse),
+          readJson(riskResponse),
           readJson(payoutResponse),
           readJson(leaderboardResponse),
           readJson(rewardResponse),
@@ -673,6 +812,33 @@ function PartnerHQ({ onNavigate = () => {} }) {
         setApplications(nextApplications);
         setReferrals(
           normalizeReferrals(referralResult.referrals || referralResult.records || [])
+        );
+
+        const nextRiskFlags = normalizeRiskFlags(
+          riskResult.flags ||
+          riskResult.records ||
+          []
+        );
+
+        setRiskFlags(nextRiskFlags);
+        setRiskStatusCounts(
+          normalizeRiskCounts(
+            riskResult.statusCounts
+          )
+        );
+        setRiskDrafts(
+          Object.fromEntries(
+            nextRiskFlags.map((flag) => [
+              flag.flagId,
+              {
+                status: flag.status,
+                severity: flag.severity,
+                privateNotes:
+                  flag.privateNotes || "",
+                note: "",
+              },
+            ])
+          )
         );
         setPayouts(
           normalizePayouts(payoutResult.payouts || payoutResult.records || [])
@@ -724,6 +890,11 @@ function PartnerHQ({ onNavigate = () => {} }) {
       } catch (error) {
         setApplications([]);
         setReferrals([]);
+        setRiskFlags([]);
+        setRiskStatusCounts(
+          EMPTY_RISK_COUNTS
+        );
+        setRiskDrafts({});
         setPayouts([]);
         setLeaderboardEntries([]);
         setRewards([]);
@@ -789,7 +960,10 @@ function PartnerHQ({ onNavigate = () => {} }) {
           if (referral.commissionStatus === "paid") {
             totals.paidCommissionCents += referral.commissionAmountCents;
             totals.paidCount += 1;
-          } else if (referral.referralStatus === "earned") {
+          } else if (
+            referral.referralStatus === "earned" &&
+            !referral.payoutHold
+          ) {
             totals.availableCommissionCents += referral.commissionAmountCents;
             totals.availableCount += 1;
           }
@@ -873,7 +1047,10 @@ function PartnerHQ({ onNavigate = () => {} }) {
       if (referral.commissionStatus === "paid") {
         current.paidCommissionCents += referral.commissionAmountCents;
         current.paidReferralCount += 1;
-      } else if (referral.referralStatus === "earned") {
+      } else if (
+        referral.referralStatus === "earned" &&
+        !referral.payoutHold
+      ) {
         current.availableCommissionCents += referral.commissionAmountCents;
         current.availableReferralCount += 1;
       } else if (referral.referralStatus === "pending") {
@@ -942,6 +1119,82 @@ function PartnerHQ({ onNavigate = () => {} }) {
     });
   }, [referrals, referralSearch, referralStatus]);
 
+  const filteredRiskFlags = useMemo(() => {
+    const search =
+      riskSearch.trim().toLowerCase();
+
+    return riskFlags.filter((flag) => {
+      const matchesStatus =
+        riskStatus === "all" ||
+        flag.status === riskStatus;
+
+      const searchableText = [
+        flag.flagId,
+        flag.orderId,
+        flag.partnerCode,
+        flag.customerEmail,
+        flag.flagType,
+        flag.severity,
+        flag.title,
+        flag.summary,
+        flag.privateNotes,
+        flag.createdBy,
+        flag.updatedBy,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return (
+        matchesStatus &&
+        (
+          !search ||
+          searchableText.includes(search)
+        )
+      );
+    });
+  }, [
+    riskFlags,
+    riskSearch,
+    riskStatus,
+  ]);
+
+  const referralByOrderId = useMemo(
+    () =>
+      new Map(
+        referrals.map((referral) => [
+          referral.orderId,
+          referral,
+        ])
+      ),
+    [referrals]
+  );
+
+  const heldReferralStats = useMemo(
+    () =>
+      referrals.reduce(
+        (totals, referral) => {
+          if (
+            referral.payoutHold &&
+            referral.referralStatus ===
+              "earned" &&
+            referral.commissionStatus !==
+              "paid"
+          ) {
+            totals.count += 1;
+            totals.amountCents +=
+              referral.commissionAmountCents;
+          }
+
+          return totals;
+        },
+        {
+          count: 0,
+          amountCents: 0,
+        }
+      ),
+    [referrals]
+  );
   const filteredPayouts = useMemo(() => {
     const search = payoutSearch.trim().toLowerCase();
     if (!search) return payouts;
@@ -997,7 +1250,8 @@ function PartnerHQ({ onNavigate = () => {} }) {
         referral.commissionAmountCents > 0 &&
         referral.referralStatus === "earned" &&
         referral.commissionStatus !== "paid" &&
-        !referral.payoutId
+        !referral.payoutId &&
+        !referral.payoutHold
     );
   }, [payoutPartner, referrals]);
 
@@ -1012,6 +1266,368 @@ function PartnerHQ({ onNavigate = () => {} }) {
     );
   }, [payoutEligibleReferrals, selectedOrderIds]);
 
+  function setRiskDraftField(
+    flagId,
+    field,
+    value
+  ) {
+    setRiskDrafts((current) => ({
+      ...current,
+      [flagId]: {
+        status:
+          current[flagId]?.status || "new",
+        severity:
+          current[flagId]?.severity ||
+          "medium",
+        privateNotes:
+          current[flagId]?.privateNotes ||
+          "",
+        note:
+          current[flagId]?.note || "",
+        [field]: value,
+      },
+    }));
+  }
+
+  async function reloadRiskFlags() {
+    const response = await fetch(
+      "/api/admin/partner-risk-flags",
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          Authorization:
+            `Bearer ${adminSecret}`,
+        },
+        credentials: "same-origin",
+        cache: "no-store",
+      }
+    );
+
+    const result = await readJson(response);
+    const nextFlags = normalizeRiskFlags(
+      result.flags ||
+      result.records ||
+      []
+    );
+
+    setRiskFlags(nextFlags);
+    setRiskStatusCounts(
+      normalizeRiskCounts(
+        result.statusCounts
+      )
+    );
+
+    setRiskDrafts((current) =>
+      Object.fromEntries(
+        nextFlags.map((flag) => [
+          flag.flagId,
+          {
+            status:
+              current[flag.flagId]?.status ||
+              flag.status,
+            severity:
+              current[flag.flagId]
+                ?.severity ||
+              flag.severity,
+            privateNotes:
+              current[flag.flagId]
+                ?.privateNotes ??
+              flag.privateNotes ??
+              "",
+            note:
+              current[flag.flagId]?.note ||
+              "",
+          },
+        ])
+      )
+    );
+
+    return nextFlags;
+  }
+
+  async function createManualRiskFlag(
+    referral
+  ) {
+    if (!referral || riskSavingId) {
+      return;
+    }
+
+    const privateNotes = window.prompt(
+      `Enter the private reason for opening a review on order ${referral.orderId}.`
+    );
+
+    if (privateNotes == null) {
+      return;
+    }
+
+    if (!privateNotes.trim()) {
+      setActionError(
+        "Enter a private review reason."
+      );
+      return;
+    }
+
+    setRiskSavingId(
+      `create-${referral.orderId}`
+    );
+    setActionError("");
+    setActionMessage("");
+
+    try {
+      const response = await fetch(
+        "/api/admin/partner-risk-flags/create",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+            Accept: "application/json",
+            Authorization:
+              `Bearer ${adminSecret}`,
+          },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            orderId: referral.orderId,
+            flagType: "manual_review",
+            severity: "medium",
+            title:
+              `Manual review for order ${referral.orderId}`,
+            summary:
+              "An administrator opened a manual review for this referral order.",
+            privateNotes:
+              privateNotes.trim(),
+            payoutHoldRecommended:
+              false,
+          }),
+        }
+      );
+
+      const result = await readJson(response);
+      await reloadRiskFlags();
+
+      setExpandedRiskFlagId(
+        result.flag?.flagId || ""
+      );
+      setActionMessage(
+        result.message ||
+        "The manual review was opened."
+      );
+    } catch (error) {
+      setActionError(
+        error.message ||
+        "The manual review could not be opened."
+      );
+    } finally {
+      setRiskSavingId("");
+    }
+  }
+
+  async function saveRiskFlag(flag) {
+    if (!flag || riskSavingId) {
+      return;
+    }
+
+    const draft =
+      riskDrafts[flag.flagId] || {};
+
+    setRiskSavingId(flag.flagId);
+    setActionError("");
+    setActionMessage("");
+
+    try {
+      const response = await fetch(
+        "/api/admin/partner-risk-flags/update",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+            Accept: "application/json",
+            Authorization:
+              `Bearer ${adminSecret}`,
+          },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            flagId: flag.flagId,
+            status:
+              draft.status || flag.status,
+            severity:
+              draft.severity ||
+              flag.severity,
+            privateNotes:
+              draft.privateNotes ?? "",
+            note: draft.note || "",
+          }),
+        }
+      );
+
+      const result = await readJson(response);
+      const updatedFlag = result.flag;
+
+      setRiskFlags((current) =>
+        normalizeRiskFlags(
+          current.map((record) =>
+            record.flagId ===
+            updatedFlag.flagId
+              ? updatedFlag
+              : record
+          )
+        )
+      );
+
+      setRiskDrafts((current) => ({
+        ...current,
+        [updatedFlag.flagId]: {
+          status: updatedFlag.status,
+          severity:
+            updatedFlag.severity,
+          privateNotes:
+            updatedFlag.privateNotes ||
+            "",
+          note: "",
+        },
+      }));
+
+      await reloadRiskFlags();
+
+      setActionMessage(
+        result.message ||
+        "The review record was updated."
+      );
+    } catch (error) {
+      setActionError(
+        error.message ||
+        "The review record could not be updated."
+      );
+    } finally {
+      setRiskSavingId("");
+    }
+  }
+
+  async function toggleReferralPayoutHold(
+    referral,
+    flagId = ""
+  ) {
+    if (
+      !referral ||
+      holdSavingOrderId
+    ) {
+      return;
+    }
+
+    const nextHold =
+      !referral.payoutHold;
+
+    let reason = "";
+
+    if (nextHold) {
+      const enteredReason = window.prompt(
+        `Enter the private reason for holding commission on order ${referral.orderId}.`
+      );
+
+      if (enteredReason == null) {
+        return;
+      }
+
+      reason = enteredReason.trim();
+
+      if (!reason) {
+        setActionError(
+          "A private payout-hold reason is required."
+        );
+        return;
+      }
+    } else {
+      const enteredReason = window.prompt(
+        `Enter the private reason for clearing the payout hold on order ${referral.orderId}.`,
+        "Review completed; payout hold cleared."
+      );
+
+      if (enteredReason == null) {
+        return;
+      }
+
+      reason = enteredReason.trim();
+
+      if (!reason) {
+        setActionError(
+          "A private reason is required before clearing a payout hold."
+        );
+        return;
+      }
+    }
+
+    const actionLabel = nextHold
+      ? "place this commission on payout hold"
+      : "clear this commission payout hold";
+
+    if (
+      !window.confirm(
+        `Confirm that you want to ${actionLabel}.`
+      )
+    ) {
+      return;
+    }
+
+    setHoldSavingOrderId(
+      referral.orderId
+    );
+    setActionError("");
+    setActionMessage("");
+
+    try {
+      const response = await fetch(
+        "/api/admin/partner-referral-payout-hold",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+            Accept: "application/json",
+            Authorization:
+              `Bearer ${adminSecret}`,
+          },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            orderId: referral.orderId,
+            hold: nextHold,
+            reason,
+            flagId,
+          }),
+        }
+      );
+
+      const result = await readJson(response);
+      const updatedReferral =
+        result.referral;
+
+      setReferrals((current) =>
+        normalizeReferrals(
+          current.map((record) =>
+            record.orderId ===
+            updatedReferral.orderId
+              ? updatedReferral
+              : record
+          )
+        )
+      );
+
+      await reloadRiskFlags();
+
+      setActionMessage(
+        result.message ||
+        "The payout-hold status was updated."
+      );
+    } catch (error) {
+      setActionError(
+        error.message ||
+        "The payout-hold status could not be updated."
+      );
+    } finally {
+      setHoldSavingOrderId("");
+    }
+  }
   async function loadAnalytics(event) {
     event?.preventDefault?.();
     if (!adminSecret || isLoadingAnalytics) return;
@@ -1069,6 +1685,14 @@ function PartnerHQ({ onNavigate = () => {} }) {
     setSecretInput("");
     setApplications([]);
     setReferrals([]);
+    setRiskFlags([]);
+    setRiskStatusCounts(
+      EMPTY_RISK_COUNTS
+    );
+    setRiskDrafts({});
+    setRiskSearch("");
+    setRiskStatus("all");
+    setExpandedRiskFlagId("");
     setPayouts([]);
     setLeaderboardEntries([]);
     setRewards([]);
@@ -1283,7 +1907,8 @@ function PartnerHQ({ onNavigate = () => {} }) {
         referral.partnerAccountId === balance.application.accountId &&
         referral.referralStatus === "earned" &&
         referral.commissionStatus !== "paid" &&
-        !referral.payoutId
+        !referral.payoutId &&
+        !referral.payoutHold
     );
     setPayoutPartner(balance);
     setSelectedOrderIds(eligible.map((referral) => referral.orderId));
@@ -3429,6 +4054,460 @@ function PartnerHQ({ onNavigate = () => {} }) {
             )}
           </section>
 
+          <section className="partner-hq-panel partner-hq-risk-panel">
+            <div className="partner-hq-section-heading">
+              <div>
+                <p className="eyebrow">FRAUD & ABUSE REVIEW</p>
+                <h2>Partner Risk Review Queue</h2>
+                <p className="partner-hq-muted">
+                  Automated signals identify patterns that may need human review.
+                  A flag does not prove abuse, cancel commission, or place a payout
+                  hold automatically. Approved own-code tier orders are treated
+                  separately and are not considered self-referral abuse.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="secondary-btn"
+                disabled={Boolean(riskSavingId)}
+                onClick={() => {
+                  const enteredOrderId = window.prompt(
+                    "Enter the referral order number to open a manual review."
+                  );
+
+                  if (enteredOrderId == null) {
+                    return;
+                  }
+
+                  const orderId = enteredOrderId
+                    .trim()
+                    .toUpperCase();
+
+                  const referral =
+                    referralByOrderId.get(orderId);
+
+                  if (!referral) {
+                    setActionError(
+                      "That referral order could not be found."
+                    );
+                    return;
+                  }
+
+                  createManualRiskFlag(referral);
+                }}
+              >
+                Open Manual Review
+              </button>
+            </div>
+
+            <section className="partner-hq-risk-stats">
+              <StatCard
+                label="New Flags"
+                value={riskStatusCounts.new}
+                detail="Awaiting initial review"
+              />
+              <StatCard
+                label="Reviewing"
+                value={riskStatusCounts.reviewing}
+                detail="Currently being investigated"
+              />
+              <StatCard
+                label="Commission Held"
+                value={formatMoneyFromCents(
+                  heldReferralStats.amountCents
+                )}
+                detail={`${heldReferralStats.count} referral(s)`}
+              />
+              <StatCard
+                label="Confirmed Abuse"
+                value={riskStatusCounts.confirmedAbuse}
+                detail="Administrator-confirmed cases"
+              />
+            </section>
+
+            <div className="partner-hq-filters">
+              <label className="partner-hq-field">
+                <span>Search Reviews</span>
+                <input
+                  type="search"
+                  value={riskSearch}
+                  onChange={(event) =>
+                    setRiskSearch(event.target.value)
+                  }
+                  placeholder="Order, code, customer, type, title, or notes"
+                />
+              </label>
+
+              <label className="partner-hq-field">
+                <span>Review Status</span>
+                <select
+                  value={riskStatus}
+                  onChange={(event) =>
+                    setRiskStatus(event.target.value)
+                  }
+                >
+                  {RISK_FILTERS.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {isLoading ? (
+              <EmptyState
+                title="Loading Review Queue"
+                text="Retrieving protected risk-review records."
+              />
+            ) : filteredRiskFlags.length === 0 ? (
+              <EmptyState
+                title="No Matching Review Flags"
+                text="No risk flags match the selected filters. Automated signals and manual reviews will appear here."
+              />
+            ) : (
+              <div className="partner-hq-stack">
+                {filteredRiskFlags.map((flag) => {
+                  const referral =
+                    referralByOrderId.get(flag.orderId);
+
+                  const draft =
+                    riskDrafts[flag.flagId] || {
+                      status: flag.status,
+                      severity: flag.severity,
+                      privateNotes:
+                        flag.privateNotes || "",
+                      note: "",
+                    };
+
+                  const expanded =
+                    expandedRiskFlagId === flag.flagId;
+
+                  const canControlHold =
+                    referral &&
+                    !referral.isSelfUse &&
+                    !referral.payoutId &&
+                    referral.referralStatus === "earned";
+
+                  return (
+                    <article
+                      key={flag.flagId}
+                      className={`partner-hq-risk-card partner-hq-risk-card-${flag.severity}`}
+                    >
+                      <div className="partner-hq-card-title-row">
+                        <div>
+                          <p className="eyebrow">
+                            {flag.partnerCode ||
+                              "PARTNER REVIEW"}
+                          </p>
+                          <h3>{flag.title}</h3>
+                          <p className="partner-hq-muted">
+                            {flag.orderId
+                              ? `Order #${flag.orderId}`
+                              : flag.flagId}
+                          </p>
+                        </div>
+
+                        <div className="partner-hq-risk-badges">
+                          <RiskSeverityPill
+                            severity={flag.severity}
+                          />
+                          <RiskStatusPill
+                            status={flag.status}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="partner-hq-referral-grid">
+                        <QuickDetail
+                          label="Signal Type"
+                          value={formatRiskLabel(
+                            flag.flagType
+                          )}
+                        />
+                        <QuickDetail
+                          label="Source"
+                          value={formatRiskLabel(
+                            flag.source
+                          )}
+                        />
+                        <QuickDetail
+                          label="Customer"
+                          value={
+                            flag.customerEmail ||
+                            flag.customerAccountId ||
+                            "Unavailable"
+                          }
+                        />
+                        <QuickDetail
+                          label="Created"
+                          value={formatDate(flag.createdAt)}
+                        />
+                        <QuickDetail
+                          label="Updated"
+                          value={formatDate(flag.updatedAt)}
+                        />
+                        <QuickDetail
+                          label="Created By"
+                          value={
+                            flag.createdBy ||
+                            "Unavailable"
+                          }
+                        />
+                        <QuickDetail
+                          label="Payout Hold"
+                          value={
+                            referral?.payoutHold
+                              ? "ACTIVE"
+                              : "Not active"
+                          }
+                        />
+                        <QuickDetail
+                          label="Commission"
+                          value={
+                            referral
+                              ? formatMoneyFromCents(
+                                  referral.commissionAmountCents
+                                )
+                              : "Unavailable"
+                          }
+                        />
+                      </div>
+
+                      <DetailBlock
+                        title="Review Signal"
+                        text={
+                          flag.summary ||
+                          "No summary was supplied."
+                        }
+                        highlighted
+                      />
+
+                      {referral?.payoutHold && (
+                        <div className="partner-hq-hold-notice">
+                          <strong>
+                            Commission payout hold is active.
+                          </strong>
+                          <span>
+                            {referral.payoutHoldReason ||
+                              "A private hold reason is recorded."}
+                          </span>
+                          <small>
+                            Applied by{" "}
+                            {referral.payoutHoldBy ||
+                              "an administrator"}{" "}
+                            {referral.payoutHoldAt
+                              ? `on ${formatDate(
+                                  referral.payoutHoldAt
+                                )}`
+                              : ""}
+                          </small>
+                        </div>
+                      )}
+
+                      <div className="partner-hq-button-row">
+                        <button
+                          type="button"
+                          className="secondary-btn"
+                          onClick={() =>
+                            setExpandedRiskFlagId(
+                              expanded ? "" : flag.flagId
+                            )
+                          }
+                        >
+                          {expanded
+                            ? "Hide Review Details"
+                            : "Review Flag"}
+                        </button>
+
+                        {canControlHold && (
+                          <button
+                            type="button"
+                            className={
+                              referral.payoutHold
+                                ? "secondary-btn"
+                                : "partner-hq-danger-button"
+                            }
+                            disabled={
+                              holdSavingOrderId ===
+                              referral.orderId
+                            }
+                            onClick={() =>
+                              toggleReferralPayoutHold(
+                                referral,
+                                flag.flagId
+                              )
+                            }
+                          >
+                            {holdSavingOrderId ===
+                            referral.orderId
+                              ? "Saving..."
+                              : referral.payoutHold
+                              ? "Clear Payout Hold"
+                              : "Place Payout Hold"}
+                          </button>
+                        )}
+                      </div>
+
+                      {expanded && (
+                        <div className="partner-hq-risk-review-details">
+                          <div className="partner-hq-risk-controls">
+                            <label className="partner-hq-field">
+                              <span>Status</span>
+                              <select
+                                value={draft.status}
+                                onChange={(event) =>
+                                  setRiskDraftField(
+                                    flag.flagId,
+                                    "status",
+                                    event.target.value
+                                  )
+                                }
+                              >
+                                {RISK_FILTERS.filter(
+                                  ([value]) =>
+                                    value !== "all"
+                                ).map(([value, label]) => (
+                                  <option
+                                    key={value}
+                                    value={value}
+                                  >
+                                    {label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label className="partner-hq-field">
+                              <span>Severity</span>
+                              <select
+                                value={draft.severity}
+                                onChange={(event) =>
+                                  setRiskDraftField(
+                                    flag.flagId,
+                                    "severity",
+                                    event.target.value
+                                  )
+                                }
+                              >
+                                {RISK_SEVERITIES.map(
+                                  ([value, label]) => (
+                                    <option
+                                      key={value}
+                                      value={value}
+                                    >
+                                      {label}
+                                    </option>
+                                  )
+                                )}
+                              </select>
+                            </label>
+                          </div>
+
+                          <label className="partner-hq-field">
+                            <span>Private Investigation Notes</span>
+                            <textarea
+                              rows="5"
+                              value={draft.privateNotes}
+                              onChange={(event) =>
+                                setRiskDraftField(
+                                  flag.flagId,
+                                  "privateNotes",
+                                  event.target.value
+                                )
+                              }
+                              placeholder="Document evidence, contacts, reasoning, and follow-up items. These notes are administrator-only."
+                            />
+                          </label>
+
+                          <label className="partner-hq-field">
+                            <span>History Note For This Update</span>
+                            <textarea
+                              rows="3"
+                              value={draft.note}
+                              onChange={(event) =>
+                                setRiskDraftField(
+                                  flag.flagId,
+                                  "note",
+                                  event.target.value
+                                )
+                              }
+                              placeholder="Optional note explaining this status or severity change."
+                            />
+                          </label>
+
+                          <div className="partner-hq-button-row">
+                            <button
+                              type="button"
+                              className="primary-btn"
+                              disabled={
+                                riskSavingId === flag.flagId
+                              }
+                              onClick={() =>
+                                saveRiskFlag(flag)
+                              }
+                            >
+                              {riskSavingId === flag.flagId
+                                ? "Saving..."
+                                : "Save Review"}
+                            </button>
+                          </div>
+
+                          <section className="partner-hq-risk-history">
+                            <strong>Permanent Review History</strong>
+
+                            {flag.history.length === 0 ? (
+                              <p className="partner-hq-muted">
+                                No history entries are available.
+                              </p>
+                            ) : (
+                              <div>
+                                {flag.history.map((entry) => (
+                                  <article
+                                    key={entry.historyId}
+                                  >
+                                    <strong>
+                                      {formatRiskLabel(
+                                        entry.action
+                                      )}
+                                    </strong>
+                                    <span>
+                                      {entry.previousStatus &&
+                                      entry.nextStatus
+                                        ? `${formatRiskLabel(
+                                            entry.previousStatus
+                                          )} → ${formatRiskLabel(
+                                            entry.nextStatus
+                                          )}`
+                                        : formatRiskLabel(
+                                            entry.nextStatus
+                                          )}
+                                    </span>
+                                    {entry.note && (
+                                      <p>{entry.note}</p>
+                                    )}
+                                    <small>
+                                      {formatDate(
+                                        entry.createdAt
+                                      )}{" "}
+                                      ·{" "}
+                                      {entry.createdBy ||
+                                        "Unavailable"}
+                                    </small>
+                                  </article>
+                                ))}
+                              </div>
+                            )}
+                          </section>
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
           <section className="partner-hq-panel">
             <div className="partner-hq-section-heading">
               <div>
@@ -3442,7 +4521,13 @@ function PartnerHQ({ onNavigate = () => {} }) {
             </div>
             <section className="partner-hq-referral-stats">
               <StatCard label="Pending Commission" value={formatMoneyFromCents(referralStats.pendingCommissionCents)} detail={`${referralStats.pending} awaiting payment`} />
-              <StatCard label="Available To Pay" value={formatMoneyFromCents(referralStats.availableCommissionCents)} detail={`${referralStats.availableCount} unpaid earned`} />
+              <StatCard label="Available To Pay" value={formatMoneyFromCents(referralStats.availableCommissionCents)} detail={`${referralStats.availableCount} unpaid earned`} />              <StatCard
+                label="Held For Review"
+                value={formatMoneyFromCents(
+                  heldReferralStats.amountCents
+                )}
+                detail={`${heldReferralStats.count} referral(s) excluded from payout`}
+              />
               <StatCard label="Paid Commission" value={formatMoneyFromCents(referralStats.paidCommissionCents)} detail={`${referralStats.paidCount} paid referral(s)`} />
               <StatCard
                 label="Tier Progress Orders"
@@ -3503,6 +4588,79 @@ function PartnerHQ({ onNavigate = () => {} }) {
                         no commission, payout, leaderboard, or reward credit.
                       </div>
                     )}
+                    {referral.payoutHold && (
+                      <div className="partner-hq-hold-notice">
+                        <strong>
+                          Commission is excluded from payouts while this review hold is active.
+                        </strong>
+                        <span>
+                          {referral.payoutHoldReason ||
+                            "A private administrator reason is recorded."}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="partner-hq-button-row">
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        disabled={
+                          Boolean(riskSavingId) ||
+                          riskFlags.some(
+                            (flag) =>
+                              flag.orderId ===
+                                referral.orderId &&
+                              ["new", "reviewing"].includes(
+                                flag.status
+                              )
+                          )
+                        }
+                        onClick={() =>
+                          createManualRiskFlag(referral)
+                        }
+                      >
+                        {riskFlags.some(
+                          (flag) =>
+                            flag.orderId ===
+                              referral.orderId &&
+                            ["new", "reviewing"].includes(
+                              flag.status
+                            )
+                        )
+                          ? "Review Open"
+                          : "Open Manual Review"}
+                      </button>
+
+                      {!referral.isSelfUse &&
+                        !referral.payoutId &&
+                        referral.referralStatus ===
+                          "earned" && (
+                          <button
+                            type="button"
+                            className={
+                              referral.payoutHold
+                                ? "secondary-btn"
+                                : "partner-hq-danger-button"
+                            }
+                            disabled={
+                              holdSavingOrderId ===
+                              referral.orderId
+                            }
+                            onClick={() =>
+                              toggleReferralPayoutHold(
+                                referral
+                              )
+                            }
+                          >
+                            {holdSavingOrderId ===
+                            referral.orderId
+                              ? "Saving..."
+                              : referral.payoutHold
+                              ? "Clear Payout Hold"
+                              : "Place Payout Hold"}
+                          </button>
+                        )}
+                    </div>
                     <div className="partner-hq-referral-grid">
                       <QuickDetail label="Customer" value={referral.customerEmail || "Unavailable"} />
                       <QuickDetail
@@ -3647,6 +4805,33 @@ function AnalyticsTable({ eyebrow, title, rows, columns, emptyText }) {
   );
 }
 
+function formatRiskLabel(value) {
+  return String(value || "Unavailable")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) =>
+      letter.toUpperCase()
+    );
+}
+
+function RiskStatusPill({ status }) {
+  return (
+    <span
+      className={`partner-hq-status partner-hq-risk-status-${status}`}
+    >
+      {formatRiskLabel(status)}
+    </span>
+  );
+}
+
+function RiskSeverityPill({ severity }) {
+  return (
+    <span
+      className={`partner-hq-status partner-hq-risk-severity-${severity}`}
+    >
+      {formatRiskLabel(severity)}
+    </span>
+  );
+}
 function ReferralStatusPill({ status }) {
   return <span className={`partner-hq-status partner-hq-referral-status-${status}`}>{String(status || "pending").toUpperCase()}</span>;
 }
@@ -3887,9 +5072,162 @@ const partnerHqCss = `
 .partner-hq-analytics-table td { color: #e8edf0; }
 .partner-hq-analytics-table td small { display: block; margin-top: 4px; color: #8f9aa2; }
 .partner-hq-analytics-empty { padding: 30px 18px; border-top: 1px solid rgba(255,255,255,.07); color: #aab5bd; text-align: center; line-height: 1.55; }
+.partner-hq-risk-panel {
+  border-color: rgba(255,190,80,.3);
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(255,170,50,.11),
+      transparent 38%
+    ),
+    rgba(255,255,255,.04);
+}
+
+.partner-hq-risk-stats {
+  display: grid;
+  grid-template-columns:
+    repeat(4,minmax(0,1fr));
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.partner-hq-risk-card {
+  overflow: hidden;
+  padding: 20px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 18px;
+  background: rgba(0,0,0,.18);
+}
+
+.partner-hq-risk-card-low {
+  border-color: rgba(61,165,255,.25);
+}
+
+.partner-hq-risk-card-medium {
+  border-color: rgba(255,190,80,.3);
+}
+
+.partner-hq-risk-card-high,
+.partner-hq-risk-card-critical {
+  border-color: rgba(255,95,95,.42);
+}
+
+.partner-hq-risk-badges {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.partner-hq-risk-status-new {
+  border: 1px solid rgba(255,190,80,.38);
+  background: rgba(255,170,50,.11);
+  color: #ffe0a8;
+}
+
+.partner-hq-risk-status-reviewing {
+  border: 1px solid rgba(61,165,255,.38);
+  background: rgba(61,165,255,.11);
+  color: #b9e4ff;
+}
+
+.partner-hq-risk-status-cleared {
+  border: 1px solid rgba(72,214,151,.36);
+  background: rgba(72,214,151,.1);
+  color: #b8f3d8;
+}
+
+.partner-hq-risk-status-confirmed_abuse {
+  border: 1px solid rgba(255,95,95,.44);
+  background: rgba(255,70,70,.13);
+  color: #ffcaca;
+}
+
+.partner-hq-risk-severity-low {
+  border: 1px solid rgba(61,165,255,.3);
+  color: #b9e4ff;
+}
+
+.partner-hq-risk-severity-medium {
+  border: 1px solid rgba(255,190,80,.34);
+  color: #ffe0a8;
+}
+
+.partner-hq-risk-severity-high,
+.partner-hq-risk-severity-critical {
+  border: 1px solid rgba(255,95,95,.42);
+  color: #ffcaca;
+}
+
+.partner-hq-risk-review-details {
+  display: grid;
+  gap: 14px;
+  padding-top: 18px;
+  margin-top: 18px;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+
+.partner-hq-risk-controls {
+  display: grid;
+  grid-template-columns:
+    repeat(2,minmax(0,1fr));
+  gap: 14px;
+}
+
+.partner-hq-hold-notice {
+  display: grid;
+  gap: 5px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid rgba(255,95,95,.4);
+  border-radius: 13px;
+  background: rgba(255,70,70,.1);
+  color: #ffd0d0;
+  line-height: 1.5;
+}
+
+.partner-hq-hold-notice span,
+.partner-hq-hold-notice small {
+  color: #e8bebe;
+}
+
+.partner-hq-risk-history {
+  padding: 16px;
+  border: 1px solid rgba(185,130,255,.28);
+  border-radius: 14px;
+  background: rgba(185,130,255,.06);
+}
+
+.partner-hq-risk-history > div {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.partner-hq-risk-history article {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 11px;
+  background: rgba(0,0,0,.15);
+}
+
+.partner-hq-risk-history article span,
+.partner-hq-risk-history article small {
+  color: #aeb8c0;
+}
+
+.partner-hq-risk-history article p {
+  margin: 0;
+  color: #d3dae0;
+  white-space: pre-wrap;
+}
 button:disabled { opacity: .5; cursor: not-allowed; }
 @media (max-width: 1080px) {
   .partner-hq-stats { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .partner-hq-risk-stats,
   .partner-hq-referral-stats,
   .partner-hq-detail-grid,
   .partner-hq-referral-grid,
@@ -3905,6 +5243,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   .partner-hq-hero,
   .partner-hq-panel { padding: 20px; border-radius: 19px; }
   .partner-hq-stats,
+  .partner-hq-risk-stats,
   .partner-hq-referral-stats,
   .partner-hq-payout-summary,
   .partner-hq-filters,
@@ -3913,6 +5252,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   .partner-hq-detail-grid,
   .partner-hq-referral-grid,
   .partner-hq-balance-metrics,
+  .partner-hq-risk-controls,
   .partner-hq-rate-panel,
   .partner-hq-settings-panel,
   .partner-hq-threshold-form,

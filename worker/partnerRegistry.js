@@ -1,4 +1,4 @@
-import { DurableObject } from "cloudflare:workers";
+﻿import { DurableObject } from "cloudflare:workers";
 
 const APPLICATION_STATUSES = new Set([
   "pending",
@@ -126,6 +126,37 @@ const DEFAULT_ANALYTICS_PERIOD = "30";
 const MAX_ANALYTICS_VISITOR_ID_LENGTH = 120;
 const MAX_ANALYTICS_CLICK_ID_LENGTH = 120;
 const MAX_ANALYTICS_BREAKDOWN_ROWS = 250;
+
+const RISK_FLAG_STATUSES = new Set([
+  "new",
+  "reviewing",
+  "cleared",
+  "confirmed_abuse",
+]);
+
+const RISK_FLAG_SEVERITIES = new Set([
+  "low",
+  "medium",
+  "high",
+  "critical",
+]);
+
+const RISK_FLAG_TYPES = new Set([
+  "duplicate_customer_account",
+  "duplicate_customer_email",
+  "duplicate_shipping_address",
+  "suspicious_click_activity",
+  "high_clicks_low_conversion",
+  "repeated_referral_pattern",
+  "manual_review",
+  "other",
+]);
+
+const MAX_RISK_FLAG_HISTORY = 500;
+const MAX_RISK_TITLE_LENGTH = 160;
+const MAX_RISK_SUMMARY_LENGTH = 2000;
+const MAX_RISK_PRIVATE_NOTES_LENGTH = 5000;
+const MAX_RISK_ADDRESS_FINGERPRINT_LENGTH = 128;
 
 export class PartnerRegistry extends DurableObject {
   constructor(ctx, env) {
@@ -349,6 +380,7 @@ export class PartnerRegistry extends DurableObject {
     this.ensureReferralCampaignColumns();
     this.ensureReferralAnalyticsColumns();
     this.ensureReferralSelfUseColumns();
+    this.ensureReferralRiskColumns();
 
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS partner_click_events (
@@ -375,6 +407,109 @@ export class PartnerRegistry extends DurableObject {
 
       CREATE INDEX IF NOT EXISTS partner_click_events_channel_index
         ON partner_click_events(channel, clicked_at DESC);
+    `);
+
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS partner_referral_risk_profiles (
+        order_id TEXT PRIMARY KEY,
+        partner_account_id TEXT NOT NULL,
+        partner_code TEXT NOT NULL COLLATE NOCASE,
+        customer_account_id TEXT NOT NULL,
+        customer_email TEXT NOT NULL DEFAULT '',
+        address_fingerprint TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS partner_risk_profiles_account_index
+        ON partner_referral_risk_profiles(
+          customer_account_id,
+          created_at DESC
+        );
+
+      CREATE INDEX IF NOT EXISTS partner_risk_profiles_email_index
+        ON partner_referral_risk_profiles(
+          customer_email,
+          created_at DESC
+        );
+
+      CREATE INDEX IF NOT EXISTS partner_risk_profiles_address_index
+        ON partner_referral_risk_profiles(
+          address_fingerprint,
+          created_at DESC
+        );
+
+      CREATE TABLE IF NOT EXISTS partner_risk_flags (
+        flag_id TEXT PRIMARY KEY,
+        order_id TEXT NOT NULL DEFAULT '',
+        partner_account_id TEXT NOT NULL DEFAULT '',
+        partner_code TEXT NOT NULL DEFAULT '' COLLATE NOCASE,
+        customer_account_id TEXT NOT NULL DEFAULT '',
+        customer_email TEXT NOT NULL DEFAULT '',
+        address_fingerprint TEXT NOT NULL DEFAULT '',
+        flag_type TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        status TEXT NOT NULL,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'automatic',
+        private_notes TEXT NOT NULL DEFAULT '',
+        payout_hold_recommended INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        updated_by TEXT NOT NULL,
+        resolved_at TEXT NOT NULL DEFAULT '',
+        resolved_by TEXT NOT NULL DEFAULT ''
+      );
+
+      CREATE INDEX IF NOT EXISTS partner_risk_flags_status_index
+        ON partner_risk_flags(status, created_at DESC);
+
+      CREATE INDEX IF NOT EXISTS partner_risk_flags_order_index
+        ON partner_risk_flags(order_id, created_at DESC);
+
+      CREATE INDEX IF NOT EXISTS partner_risk_flags_partner_index
+        ON partner_risk_flags(
+          partner_account_id,
+          created_at DESC
+        );
+
+      CREATE INDEX IF NOT EXISTS partner_risk_flags_type_index
+        ON partner_risk_flags(flag_type, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS partner_risk_flag_history (
+        history_id TEXT PRIMARY KEY,
+        flag_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        previous_status TEXT NOT NULL DEFAULT '',
+        next_status TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        created_by TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS partner_risk_history_flag_index
+        ON partner_risk_flag_history(
+          flag_id,
+          created_at DESC
+        );
+
+      CREATE TABLE IF NOT EXISTS partner_referral_hold_history (
+        history_id TEXT PRIMARY KEY,
+        order_id TEXT NOT NULL,
+        previous_hold INTEGER NOT NULL DEFAULT 0,
+        next_hold INTEGER NOT NULL DEFAULT 0,
+        reason TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        created_by TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS partner_hold_history_order_index
+        ON partner_referral_hold_history(
+          order_id,
+          created_at DESC
+        );
     `);
   }
 
@@ -454,6 +589,29 @@ export class PartnerRegistry extends DurableObject {
     }
   }
 
+  ensureReferralRiskColumns() {
+    const columns = this.sql
+      .exec("PRAGMA table_info(partner_referrals)")
+      .toArray();
+
+    const names = new Set(
+      columns.map((column) => column.name)
+    );
+
+    for (const [name, definition] of [
+      ["payout_hold", "INTEGER NOT NULL DEFAULT 0"],
+      ["payout_hold_reason", "TEXT NOT NULL DEFAULT ''"],
+      ["payout_hold_at", "TEXT NOT NULL DEFAULT ''"],
+      ["payout_hold_by", "TEXT NOT NULL DEFAULT ''"],
+    ]) {
+      if (!names.has(name)) {
+        this.sql.exec(
+          `ALTER TABLE partner_referrals ADD COLUMN ${name} ${definition}`
+        );
+      }
+    }
+  }
+
   async fetch(request) {
     try {
       const url = new URL(request.url);
@@ -522,6 +680,31 @@ export class PartnerRegistry extends DurableObject {
 
       if (url.pathname === "/admin/referrals" && request.method === "GET") {
         return this.listAllReferrals();
+      }
+
+      if (url.pathname === "/admin/risk-flags" && request.method === "GET") {
+        return this.listRiskFlags(url);
+      }
+
+      if (
+        url.pathname === "/admin/risk-flags/create" &&
+        request.method === "POST"
+      ) {
+        return this.createRiskFlag(request);
+      }
+
+      if (
+        url.pathname === "/admin/risk-flags/update" &&
+        request.method === "POST"
+      ) {
+        return this.updateRiskFlag(request);
+      }
+
+      if (
+        url.pathname === "/admin/referral-payout-hold" &&
+        request.method === "POST"
+      ) {
+        return this.setReferralPayoutHold(request);
       }
 
       if (url.pathname === "/admin/payout-settings" && request.method === "GET") {
@@ -856,6 +1039,10 @@ export class PartnerRegistry extends DurableObject {
     const code = normalizeCode(payload.code);
     const customerAccountId = cleanText(payload.customerAccountId, 150);
     const customerEmail = cleanText(payload.customerEmail, 254).toLowerCase();
+    const addressFingerprint = cleanText(
+      payload.addressFingerprint,
+      MAX_RISK_ADDRESS_FINGERPRINT_LENGTH
+    );
     const orderStatus = cleanText(
       payload.orderStatus || "Order Request Received",
       100
@@ -1000,7 +1187,40 @@ export class PartnerRegistry extends DurableObject {
       }
 
       savedReferral = this.findReferral(orderId);
+
+      if (isSelfUse) {
+        this.sql.exec(
+          `DELETE FROM partner_referral_risk_profiles
+           WHERE order_id = ?`,
+          orderId
+        );
+      } else {
+        this.upsertReferralRiskProfile({
+          orderId,
+          partnerAccountId: partner.accountId,
+          partnerCode: partner.code,
+          customerAccountId,
+          customerEmail,
+          addressFingerprint,
+          createdAt: savedReferral?.createdAt || now,
+          updatedAt: now,
+        });
+      }
     });
+
+    if (!isSelfUse) {
+      try {
+        this.assessReferralRisk(savedReferral, {
+          addressFingerprint,
+          analyticsVisitorId,
+        });
+      } catch (riskError) {
+        console.error(
+          "Partner referral risk assessment failed:",
+          riskError
+        );
+      }
+    }
 
     return jsonResponse(
       {
@@ -1463,8 +1683,10 @@ export class PartnerRegistry extends DurableObject {
            SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'earned' THEN r.commission_amount_cents ELSE 0 END) AS earned_commission_cents,
            SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'voided' THEN r.commission_amount_cents ELSE 0 END) AS voided_commission_cents,
            SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'earned' THEN r.order_subtotal_cents ELSE 0 END) AS earned_revenue_cents,
-           SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'earned' AND pi.order_id IS NULL THEN 1 ELSE 0 END) AS available_referral_count,
-           SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'earned' AND pi.order_id IS NULL THEN r.commission_amount_cents ELSE 0 END) AS available_commission_cents,
+           SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'earned' AND r.payout_hold = 0 AND pi.order_id IS NULL THEN 1 ELSE 0 END) AS available_referral_count,
+           SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'earned' AND r.payout_hold = 0 AND pi.order_id IS NULL THEN r.commission_amount_cents ELSE 0 END) AS available_commission_cents,
+           SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'earned' AND r.payout_hold = 1 AND pi.order_id IS NULL THEN 1 ELSE 0 END) AS held_referral_count,
+           SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'earned' AND r.payout_hold = 1 AND pi.order_id IS NULL THEN r.commission_amount_cents ELSE 0 END) AS held_commission_cents,
            SUM(CASE WHEN r.is_self_use = 0 AND pi.order_id IS NOT NULL THEN 1 ELSE 0 END) AS paid_referral_count,
            SUM(CASE WHEN r.is_self_use = 0 AND pi.order_id IS NOT NULL THEN pi.commission_amount_cents ELSE 0 END) AS paid_commission_cents,
            SUM(CASE WHEN r.is_self_use = 0 AND r.referral_status = 'voided' AND pi.order_id IS NOT NULL THEN 1 ELSE 0 END) AS adjustment_required_count,
@@ -1802,6 +2024,844 @@ export class PartnerRegistry extends DurableObject {
     });
   }
 
+  upsertReferralRiskProfile(profile) {
+    this.sql.exec(
+      `INSERT INTO partner_referral_risk_profiles (
+         order_id,
+         partner_account_id,
+         partner_code,
+         customer_account_id,
+         customer_email,
+         address_fingerprint,
+         created_at,
+         updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(order_id) DO UPDATE SET
+         partner_account_id = excluded.partner_account_id,
+         partner_code = excluded.partner_code,
+         customer_account_id = excluded.customer_account_id,
+         customer_email = excluded.customer_email,
+         address_fingerprint = excluded.address_fingerprint,
+         updated_at = excluded.updated_at`,
+      profile.orderId,
+      profile.partnerAccountId,
+      profile.partnerCode,
+      profile.customerAccountId,
+      profile.customerEmail,
+      profile.addressFingerprint,
+      profile.createdAt,
+      profile.updatedAt
+    );
+  }
+
+  assessReferralRisk(referral, context = {}) {
+    if (!referral || referral.isSelfUse) {
+      return [];
+    }
+
+    const createdFlags = [];
+    const lookbackAt = new Date(
+      Date.now() - 90 * 24 * 60 * 60 * 1000
+    ).toISOString();
+
+    const duplicateChecks = [
+      {
+        value: referral.customerAccountId,
+        column: "customer_account_id",
+        flagType: "duplicate_customer_account",
+        title: "Customer account used across partner codes",
+        label: "customer account",
+        severity: "medium",
+      },
+      {
+        value: referral.customerEmail,
+        column: "customer_email",
+        flagType: "duplicate_customer_email",
+        title: "Customer email used across partner codes",
+        label: "customer email",
+        severity: "medium",
+      },
+      {
+        value: cleanText(
+          context.addressFingerprint,
+          MAX_RISK_ADDRESS_FINGERPRINT_LENGTH
+        ),
+        column: "address_fingerprint",
+        flagType: "duplicate_shipping_address",
+        title: "Shipping address used across partner codes",
+        label: "shipping address",
+        severity: "medium",
+      },
+    ];
+
+    for (const check of duplicateChecks) {
+      if (!check.value) {
+        continue;
+      }
+
+      const rows = this.sql
+        .exec(
+          `SELECT
+             COUNT(*) AS order_count,
+             COUNT(DISTINCT partner_account_id) AS partner_count
+           FROM partner_referral_risk_profiles
+           WHERE ${check.column} = ?
+             AND created_at >= ?`,
+          check.value,
+          lookbackAt
+        )
+        .toArray();
+
+      const orderCount = Number(rows[0]?.order_count || 0);
+      const partnerCount = Number(
+        rows[0]?.partner_count || 0
+      );
+
+      if (partnerCount < 2) {
+        continue;
+      }
+
+      const flag = this.createAutomaticRiskFlag({
+        referral,
+        flagType: check.flagType,
+        severity: check.severity,
+        title: check.title,
+        summary:
+          `The same ${check.label} appears on ${orderCount} referral orders connected to ${partnerCount} different partner accounts during the last 90 days. This is a review signal only and does not prove abuse.`,
+        addressFingerprint: cleanText(
+          context.addressFingerprint,
+          MAX_RISK_ADDRESS_FINGERPRINT_LENGTH
+        ),
+        payoutHoldRecommended: false,
+      });
+
+      if (flag) {
+        createdFlags.push(flag);
+      }
+    }
+
+    const visitorId = cleanText(
+      context.analyticsVisitorId,
+      MAX_ANALYTICS_VISITOR_ID_LENGTH
+    );
+
+    if (visitorId) {
+      const clickLookbackAt = new Date(
+        Date.now() - 60 * 60 * 1000
+      ).toISOString();
+
+      const clickRows = this.sql
+        .exec(
+          `SELECT
+             COUNT(*) AS click_count,
+             COUNT(DISTINCT partner_account_id) AS partner_count
+           FROM partner_click_events
+           WHERE visitor_id = ?
+             AND clicked_at >= ?`,
+          visitorId,
+          clickLookbackAt
+        )
+        .toArray();
+
+      const clickCount = Number(
+        clickRows[0]?.click_count || 0
+      );
+
+      const clickedPartnerCount = Number(
+        clickRows[0]?.partner_count || 0
+      );
+
+      if (
+        clickCount >= 40 ||
+        clickedPartnerCount >= 8
+      ) {
+        const flag = this.createAutomaticRiskFlag({
+          referral,
+          flagType: "suspicious_click_activity",
+          severity: "medium",
+          title: "Unusually high referral-link activity",
+          summary:
+            `The anonymous visitor connected to this order generated ${clickCount} referral-link clicks involving ${clickedPartnerCount} partner accounts within one hour. No IP address was stored. This is a review signal only and does not prove abuse.`,
+          addressFingerprint: cleanText(
+            context.addressFingerprint,
+            MAX_RISK_ADDRESS_FINGERPRINT_LENGTH
+          ),
+          payoutHoldRecommended: false,
+        });
+
+        if (flag) {
+          createdFlags.push(flag);
+        }
+      }
+    }
+
+    return createdFlags;
+  }
+
+  createAutomaticRiskFlag({
+    referral,
+    flagType,
+    severity,
+    title,
+    summary,
+    addressFingerprint = "",
+    payoutHoldRecommended = false,
+  }) {
+    const existingRows = this.sql
+      .exec(
+        `SELECT flag_id
+         FROM partner_risk_flags
+         WHERE order_id = ?
+           AND flag_type = ?
+           AND status IN ('new', 'reviewing')
+         LIMIT 1`,
+        referral.orderId,
+        flagType
+      )
+      .toArray();
+
+    if (existingRows.length) {
+      return null;
+    }
+
+    const flagId = createRiskFlagId();
+    const now = new Date().toISOString();
+    const createdBy = "system risk monitor";
+
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(
+        `INSERT INTO partner_risk_flags (
+           flag_id,
+           order_id,
+           partner_account_id,
+           partner_code,
+           customer_account_id,
+           customer_email,
+           address_fingerprint,
+           flag_type,
+           severity,
+           status,
+           title,
+           summary,
+           source,
+           private_notes,
+           payout_hold_recommended,
+           created_at,
+           created_by,
+           updated_at,
+           updated_by,
+           resolved_at,
+           resolved_by
+         ) VALUES (
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new',
+           ?, ?, 'automatic', '', ?, ?, ?, ?, ?, '', ''
+         )`,
+        flagId,
+        referral.orderId,
+        referral.partnerAccountId,
+        referral.partnerCode,
+        referral.customerAccountId,
+        referral.customerEmail,
+        addressFingerprint,
+        flagType,
+        severity,
+        title,
+        summary,
+        payoutHoldRecommended ? 1 : 0,
+        now,
+        createdBy,
+        now,
+        createdBy
+      );
+
+      this.sql.exec(
+        `INSERT INTO partner_risk_flag_history (
+           history_id,
+           flag_id,
+           action,
+           previous_status,
+           next_status,
+           note,
+           created_at,
+           created_by
+         ) VALUES (
+           ?, ?, 'automatically_flagged',
+           '', 'new', ?, ?, ?
+         )`,
+        createRiskHistoryId(),
+        flagId,
+        summary,
+        now,
+        createdBy
+      );
+    });
+
+    return this.findRiskFlag(flagId);
+  }
+
+  listRiskFlags(url) {
+    const status = cleanText(
+      url.searchParams.get("status") || "all",
+      40
+    ).toLowerCase();
+
+    if (status !== "all" && !RISK_FLAG_STATUSES.has(status)) {
+      throw new RegistryError("Choose a valid review status.", 400);
+    }
+
+    const rows =
+      status === "all"
+        ? this.sql
+            .exec(
+              `SELECT *
+               FROM partner_risk_flags
+               ORDER BY created_at DESC
+               LIMIT ?`,
+              MAX_RISK_FLAG_HISTORY
+            )
+            .toArray()
+        : this.sql
+            .exec(
+              `SELECT *
+               FROM partner_risk_flags
+               WHERE status = ?
+               ORDER BY created_at DESC
+               LIMIT ?`,
+              status,
+              MAX_RISK_FLAG_HISTORY
+            )
+            .toArray();
+
+    const statusRows = this.sql
+      .exec(
+        `SELECT status, COUNT(*) AS count
+         FROM partner_risk_flags
+         GROUP BY status`
+      )
+      .toArray();
+
+    const statusCounts = {
+      new: 0,
+      reviewing: 0,
+      cleared: 0,
+      confirmed_abuse: 0,
+    };
+
+    for (const row of statusRows) {
+      const rowStatus = cleanText(row.status, 40).toLowerCase();
+
+      if (RISK_FLAG_STATUSES.has(rowStatus)) {
+        statusCounts[rowStatus] = Number(row.count || 0);
+      }
+    }
+
+    const flags = rows.map((row) => {
+      const flag = mapRiskFlagRow(row);
+
+      return {
+        ...flag,
+        history: this.listRiskFlagHistory(flag.flagId),
+      };
+    });
+
+    return jsonResponse({
+      success: true,
+      flags,
+      records: flags,
+      count: flags.length,
+      statusCounts,
+    });
+  }
+
+  async createRiskFlag(request) {
+    const payload = await readJson(request);
+
+    const submittedOrderId = cleanText(
+      payload.orderId,
+      100
+    ).toUpperCase();
+
+    const orderId = submittedOrderId
+      ? normalizeOrderId(submittedOrderId)
+      : "";
+
+    const referral = orderId
+      ? this.findReferral(orderId)
+      : null;
+
+    if (orderId && !referral) {
+      throw new RegistryError("Referral order not found.", 404);
+    }
+
+    const partnerAccountId =
+      referral?.partnerAccountId ||
+      cleanText(payload.partnerAccountId, 150);
+
+    const application = partnerAccountId
+      ? this.findApplication(partnerAccountId)
+      : null;
+
+    const partnerCode =
+      referral?.partnerCode ||
+      application?.code ||
+      normalizeCode(payload.partnerCode);
+
+    const customerAccountId =
+      referral?.customerAccountId ||
+      cleanText(payload.customerAccountId, 150);
+
+    const customerEmail = cleanText(
+      referral?.customerEmail || payload.customerEmail,
+      254
+    ).toLowerCase();
+
+    const addressFingerprint = cleanText(
+      payload.addressFingerprint,
+      MAX_RISK_ADDRESS_FINGERPRINT_LENGTH
+    );
+
+    const flagType = cleanText(
+      payload.flagType || "manual_review",
+      80
+    ).toLowerCase();
+
+    const severity = cleanText(
+      payload.severity || "medium",
+      40
+    ).toLowerCase();
+
+    const title = cleanText(
+      payload.title,
+      MAX_RISK_TITLE_LENGTH
+    );
+
+    const summary = cleanMultilineText(
+      payload.summary,
+      MAX_RISK_SUMMARY_LENGTH
+    );
+
+    const privateNotes = cleanMultilineText(
+      payload.privateNotes,
+      MAX_RISK_PRIVATE_NOTES_LENGTH
+    );
+
+    const createdBy = cleanText(
+      payload.createdBy || "authorized administrator",
+      254
+    );
+
+    const payoutHoldRecommended = Boolean(
+      payload.payoutHoldRecommended
+    );
+
+    if (!RISK_FLAG_TYPES.has(flagType)) {
+      throw new RegistryError("Choose a valid risk-flag type.", 400);
+    }
+
+    if (!RISK_FLAG_SEVERITIES.has(severity)) {
+      throw new RegistryError("Choose a valid risk severity.", 400);
+    }
+
+    if (!title) {
+      throw new RegistryError("A review title is required.", 400);
+    }
+
+    if (
+      !orderId &&
+      !partnerAccountId &&
+      !customerAccountId &&
+      !customerEmail
+    ) {
+      throw new RegistryError(
+        "Connect the review flag to an order, partner, customer account, or customer email.",
+        400
+      );
+    }
+
+    const flagId = createRiskFlagId();
+    const historyId = createRiskHistoryId();
+    const now = new Date().toISOString();
+
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(
+        `INSERT INTO partner_risk_flags (
+           flag_id,
+           order_id,
+           partner_account_id,
+           partner_code,
+           customer_account_id,
+           customer_email,
+           address_fingerprint,
+           flag_type,
+           severity,
+           status,
+           title,
+           summary,
+           source,
+           private_notes,
+           payout_hold_recommended,
+           created_at,
+           created_by,
+           updated_at,
+           updated_by,
+           resolved_at,
+           resolved_by
+         ) VALUES (
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new',
+           ?, ?, 'manual', ?, ?, ?, ?, ?, ?, '', ''
+         )`,
+        flagId,
+        orderId,
+        partnerAccountId,
+        partnerCode,
+        customerAccountId,
+        customerEmail,
+        addressFingerprint,
+        flagType,
+        severity,
+        title,
+        summary,
+        privateNotes,
+        payoutHoldRecommended ? 1 : 0,
+        now,
+        createdBy,
+        now,
+        createdBy
+      );
+
+      this.sql.exec(
+        `INSERT INTO partner_risk_flag_history (
+           history_id,
+           flag_id,
+           action,
+           previous_status,
+           next_status,
+           note,
+           created_at,
+           created_by
+         ) VALUES (?, ?, 'created', '', 'new', ?, ?, ?)`,
+        historyId,
+        flagId,
+        summary || "Review flag created.",
+        now,
+        createdBy
+      );
+    });
+
+    return jsonResponse(
+      {
+        success: true,
+        flag: {
+          ...this.findRiskFlag(flagId),
+          history: this.listRiskFlagHistory(flagId),
+        },
+        message:
+          "The review flag was created. No commission was cancelled and no payout hold was applied automatically.",
+      },
+      201
+    );
+  }
+
+  async updateRiskFlag(request) {
+    const payload = await readJson(request);
+    const flagId = cleanText(payload.flagId, 120);
+    const existing = this.findRiskFlag(flagId);
+
+    if (!existing) {
+      throw new RegistryError("Review flag not found.", 404);
+    }
+
+    const nextStatus = cleanText(
+      payload.status || existing.status,
+      40
+    ).toLowerCase();
+
+    const nextSeverity = cleanText(
+      payload.severity || existing.severity,
+      40
+    ).toLowerCase();
+
+    const privateNotes =
+      Object.prototype.hasOwnProperty.call(
+        payload,
+        "privateNotes"
+      )
+        ? cleanMultilineText(
+            payload.privateNotes,
+            MAX_RISK_PRIVATE_NOTES_LENGTH
+          )
+        : existing.privateNotes;
+
+    const note = cleanMultilineText(
+      payload.note,
+      MAX_RISK_SUMMARY_LENGTH
+    );
+
+    const updatedBy = cleanText(
+      payload.updatedBy || "authorized administrator",
+      254
+    );
+
+    if (!RISK_FLAG_STATUSES.has(nextStatus)) {
+      throw new RegistryError("Choose a valid review status.", 400);
+    }
+
+    if (!RISK_FLAG_SEVERITIES.has(nextSeverity)) {
+      throw new RegistryError("Choose a valid risk severity.", 400);
+    }
+
+    const now = new Date().toISOString();
+    const resolved =
+      nextStatus === "cleared" ||
+      nextStatus === "confirmed_abuse";
+
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(
+        `UPDATE partner_risk_flags
+         SET status = ?,
+             severity = ?,
+             private_notes = ?,
+             updated_at = ?,
+             updated_by = ?,
+             resolved_at = ?,
+             resolved_by = ?
+         WHERE flag_id = ?`,
+        nextStatus,
+        nextSeverity,
+        privateNotes,
+        now,
+        updatedBy,
+        resolved ? now : "",
+        resolved ? updatedBy : "",
+        flagId
+      );
+
+      this.sql.exec(
+        `INSERT INTO partner_risk_flag_history (
+           history_id,
+           flag_id,
+           action,
+           previous_status,
+           next_status,
+           note,
+           created_at,
+           created_by
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        createRiskHistoryId(),
+        flagId,
+        existing.status === nextStatus
+          ? "details_updated"
+          : "status_changed",
+        existing.status,
+        nextStatus,
+        note,
+        now,
+        updatedBy
+      );
+    });
+
+    return jsonResponse({
+      success: true,
+      flag: {
+        ...this.findRiskFlag(flagId),
+        history: this.listRiskFlagHistory(flagId),
+      },
+      message: "The review flag was updated.",
+    });
+  }
+
+  async setReferralPayoutHold(request) {
+    const payload = await readJson(request);
+    const orderId = normalizeOrderId(payload.orderId);
+    if (typeof payload.hold !== "boolean") {
+      throw new RegistryError(
+        "Choose whether to apply or clear the payout hold.",
+        400
+      );
+    }
+
+    const hold = payload.hold;
+
+    const reason = cleanMultilineText(
+      payload.reason,
+      MAX_RISK_PRIVATE_NOTES_LENGTH
+    );
+
+    const updatedBy = cleanText(
+      payload.updatedBy || "authorized administrator",
+      254
+    );
+
+    const flagId = cleanText(payload.flagId, 120);
+    const referral = this.findReferral(orderId);
+
+    if (!referral) {
+      throw new RegistryError("Referral order not found.", 404);
+    }
+
+    if (referral.isSelfUse) {
+      throw new RegistryError(
+        "Own-code tier orders earn no commission and do not require payout holds.",
+        409
+      );
+    }
+
+    if (referral.payoutId) {
+      throw new RegistryError(
+        "This commission has already been included in a payout.",
+        409
+      );
+    }
+
+    if (!reason) {
+      throw new RegistryError(
+        hold
+          ? "Enter a private reason before placing a payout hold."
+          : "Enter a private reason before clearing the payout hold.",
+        400
+      );
+    }
+
+    const previousHold = Boolean(
+      referral.payoutHold
+    );
+
+    if (previousHold === hold) {
+      throw new RegistryError(
+        hold
+          ? "This commission is already on payout hold."
+          : "This commission is not currently on payout hold.",
+        409
+      );
+    }
+    const now = new Date().toISOString();
+
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(
+        `UPDATE partner_referrals
+         SET payout_hold = ?,
+             payout_hold_reason = ?,
+             payout_hold_at = ?,
+             payout_hold_by = ?
+         WHERE order_id = ?`,
+        hold ? 1 : 0,
+        hold ? reason : "",
+        hold ? now : "",
+        hold ? updatedBy : "",
+        orderId
+      );
+
+      this.sql.exec(
+        `INSERT INTO partner_referral_hold_history (
+           history_id,
+           order_id,
+           previous_hold,
+           next_hold,
+           reason,
+           created_at,
+           created_by
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        createRiskHistoryId("HOLD"),
+        orderId,
+        previousHold ? 1 : 0,
+        hold ? 1 : 0,
+        reason,
+        now,
+        updatedBy
+      );
+
+      if (flagId) {
+        const flag = this.findRiskFlag(flagId);
+
+        if (!flag) {
+          throw new RegistryError("Review flag not found.", 404);
+        }
+
+        this.sql.exec(
+          `INSERT INTO partner_risk_flag_history (
+             history_id,
+             flag_id,
+             action,
+             previous_status,
+             next_status,
+             note,
+             created_at,
+             created_by
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          createRiskHistoryId(),
+          flagId,
+          hold
+            ? "payout_hold_applied"
+            : "payout_hold_cleared",
+          flag.status,
+          flag.status,
+          reason,
+          now,
+          updatedBy
+        );
+      }
+    });
+
+    return jsonResponse({
+      success: true,
+      referral: this.findReferral(orderId),
+      holdHistory: this.listReferralHoldHistory(orderId),
+      message: hold
+        ? "The commission was placed on payout hold. It remains recorded and was not cancelled."
+        : "The payout hold was cleared.",
+    });
+  }
+
+  findRiskFlag(flagId) {
+    if (!flagId) {
+      return null;
+    }
+
+    const rows = this.sql
+      .exec(
+        `SELECT *
+         FROM partner_risk_flags
+         WHERE flag_id = ?
+         LIMIT 1`,
+        flagId
+      )
+      .toArray();
+
+    return rows.length
+      ? mapRiskFlagRow(rows[0])
+      : null;
+  }
+
+  listRiskFlagHistory(flagId) {
+    return this.sql
+      .exec(
+        `SELECT *
+         FROM partner_risk_flag_history
+         WHERE flag_id = ?
+         ORDER BY created_at DESC
+         LIMIT ?`,
+        flagId,
+        MAX_RISK_FLAG_HISTORY
+      )
+      .toArray()
+      .map(mapRiskFlagHistoryRow);
+  }
+
+  listReferralHoldHistory(orderId) {
+    return this.sql
+      .exec(
+        `SELECT *
+         FROM partner_referral_hold_history
+         WHERE order_id = ?
+         ORDER BY created_at DESC
+         LIMIT ?`,
+        orderId,
+        MAX_RISK_FLAG_HISTORY
+      )
+      .toArray()
+      .map(mapReferralHoldHistoryRow);
+  }
+
   getPayoutSettings() {
     return jsonResponse({
       success: true,
@@ -1906,6 +2966,7 @@ export class PartnerRegistry extends DurableObject {
            AND r.referral_status = 'earned'
            AND r.is_self_use = 0
            AND r.commission_amount_cents > 0
+           AND r.payout_hold = 0
            AND pi.order_id IS NULL
          ORDER BY r.earned_at ASC, r.created_at ASC`,
         accountId
@@ -1966,6 +3027,7 @@ export class PartnerRegistry extends DurableObject {
             currentReferral.partnerAccountId !== accountId ||
             currentReferral.referralStatus !== "earned" ||
             currentReferral.isSelfUse ||
+            currentReferral.payoutHold ||
             currentReferral.commissionAmountCents <= 0 ||
             existingItem
           ) {
@@ -3628,7 +4690,7 @@ function normalizeCampaignSlug(value) {
     !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)
   ) {
     throw new RegistryError(
-      "Campaign slugs must contain 3–60 lowercase letters, numbers, or single hyphens.",
+      "Campaign slugs must contain 3â€“60 lowercase letters, numbers, or single hyphens.",
       400
     );
   }
@@ -4160,6 +5222,104 @@ function mapApplicationRow(row) {
   };
 }
 
+function mapRiskFlagRow(row) {
+  const status = cleanText(row.status, 40).toLowerCase();
+  const severity = cleanText(row.severity, 40).toLowerCase();
+  const flagType = cleanText(row.flag_type, 80).toLowerCase();
+
+  return {
+    flagId: cleanText(row.flag_id, 120),
+    orderId: cleanText(row.order_id, 100),
+    partnerAccountId: cleanText(
+      row.partner_account_id,
+      150
+    ),
+    partnerCode: normalizeCode(row.partner_code),
+    customerAccountId: cleanText(
+      row.customer_account_id,
+      150
+    ),
+    customerEmail: cleanText(
+      row.customer_email,
+      254
+    ).toLowerCase(),
+    addressFingerprint: cleanText(
+      row.address_fingerprint,
+      MAX_RISK_ADDRESS_FINGERPRINT_LENGTH
+    ),
+    flagType: RISK_FLAG_TYPES.has(flagType)
+      ? flagType
+      : "other",
+    severity: RISK_FLAG_SEVERITIES.has(severity)
+      ? severity
+      : "medium",
+    status: RISK_FLAG_STATUSES.has(status)
+      ? status
+      : "new",
+    title: cleanText(
+      row.title,
+      MAX_RISK_TITLE_LENGTH
+    ),
+    summary: cleanMultilineText(
+      row.summary,
+      MAX_RISK_SUMMARY_LENGTH
+    ),
+    source: cleanText(row.source, 40),
+    privateNotes: cleanMultilineText(
+      row.private_notes,
+      MAX_RISK_PRIVATE_NOTES_LENGTH
+    ),
+    payoutHoldRecommended: Boolean(
+      Number(row.payout_hold_recommended || 0)
+    ),
+    createdAt: row.created_at || "",
+    createdBy: cleanText(row.created_by, 254),
+    updatedAt: row.updated_at || "",
+    updatedBy: cleanText(row.updated_by, 254),
+    resolvedAt: row.resolved_at || "",
+    resolvedBy: cleanText(row.resolved_by, 254),
+  };
+}
+
+function mapRiskFlagHistoryRow(row) {
+  return {
+    historyId: cleanText(row.history_id, 120),
+    flagId: cleanText(row.flag_id, 120),
+    action: cleanText(row.action, 80),
+    previousStatus: cleanText(
+      row.previous_status,
+      40
+    ).toLowerCase(),
+    nextStatus: cleanText(
+      row.next_status,
+      40
+    ).toLowerCase(),
+    note: cleanMultilineText(
+      row.note,
+      MAX_RISK_SUMMARY_LENGTH
+    ),
+    createdAt: row.created_at || "",
+    createdBy: cleanText(row.created_by, 254),
+  };
+}
+
+function mapReferralHoldHistoryRow(row) {
+  return {
+    historyId: cleanText(row.history_id, 120),
+    orderId: cleanText(row.order_id, 100),
+    previousHold: Boolean(
+      Number(row.previous_hold || 0)
+    ),
+    nextHold: Boolean(Number(row.next_hold || 0)),
+    reason: cleanMultilineText(
+      row.reason,
+      MAX_RISK_PRIVATE_NOTES_LENGTH
+    ),
+    createdAt: row.created_at || "",
+    createdBy: cleanText(row.created_by, 254),
+  };
+}
+
 function mapReferralRow(row) {
   const referralStatus = cleanText(row.referral_status, 30).toLowerCase();
   const payoutId = cleanText(row.payout_id, 100);
@@ -4177,6 +5337,13 @@ function mapReferralRow(row) {
     tierProgressEligible: Boolean(
       Number(row.tier_progress_eligible ?? 1)
     ),
+    payoutHold: Boolean(Number(row.payout_hold || 0)),
+    payoutHoldReason: cleanMultilineText(
+      row.payout_hold_reason,
+      MAX_RISK_PRIVATE_NOTES_LENGTH
+    ),
+    payoutHoldAt: row.payout_hold_at || "",
+    payoutHoldBy: cleanText(row.payout_hold_by, 254),
     referralStatus: REFERRAL_STATUSES.has(referralStatus)
       ? referralStatus
       : "pending",
@@ -4225,6 +5392,7 @@ function mapCustomerReferralRow(row) {
     commissionAmountCents: referral.commissionAmountCents,
     isSelfUse: referral.isSelfUse,
     tierProgressEligible: referral.tierProgressEligible,
+    payoutHold: referral.payoutHold,
     referralStatus: referral.referralStatus,
     commissionStatus: referral.commissionStatus,
     orderStatus: referral.orderStatus,
@@ -4273,6 +5441,8 @@ function mapSummaryRow(row) {
     adjustmentRequiredCount: Number(row.adjustment_required_count || 0),
     tierProgressOrderCount: Number(row.tier_progress_order_count || 0),
     selfUseTierOrderCount: Number(row.self_use_tier_order_count || 0),
+    heldReferralCount: Number(row.held_referral_count || 0),
+    heldCommissionCents: Number(row.held_commission_cents || 0),
   };
 }
 
@@ -4293,6 +5463,8 @@ function emptyReferralSummary() {
     adjustmentRequiredCount: 0,
     tierProgressOrderCount: 0,
     selfUseTierOrderCount: 0,
+    heldReferralCount: 0,
+    heldCommissionCents: 0,
   };
 }
 
@@ -4404,6 +5576,20 @@ function normalizeOptionalOrderIds(value) {
   return Array.from(
     new Set(value.map((orderId) => normalizeOrderId(orderId)))
   );
+}
+
+function createRiskFlagId() {
+  return `RISK-${Date.now()}-${crypto
+    .randomUUID()
+    .split("-")[0]
+    .toUpperCase()}`;
+}
+
+function createRiskHistoryId(prefix = "RISK-HISTORY") {
+  return `${prefix}-${Date.now()}-${crypto
+    .randomUUID()
+    .split("-")[0]
+    .toUpperCase()}`;
 }
 
 function createPayoutId() {

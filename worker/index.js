@@ -164,6 +164,21 @@ export default {
     if (url.pathname === "/api/admin/partner-referrals") {
       return handleAdminPartnerReferralsRequest(request, env);
     }
+    if (url.pathname === "/api/admin/partner-risk-flags") {
+      return handleAdminRiskFlagsRequest(request, env, url);
+    }
+
+    if (url.pathname === "/api/admin/partner-risk-flags/create") {
+      return handleAdminCreateRiskFlagRequest(request, env);
+    }
+
+    if (url.pathname === "/api/admin/partner-risk-flags/update") {
+      return handleAdminUpdateRiskFlagRequest(request, env);
+    }
+
+    if (url.pathname === "/api/admin/partner-referral-payout-hold") {
+      return handleAdminReferralPayoutHoldRequest(request, env);
+    }
 
     if (url.pathname === "/api/admin/partner-payout-settings") {
       return handleAdminPayoutSettingsRequest(request, env);
@@ -1445,6 +1460,342 @@ async function handleAdminPartnerReferralsRequest(request, env) {
   }
 }
 
+async function handleAdminRiskFlagsRequest(request, env, url) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "GET") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    requireSameOrigin(request);
+    await requireAdminAuthorization(request, env);
+
+    const status = cleanText(
+      url.searchParams.get("status") || "all",
+      40
+    ).toLowerCase();
+
+    const registryResponse = await partnerRegistryFetch(
+      env,
+      `/admin/risk-flags?status=${encodeURIComponent(status)}`,
+      { method: "GET" }
+    );
+
+    const result = await readInternalJsonResponse(
+      registryResponse
+    );
+
+    const flags = Array.isArray(result.flags)
+      ? result.flags
+          .map(toAdminRiskFlagRecord)
+          .filter(Boolean)
+      : [];
+
+    return jsonResponse({
+      success: true,
+      flags,
+      records: flags,
+      count: flags.length,
+      statusCounts: toAdminRiskStatusCounts(
+        result.statusCounts
+      ),
+    });
+  } catch (error) {
+    console.error(
+      "Admin fraud-review list request error:",
+      error
+    );
+
+    return handleApiError(error);
+  }
+}
+
+async function handleAdminCreateRiskFlagRequest(
+  request,
+  env
+) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "POST") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    requireSameOrigin(request);
+    validateJsonContentType(request);
+    await requireAdminAuthorization(request, env);
+
+    await enforceAuthenticationRateLimit(
+      request,
+      env,
+      "partner-risk-create"
+    );
+
+    const body = await readJsonRequest(
+      request,
+      MAX_AUTH_REQUEST_LENGTH
+    );
+
+    const registryResponse = await partnerRegistryFetch(
+      env,
+      "/admin/risk-flags/create",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          orderId: cleanText(
+            body.orderId,
+            100
+          ).toUpperCase(),
+          partnerAccountId: cleanText(
+            body.partnerAccountId,
+            150
+          ),
+          partnerCode: cleanText(
+            body.partnerCode,
+            MAX_REFERRAL_CODE_LENGTH
+          ).toUpperCase(),
+          customerAccountId: cleanText(
+            body.customerAccountId,
+            150
+          ),
+          customerEmail: cleanText(
+            body.customerEmail,
+            MAX_REFERRAL_CUSTOMER_EMAIL_LENGTH
+          ).toLowerCase(),
+          addressFingerprint: cleanText(
+            body.addressFingerprint,
+            128
+          ),
+          flagType: cleanText(
+            body.flagType || "manual_review",
+            80
+          ).toLowerCase(),
+          severity: cleanText(
+            body.severity || "medium",
+            40
+          ).toLowerCase(),
+          title: cleanText(body.title, 160),
+          summary: cleanMultilineText(
+            body.summary,
+            2000
+          ),
+          privateNotes: cleanMultilineText(
+            body.privateNotes,
+            5000
+          ),
+          payoutHoldRecommended: Boolean(
+            body.payoutHoldRecommended
+          ),
+          createdBy: getAdminIdentity(request),
+        }),
+      }
+    );
+
+    const result = await readInternalJsonResponse(
+      registryResponse
+    );
+
+    return jsonResponse({
+      success: true,
+      flag: toAdminRiskFlagRecord(result.flag),
+      message:
+        result.message ||
+        "The review flag was created.",
+    });
+  } catch (error) {
+    console.error(
+      "Admin fraud-review create request error:",
+      error
+    );
+
+    return handleApiError(error);
+  }
+}
+
+async function handleAdminUpdateRiskFlagRequest(
+  request,
+  env
+) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "POST") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    requireSameOrigin(request);
+    validateJsonContentType(request);
+    await requireAdminAuthorization(request, env);
+
+    await enforceAuthenticationRateLimit(
+      request,
+      env,
+      "partner-risk-update"
+    );
+
+    const body = await readJsonRequest(
+      request,
+      MAX_AUTH_REQUEST_LENGTH
+    );
+
+    const updatePayload = {
+      flagId: cleanText(body.flagId, 120),
+      status: cleanText(
+        body.status,
+        40
+      ).toLowerCase(),
+      severity: cleanText(
+        body.severity,
+        40
+      ).toLowerCase(),
+      note: cleanMultilineText(
+        body.note,
+        2000
+      ),
+      updatedBy: getAdminIdentity(request),
+    };
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        body,
+        "privateNotes"
+      )
+    ) {
+      updatePayload.privateNotes =
+        cleanMultilineText(
+          body.privateNotes,
+          5000
+        );
+    }
+
+    const registryResponse = await partnerRegistryFetch(
+      env,
+      "/admin/risk-flags/update",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(updatePayload),
+      }
+    );
+
+    const result = await readInternalJsonResponse(
+      registryResponse
+    );
+
+    return jsonResponse({
+      success: true,
+      flag: toAdminRiskFlagRecord(result.flag),
+      message:
+        result.message ||
+        "The review flag was updated.",
+    });
+  } catch (error) {
+    console.error(
+      "Admin fraud-review update request error:",
+      error
+    );
+
+    return handleApiError(error);
+  }
+}
+
+async function handleAdminReferralPayoutHoldRequest(
+  request,
+  env
+) {
+  try {
+    validatePartnerEnvironment(env);
+
+    if (request.method !== "POST") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    requireSameOrigin(request);
+    validateJsonContentType(request);
+    await requireAdminAuthorization(request, env);
+
+    await enforceAuthenticationRateLimit(
+      request,
+      env,
+      "partner-payout-hold"
+    );
+
+    const body = await readJsonRequest(
+      request,
+      MAX_AUTH_REQUEST_LENGTH
+    );
+
+    if (typeof body.hold !== "boolean") {
+      throw new ApiRequestError(
+        "Choose whether to apply or clear the payout hold.",
+        400
+      );
+    }
+
+    const registryResponse = await partnerRegistryFetch(
+      env,
+      "/admin/referral-payout-hold",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          orderId: cleanText(
+            body.orderId,
+            100
+          ).toUpperCase(),
+          hold: body.hold,
+          reason: cleanMultilineText(
+            body.reason,
+            5000
+          ),
+          flagId: cleanText(
+            body.flagId,
+            120
+          ),
+          updatedBy: getAdminIdentity(request),
+        }),
+      }
+    );
+
+    const result = await readInternalJsonResponse(
+      registryResponse
+    );
+
+    const holdHistory = Array.isArray(
+      result.holdHistory
+    )
+      ? result.holdHistory
+          .map(toAdminReferralHoldHistoryRecord)
+          .filter(Boolean)
+      : [];
+
+    return jsonResponse({
+      success: true,
+      referral: toAdminReferralRecord(
+        result.referral
+      ),
+      holdHistory,
+      message:
+        result.message ||
+        "The referral payout-hold status was updated.",
+    });
+  } catch (error) {
+    console.error(
+      "Admin referral payout-hold request error:",
+      error
+    );
+
+    return handleApiError(error);
+  }
+}
 async function handleAdminPayoutSettingsRequest(request, env) {
   try {
     validatePartnerEnvironment(env);
@@ -1798,7 +2149,11 @@ async function handleOrderWithReferral(request, env, context) {
             customerEmail:
               storedOrder.customer?.email ||
               sessionState.session.account.email ||
-              "",
+              "",            addressFingerprint:
+              await createOrderAddressFingerprint(
+                storedOrder,
+                env
+              ),
             orderSubtotal: Number(storedOrder.subtotal || 0),
             orderStatus:
               storedOrder.status || "Order Request Received",
@@ -2082,6 +2437,12 @@ function toCustomerReferralSummary(summary) {
     adjustmentRequiredCount: Number(source.adjustmentRequiredCount || 0),
     tierProgressOrderCount: Number(source.tierProgressOrderCount || 0),
     selfUseTierOrderCount: Number(source.selfUseTierOrderCount || 0),
+    heldReferralCount: Number(
+      source.heldReferralCount || 0
+    ),
+    heldCommissionCents: Number(
+      source.heldCommissionCents || 0
+    ),
     minimumPayoutCents: Number(source.minimumPayoutCents || 0),
     payoutEligible: Boolean(source.payoutEligible),
     amountUntilEligibleCents: Number(source.amountUntilEligibleCents || 0),
@@ -2101,6 +2462,7 @@ function toCustomerReferralRecord(referral) {
     commissionAmountCents: Number(referral.commissionAmountCents || 0),
     isSelfUse: Boolean(referral.isSelfUse),
     tierProgressEligible: Boolean(referral.tierProgressEligible),
+    payoutHold: Boolean(referral.payoutHold),
     referralStatus: cleanText(referral.referralStatus || "pending", 30),
     commissionStatus: cleanText(
       referral.commissionStatus || referral.referralStatus || "pending",
@@ -2146,6 +2508,15 @@ function toAdminReferralRecord(referral) {
       referral.customerEmail,
       MAX_REFERRAL_CUSTOMER_EMAIL_LENGTH
     ).toLowerCase(),
+    payoutHoldReason: cleanMultilineText(
+      referral.payoutHoldReason,
+      5000
+    ),
+    payoutHoldAt: referral.payoutHoldAt || "",
+    payoutHoldBy: cleanText(
+      referral.payoutHoldBy,
+      254
+    ),
     partnerEmail: cleanText(
       referral.partnerEmail,
       MAX_REFERRAL_CUSTOMER_EMAIL_LENGTH
@@ -2165,6 +2536,178 @@ function toAdminReferralRecord(referral) {
   };
 }
 
+function toAdminRiskStatusCounts(counts) {
+  const source =
+    counts && typeof counts === "object"
+      ? counts
+      : {};
+
+  return {
+    new: Number(source.new || 0),
+    reviewing: Number(source.reviewing || 0),
+    cleared: Number(source.cleared || 0),
+    confirmedAbuse: Number(
+      source.confirmed_abuse ||
+      source.confirmedAbuse ||
+      0
+    ),
+  };
+}
+
+function toAdminRiskFlagRecord(flag) {
+  if (!flag || typeof flag !== "object") {
+    return null;
+  }
+
+  return {
+    flagId: cleanText(flag.flagId, 120),
+    orderId: cleanText(
+      flag.orderId,
+      100
+    ).toUpperCase(),
+    partnerAccountId: cleanText(
+      flag.partnerAccountId,
+      150
+    ),
+    partnerCode: cleanText(
+      flag.partnerCode,
+      MAX_REFERRAL_CODE_LENGTH
+    ).toUpperCase(),
+    customerAccountId: cleanText(
+      flag.customerAccountId,
+      150
+    ),
+    customerEmail: cleanText(
+      flag.customerEmail,
+      MAX_REFERRAL_CUSTOMER_EMAIL_LENGTH
+    ).toLowerCase(),
+    addressFingerprint: cleanText(
+      flag.addressFingerprint,
+      128
+    ),
+    flagType: cleanText(
+      flag.flagType,
+      80
+    ),
+    severity: cleanText(
+      flag.severity,
+      40
+    ),
+    status: cleanText(
+      flag.status,
+      40
+    ),
+    title: cleanText(
+      flag.title,
+      160
+    ),
+    summary: cleanMultilineText(
+      flag.summary,
+      2000
+    ),
+    source: cleanText(
+      flag.source,
+      40
+    ),
+    privateNotes: cleanMultilineText(
+      flag.privateNotes,
+      5000
+    ),
+    payoutHoldRecommended: Boolean(
+      flag.payoutHoldRecommended
+    ),
+    createdAt: flag.createdAt || "",
+    createdBy: cleanText(
+      flag.createdBy,
+      254
+    ),
+    updatedAt: flag.updatedAt || "",
+    updatedBy: cleanText(
+      flag.updatedBy,
+      254
+    ),
+    resolvedAt: flag.resolvedAt || "",
+    resolvedBy: cleanText(
+      flag.resolvedBy,
+      254
+    ),
+    history: Array.isArray(flag.history)
+      ? flag.history
+          .map(toAdminRiskFlagHistoryRecord)
+          .filter(Boolean)
+      : [],
+  };
+}
+
+function toAdminRiskFlagHistoryRecord(history) {
+  if (!history || typeof history !== "object") {
+    return null;
+  }
+
+  return {
+    historyId: cleanText(
+      history.historyId,
+      120
+    ),
+    flagId: cleanText(
+      history.flagId,
+      120
+    ),
+    action: cleanText(
+      history.action,
+      80
+    ),
+    previousStatus: cleanText(
+      history.previousStatus,
+      40
+    ),
+    nextStatus: cleanText(
+      history.nextStatus,
+      40
+    ),
+    note: cleanMultilineText(
+      history.note,
+      2000
+    ),
+    createdAt: history.createdAt || "",
+    createdBy: cleanText(
+      history.createdBy,
+      254
+    ),
+  };
+}
+
+function toAdminReferralHoldHistoryRecord(history) {
+  if (!history || typeof history !== "object") {
+    return null;
+  }
+
+  return {
+    historyId: cleanText(
+      history.historyId,
+      120
+    ),
+    orderId: cleanText(
+      history.orderId,
+      100
+    ).toUpperCase(),
+    previousHold: Boolean(
+      history.previousHold
+    ),
+    nextHold: Boolean(
+      history.nextHold
+    ),
+    reason: cleanMultilineText(
+      history.reason,
+      5000
+    ),
+    createdAt: history.createdAt || "",
+    createdBy: cleanText(
+      history.createdBy,
+      254
+    ),
+  };
+}
 function toCustomerAnalyticsReport(report) {
   const source = report && typeof report === 'object' ? report : {};
 
@@ -3075,6 +3618,78 @@ async function getRegistryApplication(env, accountId) {
   return result.application || null;
 }
 
+async function createOrderAddressFingerprint(
+  order,
+  env
+) {
+  const source =
+    order && typeof order === "object"
+      ? order
+      : {};
+
+  const customer =
+    source.customer &&
+    typeof source.customer === "object"
+      ? source.customer
+      : {};
+
+  const parts = [
+    customer.address || source.address || "",
+    customer.city || source.city || "",
+    customer.state || source.state || "",
+    customer.zip ||
+      customer.postalCode ||
+      source.zip ||
+      source.postalCode ||
+      "",
+  ].map(normalizeAddressFingerprintPart);
+
+  if (parts.join("").length < 8) {
+    return "";
+  }
+
+  const normalizedAddress = parts.join("|");
+  const secret = String(
+    env?.ORDER_API_SECRET || ""
+  );
+
+  if (!secret) {
+    return "";
+  }
+
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    {
+      name: "HMAC",
+      hash: "SHA-256",
+    },
+    false,
+    ["sign"]
+  );
+
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(
+      normalizedAddress
+    )
+  );
+
+  return Array.from(
+    new Uint8Array(signature),
+    (byte) =>
+      byte.toString(16).padStart(2, "0")
+  ).join("");
+}
+
+function normalizeAddressFingerprintPart(value) {
+  return String(value == null ? "" : value)
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, 250);
+}
 async function partnerRegistryFetch(env, pathname, init) {
   const id = env.PARTNER_REGISTRY.idFromName(PARTNER_REGISTRY_NAME);
   const stub = env.PARTNER_REGISTRY.get(id);
