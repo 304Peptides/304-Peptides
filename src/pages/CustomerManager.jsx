@@ -8,16 +8,16 @@ const ORDER_STATUSES = [
   "Paid",
   "Paid — Awaiting Shipment",
   "Paid — Awaiting Restock",
+  "Paid — Mixed Fulfillment",
   "Processing",
   "Shipped",
   "Completed",
   "Cancelled",
 ];
 const PAYMENT_METHODS = ["Zelle", "Venmo", "Cash App"];
-const FULFILLMENT_TYPES = [
-  ["in_stock", "In Stock"],
-  ["preorder", "Preorder"],
-  ["mixed", "Mixed Order"],
+const ITEM_FULFILLMENT_OPTIONS = [
+  ["in_stock", "In Stock — ships soon"],
+  ["preorder", "Preorder — ships after restock"],
 ];
 const ACCOUNT_FILTERS = [
   ["all", "All Accounts"],
@@ -162,6 +162,75 @@ function getFulfillmentLabel(order) {
   return order?.fulfillment?.label || "Not selected";
 }
 
+function normalizeItemFulfillmentStatus(value, fallback = "in_stock") {
+  return value === "preorder" ? "preorder" : fallback;
+}
+
+function getSavedItemFulfillmentStatus(order, item, index) {
+  const savedItems = Array.isArray(order?.fulfillment?.items)
+    ? order.fulfillment.items
+    : [];
+
+  const saved =
+    savedItems.find((entry) => Number(entry?.index) === index) ||
+    savedItems.find(
+      (entry) =>
+        String(entry?.codeName || "") === String(item?.codeName || "") &&
+        String(entry?.strength || "") === String(item?.strength || "")
+    );
+
+  if (saved?.status === "in_stock" || saved?.status === "preorder") {
+    return saved.status;
+  }
+
+  return order?.fulfillment?.type === "preorder"
+    ? "preorder"
+    : "in_stock";
+}
+
+function createItemFulfillmentDraft(order) {
+  return getItems(order).map((item, index) =>
+    getSavedItemFulfillmentStatus(order, item, index)
+  );
+}
+
+function buildItemFulfillmentPayload(order, selections) {
+  return getItems(order).map((item, index) => ({
+    index,
+    status: normalizeItemFulfillmentStatus(selections[index]),
+  }));
+}
+
+function deriveFulfillmentType(itemFulfillment) {
+  const statuses = new Set(
+    itemFulfillment.map((item) => item.status)
+  );
+
+  if (statuses.size > 1) {
+    return "mixed";
+  }
+
+  return statuses.has("preorder") ? "preorder" : "in_stock";
+}
+
+function getFulfillmentTypeLabel(type) {
+  if (type === "preorder") {
+    return "Preorder";
+  }
+
+  if (type === "mixed") {
+    return "Mixed Order";
+  }
+
+  return "In Stock";
+}
+
+function getItemDisplayName(item) {
+  return [item?.name || item?.codeName || "Product", item?.strength || ""]
+    .filter(Boolean)
+    .join(" ");
+}
+
 function formatDate(value) {
   if (!value) {
     return "Unavailable";
@@ -274,7 +343,7 @@ function CustomerManager({
   const [paymentAmount, setPaymentAmount] = useState("0.00");
   const [paymentMethod, setPaymentMethod] = useState("Zelle");
   const [paymentReference, setPaymentReference] = useState("");
-  const [fulfillmentType, setFulfillmentType] = useState("in_stock");
+  const [itemFulfillment, setItemFulfillment] = useState([]);
   const [restockNote, setRestockNote] = useState("");
   const [workflowBusy, setWorkflowBusy] = useState("");
   const [busyId, setBusyId] = useState("");
@@ -606,12 +675,11 @@ function CustomerManager({
         : "Zelle"
     );
     setPaymentReference(payment.referenceNumber || "");
-    setFulfillmentType(
-      ["in_stock", "preorder", "mixed"].includes(fulfillment.type)
-        ? fulfillment.type
-        : "in_stock"
+    setItemFulfillment(createItemFulfillmentDraft(order));
+    setRestockNote(
+      fulfillment.timingNote ||
+        (Array.isArray(fulfillment.items) ? "" : fulfillment.restockNote || "")
     );
-    setRestockNote(fulfillment.restockNote || "");
     setActionMessage("");
     setActionError("");
   }
@@ -806,6 +874,20 @@ function CustomerManager({
       return;
     }
 
+    const fulfillmentItems = buildItemFulfillmentPayload(
+      order,
+      itemFulfillment
+    );
+
+    if (fulfillmentItems.length === 0) {
+      setActionError(
+        "This order does not contain any products to classify for fulfillment."
+      );
+      return;
+    }
+
+    const fulfillmentType = deriveFulfillmentType(fulfillmentItems);
+
     setWorkflowBusy(`${orderId}:payment`);
     setActionError("");
     setActionMessage("");
@@ -828,6 +910,7 @@ function CustomerManager({
             paymentMethod,
             referenceNumber: paymentReference.trim(),
             fulfillmentType,
+            itemFulfillment: fulfillmentItems,
             restockNote:
               fulfillmentType === "in_stock" ? "" : restockNote.trim(),
             confirmResend: alreadyRecorded,
@@ -2100,6 +2183,31 @@ function CustomerManager({
                   const busy =
                     recordBusy || invoiceBusy || paymentBusy;
 
+                  const fulfillmentDraft =
+                    buildItemFulfillmentPayload(
+                      order,
+                      itemFulfillment
+                    );
+
+                  const selectedFulfillmentType =
+                    deriveFulfillmentType(
+                      fulfillmentDraft
+                    );
+
+                  const inStockItems =
+                    items.filter(
+                      (_item, index) =>
+                        fulfillmentDraft[index]?.status ===
+                        "in_stock"
+                    );
+
+                  const preorderItems =
+                    items.filter(
+                      (_item, index) =>
+                        fulfillmentDraft[index]?.status ===
+                        "preorder"
+                    );
+
                   return (
                     <article
                       key={id}
@@ -2208,7 +2316,11 @@ function CustomerManager({
                             beginEdit(order)
                           }
                         >
-                          Update Order
+                          {order.invoice?.lastSentAt ||
+                          order.invoice?.sentAt ||
+                          order.invoice?.firstSentAt
+                            ? "Invoice / Payment"
+                            : "Send Invoice"}
                         </button>
 
                         <button
@@ -2297,6 +2409,20 @@ function CustomerManager({
                                       ""}{" "}
                                     ×{" "}
                                     {item.quantity}
+                                    {order.fulfillment?.items?.length ? (
+                                      <>
+                                        {" "}—{" "}
+                                        <strong>
+                                          {getSavedItemFulfillmentStatus(
+                                            order,
+                                            item,
+                                            index
+                                          ) === "preorder"
+                                            ? "Preorder"
+                                            : "In Stock"}
+                                        </strong>
+                                      </>
+                                    ) : null}
                                   </p>
                                 )
                               )
@@ -2611,22 +2737,100 @@ function CustomerManager({
                                 </select>
                               </label>
 
-                              <label>
-                                <span>Fulfillment Type</span>
-                                <select
-                                  value={fulfillmentType}
-                                  disabled={busy}
-                                  onChange={(event) =>
-                                    setFulfillmentType(event.target.value)
-                                  }
-                                >
-                                  {FULFILLMENT_TYPES.map(([value, label]) => (
-                                    <option key={value} value={value}>
-                                      {label}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
+                              <div className="cm-item-fulfillment">
+                                <div className="cm-item-fulfillment-heading">
+                                  <div>
+                                    <strong>Product Fulfillment</strong>
+                                    <small>
+                                      Mark every product as shipping soon or
+                                      waiting for restock. The customer
+                                      confirmation will list each group.
+                                    </small>
+                                  </div>
+
+                                  <span>
+                                    {getFulfillmentTypeLabel(
+                                      selectedFulfillmentType
+                                    )}
+                                  </span>
+                                </div>
+
+                                {items.map((item, index) => (
+                                  <label
+                                    className="cm-item-fulfillment-row"
+                                    key={`${item.codeName || item.name || "product"}-${item.strength || "strength"}-${index}`}
+                                  >
+                                    <span>
+                                      <strong>{getItemDisplayName(item)}</strong>
+                                      <small>Quantity: {item.quantity}</small>
+                                    </span>
+
+                                    <select
+                                      value={
+                                        itemFulfillment[index] ||
+                                        getSavedItemFulfillmentStatus(
+                                          order,
+                                          item,
+                                          index
+                                        )
+                                      }
+                                      disabled={busy}
+                                      onChange={(event) => {
+                                        const selected = event.target.value;
+
+                                        setItemFulfillment((current) => {
+                                          const next =
+                                            createItemFulfillmentDraft(order);
+
+                                          current.forEach((status, itemIndex) => {
+                                            if (status) {
+                                              next[itemIndex] = status;
+                                            }
+                                          });
+
+                                          next[index] = selected;
+                                          return next;
+                                        });
+                                      }}
+                                    >
+                                      {ITEM_FULFILLMENT_OPTIONS.map(
+                                        ([value, label]) => (
+                                          <option key={value} value={value}>
+                                            {label}
+                                          </option>
+                                        )
+                                      )}
+                                    </select>
+                                  </label>
+                                ))}
+
+
+                                <div className="cm-fulfillment-preview">
+                                  <strong>Customer confirmation preview</strong>
+
+                                  {inStockItems.length > 0 && (
+                                    <div>
+                                      <span>Shipping soon</span>
+                                      {inStockItems.map((item, index) => (
+                                        <small key={`ready-${item.codeName || item.name || index}-${index}`}>
+                                          {getItemDisplayName(item)} × {item.quantity}
+                                        </small>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {preorderItems.length > 0 && (
+                                    <div>
+                                      <span>Waiting for restock</span>
+                                      {preorderItems.map((item, index) => (
+                                        <small key={`preorder-${item.codeName || item.name || index}-${index}`}>
+                                          {getItemDisplayName(item)} × {item.quantity}
+                                        </small>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
 
                               <label>
                                 <span>Payment Reference (Optional)</span>
@@ -2642,26 +2846,18 @@ function CustomerManager({
                                 />
                               </label>
 
-                              {fulfillmentType !== "in_stock" && (
+                              {selectedFulfillmentType !== "in_stock" && (
                                 <label>
-                                  <span>
-                                    {fulfillmentType === "mixed"
-                                      ? "Mixed-Order / Restock Note"
-                                      : "Restock Note"}
-                                  </span>
+                                  <span>Restock Timing Note (Optional)</span>
                                   <textarea
                                     rows="4"
-                                    maxLength="1000"
+                                    maxLength="500"
                                     value={restockNote}
                                     disabled={busy}
                                     onChange={(event) =>
                                       setRestockNote(event.target.value)
                                     }
-                                    placeholder={
-                                      fulfillmentType === "mixed"
-                                        ? "Explain what can ship now and what will ship after restock."
-                                        : "Explain the expected restock or shipping timing."
-                                    }
+                                    placeholder="Add an estimated restock date or any timing details. The product lists are created automatically."
                                   />
                                 </label>
                               )}
@@ -3424,6 +3620,90 @@ const css = `
   line-height: 1.5;
 }
 
+.cm-item-fulfillment {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 13px;
+  background: rgba(0,0,0,.18);
+}
+
+.cm-item-fulfillment-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cm-item-fulfillment-heading > div {
+  display: grid;
+  gap: 4px;
+}
+
+.cm-item-fulfillment-heading > div > strong {
+  color: #fff;
+  font-size: 13px;
+}
+
+.cm-item-fulfillment-heading > span {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border: 1px solid rgba(61,165,255,.26);
+  border-radius: 999px;
+  background: rgba(61,165,255,.1);
+  color: #9bd8ff;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .45px;
+  text-transform: uppercase;
+}
+
+.cm-item-fulfillment-row {
+  grid-template-columns: minmax(0, 1fr) minmax(190px, .8fr);
+  align-items: center;
+  gap: 12px !important;
+  padding: 11px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 11px;
+  background: rgba(255,255,255,.035);
+}
+
+.cm-item-fulfillment-row > span {
+  display: grid;
+  gap: 3px;
+}
+
+.cm-item-fulfillment-row > span > strong {
+  color: #eef7ff;
+  font-size: 12px;
+}
+
+.cm-fulfillment-preview {
+  display: grid;
+  gap: 9px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+
+.cm-fulfillment-preview > strong {
+  color: #fff;
+  font-size: 12px;
+}
+
+.cm-fulfillment-preview > div {
+  display: grid;
+  gap: 3px;
+}
+
+.cm-fulfillment-preview > div > span {
+  color: #9bd8ff;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .45px;
+  text-transform: uppercase;
+}
+
 .cm-money-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3478,9 +3758,19 @@ const css = `
   }
 
   .cm-reset form,
-  .cm-filters {
+  .cm-filters,
+  .cm-item-fulfillment-row {
     grid-template-columns:
       minmax(0, 1fr);
+  }
+
+  .cm-item-fulfillment-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .cm-item-fulfillment-heading > span {
+    align-self: flex-start;
   }
 
   .cm-hero,

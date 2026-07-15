@@ -17,6 +17,7 @@ const MAX_ORDER_PAYMENT_LINK_LENGTH = 2048;
 const MAX_ORDER_PAYMENT_DESTINATION_LENGTH = 300;
 const MAX_ORDER_PAYMENT_REFERENCE_LENGTH = 200;
 const MAX_ORDER_RESTOCK_NOTE_LENGTH = 1000;
+const MAX_ORDER_TIMING_NOTE_LENGTH = 500;
 const MAX_ORDER_WORKFLOW_MESSAGE_LENGTH = 1000;
 const MAX_ORDER_AMOUNT_CENTS = 10000000;
 const ORDER_WORKFLOW_HISTORY_LIMIT = 100;
@@ -1298,10 +1299,20 @@ async function processPaymentReceivedWorkflowAction(
       order.paymentMethod
     );
 
-  const fulfillmentType =
-    normalizeWorkflowFulfillmentType(
-      body.fulfillmentType
+  const itemFulfillment =
+    normalizeWorkflowItemFulfillment(
+      body.itemFulfillment,
+      order.items
     );
+
+  const fulfillmentType =
+    itemFulfillment.length > 0
+      ? deriveWorkflowFulfillmentType(
+          itemFulfillment
+        )
+      : normalizeWorkflowFulfillmentType(
+          body.fulfillmentType
+        );
 
   const referenceNumber =
     cleanText(
@@ -1309,11 +1320,20 @@ async function processPaymentReceivedWorkflowAction(
       MAX_ORDER_PAYMENT_REFERENCE_LENGTH
     );
 
-  const restockNote =
+  const timingNote =
     cleanMultilineText(
       body.restockNote,
-      MAX_ORDER_RESTOCK_NOTE_LENGTH
+      MAX_ORDER_TIMING_NOTE_LENGTH
     );
+
+  const restockNote =
+    fulfillmentType ===
+      "in_stock"
+      ? ""
+      : buildWorkflowFulfillmentSummary(
+          itemFulfillment,
+          timingNote
+        );
 
   const now =
     new Date().toISOString();
@@ -1365,11 +1385,16 @@ async function processPaymentReceivedWorkflowAction(
           ? "Mixed Order"
           : "In Stock",
 
-    restockNote:
+    items:
+      itemFulfillment,
+
+    timingNote:
       fulfillmentType ===
       "in_stock"
         ? ""
-        : restockNote,
+        : timingNote,
+
+    restockNote,
   };
 
   const paymentPayload = {
@@ -1449,7 +1474,10 @@ async function processPaymentReceivedWorkflowAction(
         fulfillmentType ===
         "in_stock"
           ? "Paid — Awaiting Shipment"
-          : "Paid — Awaiting Restock",
+          : fulfillmentType ===
+              "mixed"
+            ? "Paid — Mixed Fulfillment"
+            : "Paid — Awaiting Restock",
 
       payment: {
         ...existingPayment,
@@ -1801,6 +1829,286 @@ function normalizeWorkflowFulfillmentType(
     "Choose In Stock, Preorder, or Mixed Order before confirming payment.",
     400
   );
+}
+
+function normalizeWorkflowItemFulfillment(
+  value,
+  orderItems
+) {
+  if (
+    value === undefined ||
+    value === null
+  ) {
+    return [];
+  }
+
+  if (
+    !Array.isArray(value)
+  ) {
+    throw new ApiRequestError(
+      "Product fulfillment must be submitted as a list.",
+      400
+    );
+  }
+
+  const savedItems =
+    Array.isArray(orderItems)
+      ? orderItems
+      : [];
+
+  if (
+    value.length !==
+    savedItems.length
+  ) {
+    throw new ApiRequestError(
+      "Choose a fulfillment status for every product in the order.",
+      400
+    );
+  }
+
+  const selectedByIndex =
+    new Map();
+
+  value.forEach(
+    (entry) => {
+      if (
+        !entry ||
+        typeof entry !==
+          "object" ||
+        Array.isArray(entry)
+      ) {
+        throw new ApiRequestError(
+          "One of the product fulfillment selections is invalid.",
+          400
+        );
+      }
+
+      const index =
+        Number(entry.index);
+
+      if (
+        !Number.isInteger(index) ||
+        index < 0 ||
+        index >=
+          savedItems.length ||
+        selectedByIndex.has(index)
+      ) {
+        throw new ApiRequestError(
+          "One of the product fulfillment selections does not match this order.",
+          400
+        );
+      }
+
+      selectedByIndex.set(
+        index,
+        normalizeWorkflowLineItemStatus(
+          entry.status
+        )
+      );
+    }
+  );
+
+  return savedItems.map(
+    (item, index) => {
+      const status =
+        selectedByIndex.get(index);
+
+      if (!status) {
+        throw new ApiRequestError(
+          "Choose a fulfillment status for every product in the order.",
+          400
+        );
+      }
+
+      return {
+        index,
+
+        name:
+          cleanText(
+            item?.name,
+            150
+          ) ||
+          "Product",
+
+        codeName:
+          cleanText(
+            item?.codeName,
+            100
+          ),
+
+        strength:
+          cleanText(
+            item?.strength,
+            100
+          ),
+
+        quantity:
+          Math.max(
+            1,
+            Number(
+              item?.quantity ||
+              1
+            )
+          ),
+
+        status,
+
+        label:
+          status ===
+          "preorder"
+            ? "Preorder"
+            : "In Stock",
+      };
+    }
+  );
+}
+
+function normalizeWorkflowLineItemStatus(
+  value
+) {
+  const normalized =
+    cleanText(
+      value,
+      50
+    )
+      .toLowerCase()
+      .replace(
+        /[\s-]+/g,
+        "_"
+      );
+
+  if (
+    normalized ===
+      "in_stock" ||
+    normalized ===
+      "instock"
+  ) {
+    return "in_stock";
+  }
+
+  if (
+    normalized ===
+    "preorder"
+  ) {
+    return "preorder";
+  }
+
+  throw new ApiRequestError(
+    "Each product must be marked In Stock or Preorder.",
+    400
+  );
+}
+
+function deriveWorkflowFulfillmentType(
+  items
+) {
+  const statuses =
+    new Set(
+      items.map(
+        (item) =>
+          item.status
+      )
+    );
+
+  if (
+    statuses.size > 1
+  ) {
+    return "mixed";
+  }
+
+  return statuses.has(
+    "preorder"
+  )
+    ? "preorder"
+    : "in_stock";
+}
+
+function buildWorkflowFulfillmentSummary(
+  items,
+  timingNote
+) {
+  if (
+    !Array.isArray(items) ||
+    items.length === 0
+  ) {
+    return cleanMultilineText(
+      timingNote,
+      MAX_ORDER_RESTOCK_NOTE_LENGTH
+    );
+  }
+
+  const inStock =
+    items.filter(
+      (item) =>
+        item.status ===
+        "in_stock"
+    );
+
+  const preorder =
+    items.filter(
+      (item) =>
+        item.status ===
+        "preorder"
+    );
+
+  const sections =
+    [];
+
+  if (
+    inStock.length > 0
+  ) {
+    sections.push(
+      [
+        "Shipping soon:",
+        ...inStock.map(
+          formatWorkflowFulfillmentItem
+        ),
+      ].join("\n")
+    );
+  }
+
+  if (
+    preorder.length > 0
+  ) {
+    sections.push(
+      [
+        "Waiting for restock:",
+        ...preorder.map(
+          formatWorkflowFulfillmentItem
+        ),
+      ].join("\n")
+    );
+  }
+
+  if (timingNote) {
+    sections.push(
+      `Timing note:\n${timingNote}`
+    );
+  }
+
+  return cleanMultilineText(
+    sections.join(
+      "\n\n"
+    ),
+    MAX_ORDER_RESTOCK_NOTE_LENGTH
+  );
+}
+
+function formatWorkflowFulfillmentItem(
+  item
+) {
+  const product =
+    [
+      item.name ||
+        item.codeName ||
+        "Product",
+      item.strength ||
+        "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+  return `- ${product} x ${Number(item.quantity || 1)}`;
 }
 
 function appendOrderWorkflowHistory(
@@ -4040,6 +4348,67 @@ function toCustomerOrderRecord(
               cleanText(
                 fulfillment.label,
                 100
+              ),
+
+            items:
+              Array.isArray(
+                fulfillment.items
+              )
+                ? fulfillment.items.map(
+                    (item, index) => ({
+                      index:
+                        Number.isInteger(
+                          Number(item?.index)
+                        )
+                          ? Number(item.index)
+                          : index,
+
+                      name:
+                        cleanText(
+                          item?.name,
+                          150
+                        ),
+
+                      codeName:
+                        cleanText(
+                          item?.codeName,
+                          100
+                        ),
+
+                      strength:
+                        cleanText(
+                          item?.strength,
+                          100
+                        ),
+
+                      quantity:
+                        Math.max(
+                          1,
+                          Number(
+                            item?.quantity ||
+                            1
+                          )
+                        ),
+
+                      status:
+                        item?.status ===
+                        "preorder"
+                          ? "preorder"
+                          : "in_stock",
+
+                      label:
+                        item?.status ===
+                        "preorder"
+                          ? "Preorder"
+                          : "In Stock",
+                    })
+                  )
+                : [],
+
+            timingNote:
+              cleanMultilineText(
+                fulfillment.timingNote,
+                MAX_ORDER_TIMING_NOTE_LENGTH
               ),
 
             restockNote:
