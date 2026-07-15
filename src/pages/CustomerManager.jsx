@@ -6,10 +6,18 @@ const ORDER_STATUSES = [
   "Invoice Sent",
   "Awaiting Payment",
   "Paid",
+  "Paid — Awaiting Shipment",
+  "Paid — Awaiting Restock",
   "Processing",
   "Shipped",
   "Completed",
   "Cancelled",
+];
+const PAYMENT_METHODS = ["Zelle", "Venmo", "Cash App"];
+const FULFILLMENT_TYPES = [
+  ["in_stock", "In Stock"],
+  ["preorder", "Preorder"],
+  ["mixed", "Mixed Order"],
 ];
 const ACCOUNT_FILTERS = [
   ["all", "All Accounts"],
@@ -99,6 +107,59 @@ function formatMoney(value) {
     style: "currency",
     currency: "USD",
   });
+}
+
+function formatCents(value) {
+  return formatMoney(Number(value || 0) / 100);
+}
+
+function moneyInputFromCents(cents, fallbackDollars = 0) {
+  const numericCents = Number(cents);
+  const selectedCents = Number.isFinite(numericCents)
+    ? numericCents
+    : Math.round(Number(fallbackDollars || 0) * 100);
+
+  return (Math.max(0, selectedCents) / 100).toFixed(2);
+}
+
+function moneyInputToCents(value, label) {
+  const cleaned = String(value ?? "").trim();
+
+  if (!/^\d+(?:\.\d{1,2})?$/.test(cleaned)) {
+    throw new Error(`Enter a valid ${label} using no more than two decimal places.`);
+  }
+
+  const cents = Math.round(Number(cleaned) * 100);
+
+  if (!Number.isSafeInteger(cents) || cents < 0) {
+    throw new Error(`Enter a valid ${label}.`);
+  }
+
+  return cents;
+}
+
+function getInvoiceLabel(order) {
+  const invoice = order?.invoice;
+
+  if (invoice?.lastSentAt || invoice?.sentAt || invoice?.firstSentAt) {
+    return `Sent ${formatDate(invoice.lastSentAt || invoice.sentAt || invoice.firstSentAt)}`;
+  }
+
+  return "Not sent";
+}
+
+function getPaymentLabel(order) {
+  const payment = order?.payment;
+
+  if (payment?.receivedAt) {
+    return `Received ${formatDate(payment.receivedAt)}`;
+  }
+
+  return "Not recorded";
+}
+
+function getFulfillmentLabel(order) {
+  return order?.fulfillment?.label || "Not selected";
 }
 
 function formatDate(value) {
@@ -204,6 +265,18 @@ function CustomerManager({
   const [editingId, setEditingId] = useState("");
   const [draftStatus, setDraftStatus] = useState("");
   const [draftNotes, setDraftNotes] = useState("");
+  const [invoiceMethod, setInvoiceMethod] = useState("Zelle");
+  const [invoicePaymentLink, setInvoicePaymentLink] = useState("");
+  const [invoiceDestination, setInvoiceDestination] = useState("");
+  const [invoiceSubtotal, setInvoiceSubtotal] = useState("0.00");
+  const [invoiceShipping, setInvoiceShipping] = useState("0.00");
+  const [invoiceTax, setInvoiceTax] = useState("0.00");
+  const [paymentAmount, setPaymentAmount] = useState("0.00");
+  const [paymentMethod, setPaymentMethod] = useState("Zelle");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [fulfillmentType, setFulfillmentType] = useState("in_stock");
+  const [restockNote, setRestockNote] = useState("");
+  const [workflowBusy, setWorkflowBusy] = useState("");
   const [busyId, setBusyId] = useState("");
   const [resetEmail, setResetEmail] = useState("");
   const [resetting, setResetting] = useState(false);
@@ -487,11 +560,58 @@ function CustomerManager({
 
   function beginEdit(order) {
     const orderId = getOrderId(order);
+    const invoice = order.invoice && typeof order.invoice === "object"
+      ? order.invoice
+      : {};
+    const payment = order.payment && typeof order.payment === "object"
+      ? order.payment
+      : {};
+    const fulfillment = order.fulfillment && typeof order.fulfillment === "object"
+      ? order.fulfillment
+      : {};
+    const defaultPaymentMethod =
+      payment.paymentMethod ||
+      invoice.paymentMethod ||
+      order.preferredPaymentLabel ||
+      order.paymentMethod ||
+      "Zelle";
 
     setEditingId(orderId);
     setExpandedId(orderId);
     setDraftStatus(order.status || ORDER_STATUSES[0]);
     setDraftNotes(order.adminNotes || "");
+    setInvoiceMethod(
+      PAYMENT_METHODS.includes(invoice.paymentMethod)
+        ? invoice.paymentMethod
+        : PAYMENT_METHODS.includes(defaultPaymentMethod)
+          ? defaultPaymentMethod
+          : "Zelle"
+    );
+    setInvoicePaymentLink(invoice.paymentLink || "");
+    setInvoiceDestination(invoice.paymentDestination || "");
+    setInvoiceSubtotal(
+      moneyInputFromCents(invoice.subtotalCents, getSubtotal(order))
+    );
+    setInvoiceShipping(moneyInputFromCents(invoice.shippingCents, 0));
+    setInvoiceTax(moneyInputFromCents(invoice.taxCents, 0));
+    setPaymentAmount(
+      moneyInputFromCents(
+        payment.amountCents,
+        Number(invoice.totalCents || 0) / 100 || getSubtotal(order)
+      )
+    );
+    setPaymentMethod(
+      PAYMENT_METHODS.includes(defaultPaymentMethod)
+        ? defaultPaymentMethod
+        : "Zelle"
+    );
+    setPaymentReference(payment.referenceNumber || "");
+    setFulfillmentType(
+      ["in_stock", "preorder", "mixed"].includes(fulfillment.type)
+        ? fulfillment.type
+        : "in_stock"
+    );
+    setRestockNote(fulfillment.restockNote || "");
     setActionMessage("");
     setActionError("");
   }
@@ -548,6 +668,187 @@ function CustomerManager({
       );
     } finally {
       setBusyId("");
+    }
+  }
+
+  function replaceOrderRecord(updated) {
+    const updatedId = getOrderId(updated);
+
+    setRecords((current) =>
+      sortOrders(
+        current.map((item) =>
+          getOrderId(item) === updatedId ? updated : item
+        )
+      )
+    );
+  }
+
+  async function sendInvoice(order) {
+    const orderId = getOrderId(order);
+    const alreadySent = Boolean(
+      order.invoice?.firstSentAt ||
+      order.invoice?.sentAt ||
+      order.invoice?.lastSentAt
+    );
+
+    if (!ordersReady) {
+      setActionError("Load Cloudflare orders before sending an invoice.");
+      return;
+    }
+
+    if (!invoicePaymentLink.trim() && !invoiceDestination.trim()) {
+      setActionError(
+        "Enter either a secure payment link or a payment destination before sending the invoice."
+      );
+      return;
+    }
+
+    if (
+      alreadySent &&
+      !window.confirm(
+        `An invoice has already been sent for order ${orderId}. Send it again?`
+      )
+    ) {
+      return;
+    }
+
+    let subtotalCents;
+    let shippingCents;
+    let taxCents;
+
+    try {
+      subtotalCents = moneyInputToCents(invoiceSubtotal, "invoice subtotal");
+      shippingCents = moneyInputToCents(invoiceShipping, "shipping amount");
+      taxCents = moneyInputToCents(invoiceTax, "tax amount");
+    } catch (inputError) {
+      setActionError(inputError.message);
+      return;
+    }
+
+    setWorkflowBusy(`${orderId}:invoice`);
+    setActionError("");
+    setActionMessage("");
+
+    try {
+      const response = await fetch("/api/admin/order-actions/invoice", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${adminSecret}`,
+        },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({
+          orderId,
+          paymentMethod: invoiceMethod,
+          paymentLink: invoicePaymentLink.trim(),
+          paymentDestination: invoiceDestination.trim(),
+          subtotalCents,
+          shippingCents,
+          taxCents,
+          confirmResend: alreadySent,
+        }),
+      });
+
+      const result = await readJson(response);
+      const updated = result.order || result.record;
+
+      replaceOrderRecord(updated);
+      setDraftStatus(updated.status || "Invoice Sent");
+      setPaymentAmount(
+        moneyInputFromCents(
+          updated.invoice?.totalCents,
+          getSubtotal(updated)
+        )
+      );
+      setActionMessage(
+        result.message || `Invoice for order ${orderId} was sent.`
+      );
+    } catch (requestError) {
+      setActionError(
+        requestError.message || "The invoice could not be sent."
+      );
+    } finally {
+      setWorkflowBusy("");
+    }
+  }
+
+  async function recordPayment(order) {
+    const orderId = getOrderId(order);
+    const alreadyRecorded = Boolean(order.payment?.receivedAt);
+
+    if (!ordersReady) {
+      setActionError("Load Cloudflare orders before recording payment.");
+      return;
+    }
+
+    if (
+      alreadyRecorded &&
+      !window.confirm(
+        `Payment has already been recorded for order ${orderId}. Send another confirmation?`
+      )
+    ) {
+      return;
+    }
+
+    let amountCents;
+
+    try {
+      amountCents = moneyInputToCents(paymentAmount, "payment amount");
+    } catch (inputError) {
+      setActionError(inputError.message);
+      return;
+    }
+
+    if (amountCents <= 0) {
+      setActionError("The payment amount must be greater than zero.");
+      return;
+    }
+
+    setWorkflowBusy(`${orderId}:payment`);
+    setActionError("");
+    setActionMessage("");
+
+    try {
+      const response = await fetch(
+        "/api/admin/order-actions/payment-received",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Authorization: `Bearer ${adminSecret}`,
+          },
+          credentials: "same-origin",
+          cache: "no-store",
+          body: JSON.stringify({
+            orderId,
+            amountCents,
+            paymentMethod,
+            referenceNumber: paymentReference.trim(),
+            fulfillmentType,
+            restockNote:
+              fulfillmentType === "in_stock" ? "" : restockNote.trim(),
+            confirmResend: alreadyRecorded,
+          }),
+        }
+      );
+
+      const result = await readJson(response);
+      const updated = result.order || result.record;
+
+      replaceOrderRecord(updated);
+      setDraftStatus(updated.status || "Paid");
+      setActionMessage(
+        result.message || `Payment for order ${orderId} was recorded.`
+      );
+    } catch (requestError) {
+      setActionError(
+        requestError.message || "The payment could not be recorded."
+      );
+    } finally {
+      setWorkflowBusy("");
     }
   }
 
@@ -1787,8 +2088,17 @@ function CustomerManager({
                   const editing =
                     editingId === id;
 
-                  const busy =
+                  const recordBusy =
                     busyId === id;
+
+                  const invoiceBusy =
+                    workflowBusy === `${id}:invoice`;
+
+                  const paymentBusy =
+                    workflowBusy === `${id}:payment`;
+
+                  const busy =
+                    recordBusy || invoiceBusy || paymentBusy;
 
                   return (
                     <article
@@ -1846,6 +2156,26 @@ function CustomerManager({
                             {formatMoney(
                               getSubtotal(order)
                             )}
+                          </strong>
+
+                          <span>
+                            Invoice
+                          </span>
+
+                          <strong>
+                            {order.invoice?.lastSentAt ||
+                            order.invoice?.sentAt ||
+                            order.invoice?.firstSentAt
+                              ? "Sent"
+                              : "Not Sent"}
+                          </strong>
+
+                          <span>
+                            Fulfillment
+                          </span>
+
+                          <strong>
+                            {getFulfillmentLabel(order)}
                           </strong>
                         </div>
                       </div>
@@ -1987,6 +2317,48 @@ function CustomerManager({
                                 "No notes"}
                             </p>
                           </div>
+
+                          <div>
+                            <h4>
+                              Invoice & Payment
+                            </h4>
+
+                            <p>
+                              <strong>Invoice:</strong>{" "}
+                              {getInvoiceLabel(order)}
+                            </p>
+
+                            {order.invoice?.totalCents !== undefined && (
+                              <p>
+                                <strong>Invoice total:</strong>{" "}
+                                {formatCents(order.invoice.totalCents)}
+                              </p>
+                            )}
+
+                            <p>
+                              <strong>Payment:</strong>{" "}
+                              {getPaymentLabel(order)}
+                            </p>
+
+                            {order.payment?.amountCents !== undefined && (
+                              <p>
+                                <strong>Amount received:</strong>{" "}
+                                {formatCents(order.payment.amountCents)}
+                              </p>
+                            )}
+
+                            <p>
+                              <strong>Fulfillment:</strong>{" "}
+                              {getFulfillmentLabel(order)}
+                            </p>
+
+                            {order.fulfillment?.restockNote && (
+                              <p>
+                                <strong>Restock note:</strong>{" "}
+                                {order.fulfillment.restockNote}
+                              </p>
+                            )}
+                          </div>
                         </div>
                       )}
 
@@ -2049,9 +2421,9 @@ function CustomerManager({
                                 saveOrder(order)
                               }
                             >
-                              {busy
+                              {recordBusy
                                 ? "Saving..."
-                                : "Save"}
+                                : "Save Status & Notes"}
                             </button>
 
                             <button
@@ -2062,9 +2434,252 @@ function CustomerManager({
                                 setEditingId("")
                               }
                             >
-                              Cancel
+                              Close Editor
                             </button>
                           </div>
+
+                          <section className="cm-workflow-grid">
+                            <div className="cm-workflow-card">
+                              <div className="cm-workflow-heading">
+                                <div>
+                                  <span className="cm-workflow-step">STEP 1</span>
+                                  <h4>Send Customer Invoice</h4>
+                                </div>
+
+                                <span className="cm-workflow-state">
+                                  {order.invoice?.lastSentAt ||
+                                  order.invoice?.sentAt ||
+                                  order.invoice?.firstSentAt
+                                    ? "Invoice Sent"
+                                    : "Not Sent"}
+                                </span>
+                              </div>
+
+                              <label>
+                                <span>Payment Method</span>
+                                <select
+                                  value={invoiceMethod}
+                                  disabled={busy}
+                                  onChange={(event) =>
+                                    setInvoiceMethod(event.target.value)
+                                  }
+                                >
+                                  {PAYMENT_METHODS.map((method) => (
+                                    <option key={method} value={method}>
+                                      {method}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+
+                              <label>
+                                <span>Secure Payment Link</span>
+                                <input
+                                  type="url"
+                                  value={invoicePaymentLink}
+                                  disabled={busy}
+                                  onChange={(event) =>
+                                    setInvoicePaymentLink(event.target.value)
+                                  }
+                                  placeholder="https://..."
+                                />
+                                <small>
+                                  Enter a link, a destination below, or both.
+                                </small>
+                              </label>
+
+                              <label>
+                                <span>Payment Destination</span>
+                                <input
+                                  type="text"
+                                  maxLength="300"
+                                  value={invoiceDestination}
+                                  disabled={busy}
+                                  onChange={(event) =>
+                                    setInvoiceDestination(event.target.value)
+                                  }
+                                  placeholder="Username, cashtag, phone, or email"
+                                />
+                              </label>
+
+                              <div className="cm-money-grid">
+                                <label>
+                                  <span>Subtotal</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={invoiceSubtotal}
+                                    disabled={busy}
+                                    onChange={(event) =>
+                                      setInvoiceSubtotal(event.target.value)
+                                    }
+                                  />
+                                </label>
+
+                                <label>
+                                  <span>Shipping</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={invoiceShipping}
+                                    disabled={busy}
+                                    onChange={(event) =>
+                                      setInvoiceShipping(event.target.value)
+                                    }
+                                  />
+                                </label>
+
+                                <label>
+                                  <span>Tax</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={invoiceTax}
+                                    disabled={busy}
+                                    onChange={(event) =>
+                                      setInvoiceTax(event.target.value)
+                                    }
+                                  />
+                                </label>
+                              </div>
+
+                              <div className="cm-workflow-total">
+                                Invoice total will be calculated by the Worker.
+                              </div>
+
+                              <button
+                                type="button"
+                                className="primary-btn"
+                                disabled={busy}
+                                onClick={() => sendInvoice(order)}
+                              >
+                                {invoiceBusy
+                                  ? "Sending Invoice..."
+                                  : order.invoice?.lastSentAt ||
+                                      order.invoice?.sentAt ||
+                                      order.invoice?.firstSentAt
+                                    ? "Resend Invoice"
+                                    : "Send Invoice"}
+                              </button>
+                            </div>
+
+                            <div className="cm-workflow-card">
+                              <div className="cm-workflow-heading">
+                                <div>
+                                  <span className="cm-workflow-step">STEP 2</span>
+                                  <h4>Record Payment</h4>
+                                </div>
+
+                                <span className="cm-workflow-state">
+                                  {order.payment?.receivedAt
+                                    ? "Payment Recorded"
+                                    : "Not Recorded"}
+                                </span>
+                              </div>
+
+                              <label>
+                                <span>Amount Received</span>
+                                <input
+                                  type="number"
+                                  min="0.01"
+                                  step="0.01"
+                                  value={paymentAmount}
+                                  disabled={busy}
+                                  onChange={(event) =>
+                                    setPaymentAmount(event.target.value)
+                                  }
+                                />
+                              </label>
+
+                              <label>
+                                <span>Payment Method</span>
+                                <select
+                                  value={paymentMethod}
+                                  disabled={busy}
+                                  onChange={(event) =>
+                                    setPaymentMethod(event.target.value)
+                                  }
+                                >
+                                  {PAYMENT_METHODS.map((method) => (
+                                    <option key={method} value={method}>
+                                      {method}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+
+                              <label>
+                                <span>Fulfillment Type</span>
+                                <select
+                                  value={fulfillmentType}
+                                  disabled={busy}
+                                  onChange={(event) =>
+                                    setFulfillmentType(event.target.value)
+                                  }
+                                >
+                                  {FULFILLMENT_TYPES.map(([value, label]) => (
+                                    <option key={value} value={value}>
+                                      {label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+
+                              <label>
+                                <span>Payment Reference (Optional)</span>
+                                <input
+                                  type="text"
+                                  maxLength="200"
+                                  value={paymentReference}
+                                  disabled={busy}
+                                  onChange={(event) =>
+                                    setPaymentReference(event.target.value)
+                                  }
+                                  placeholder="Transaction or confirmation number"
+                                />
+                              </label>
+
+                              {fulfillmentType !== "in_stock" && (
+                                <label>
+                                  <span>
+                                    {fulfillmentType === "mixed"
+                                      ? "Mixed-Order / Restock Note"
+                                      : "Restock Note"}
+                                  </span>
+                                  <textarea
+                                    rows="4"
+                                    maxLength="1000"
+                                    value={restockNote}
+                                    disabled={busy}
+                                    onChange={(event) =>
+                                      setRestockNote(event.target.value)
+                                    }
+                                    placeholder={
+                                      fulfillmentType === "mixed"
+                                        ? "Explain what can ship now and what will ship after restock."
+                                        : "Explain the expected restock or shipping timing."
+                                    }
+                                  />
+                                </label>
+                              )}
+
+                              <button
+                                type="button"
+                                className="primary-btn"
+                                disabled={busy}
+                                onClick={() => recordPayment(order)}
+                              >
+                                {paymentBusy
+                                  ? "Recording Payment..."
+                                  : order.payment?.receivedAt
+                                    ? "Resend Payment Confirmation"
+                                    : "Record Payment & Send Confirmation"}
+                              </button>
+                            </div>
+                          </section>
                         </div>
                       )}
                     </article>
@@ -2206,6 +2821,7 @@ const css = `
 .cm-filters input,
 .cm-filters select,
 .cm-reset input,
+.cm-editor input,
 .cm-editor select,
 .cm-editor textarea,
 .cm-control-editor textarea {
@@ -2223,6 +2839,7 @@ const css = `
 .cm-filters input:focus,
 .cm-filters select:focus,
 .cm-reset input:focus,
+.cm-editor input:focus,
 .cm-editor select:focus,
 .cm-editor textarea:focus,
 .cm-control-editor textarea:focus {
@@ -2725,10 +3342,97 @@ const css = `
   color: #fff;
 }
 
+.cm-details strong {
+  color: #e8f4ff;
+}
+
 .cm-editor {
   display: grid;
   gap: 12px;
   margin-top: 16px;
+}
+
+.cm-workflow-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 8px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255,255,255,.09);
+}
+
+.cm-workflow-card {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 13px;
+  padding: 18px;
+  border: 1px solid rgba(61,165,255,.18);
+  border-radius: 16px;
+  background: rgba(61,165,255,.055);
+}
+
+.cm-workflow-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cm-workflow-heading h4 {
+  margin: 4px 0 0;
+  color: #fff;
+  font-size: 18px;
+}
+
+.cm-workflow-step,
+.cm-workflow-state {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+}
+
+.cm-workflow-step {
+  color: #8ed3ff;
+}
+
+.cm-workflow-state {
+  padding: 7px 9px;
+  border: 1px solid rgba(255,255,255,.11);
+  border-radius: 999px;
+  background: rgba(0,0,0,.22);
+  color: #c9d4dc;
+}
+
+.cm-workflow-card label {
+  display: grid;
+  gap: 7px;
+}
+
+.cm-workflow-card label > span {
+  color: #d7e0e6;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.cm-workflow-card small,
+.cm-workflow-total {
+  color: #8f9ba4;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.cm-money-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cm-workflow-card > button {
+  width: 100%;
+  margin-top: 3px;
 }
 
 .cm-empty {
@@ -2767,7 +3471,8 @@ const css = `
 
   .cm-order-stats,
   .cm-summary,
-  .cm-details {
+  .cm-details,
+  .cm-workflow-grid {
     grid-template-columns:
       minmax(0, 1fr);
   }
@@ -2800,7 +3505,8 @@ const css = `
 
   .cm-account-stats,
   .cm-order-stats,
-  .cm-account-info-grid {
+  .cm-account-info-grid,
+  .cm-money-grid {
     grid-template-columns:
       minmax(0, 1fr);
   }
