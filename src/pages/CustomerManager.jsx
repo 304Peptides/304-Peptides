@@ -10,11 +10,13 @@ const ORDER_STATUSES = [
   "Paid — Awaiting Restock",
   "Paid — Mixed Fulfillment",
   "Processing",
+  "Partially Shipped",
   "Shipped",
   "Completed",
   "Cancelled",
 ];
 const PAYMENT_METHODS = ["Zelle", "Venmo", "Cash App"];
+const SHIPPING_CARRIERS = ["USPS", "UPS", "FedEx", "Other"];
 const ITEM_FULFILLMENT_OPTIONS = [
   ["in_stock", "In Stock — ships soon"],
   ["preorder", "Preorder — ships after restock"],
@@ -231,6 +233,71 @@ function getItemDisplayName(item) {
     .join(" ");
 }
 
+function getShipments(order) {
+  return Array.isArray(order?.shipments) ? order.shipments : [];
+}
+
+function getShippedQuantity(order, itemIndex) {
+  return getShipments(order).reduce(
+    (total, shipment) =>
+      total +
+      (Array.isArray(shipment?.items)
+        ? shipment.items.reduce(
+            (shipmentTotal, item) =>
+              Number(item?.index) === itemIndex
+                ? shipmentTotal + Math.max(0, Number(item?.quantity || 0))
+                : shipmentTotal,
+            0
+          )
+        : 0),
+    0
+  );
+}
+
+function getRemainingQuantity(order, itemIndex) {
+  const ordered = Math.max(0, Number(getItems(order)[itemIndex]?.quantity || 0));
+  return Math.max(0, ordered - getShippedQuantity(order, itemIndex));
+}
+
+function createShipmentQuantityDraft(order) {
+  return getItems(order).map((item, index) => {
+    const remaining = getRemainingQuantity(order, index);
+    const fulfillmentStatus = getSavedItemFulfillmentStatus(
+      order,
+      item,
+      index
+    );
+
+    return fulfillmentStatus === "in_stock" ? remaining : 0;
+  });
+}
+
+function buildShipmentItemsPayload(order, quantities) {
+  return getItems(order)
+    .map((item, index) => ({
+      index,
+      quantity: Math.max(0, Math.floor(Number(quantities[index] || 0))),
+      remaining: getRemainingQuantity(order, index),
+      item,
+    }))
+    .filter((entry) => entry.quantity > 0)
+    .map(({ index, quantity }) => ({ index, quantity }));
+}
+
+function getShipmentProgress(order) {
+  const totalQuantity = getQuantity(order);
+  const shippedQuantity = getItems(order).reduce(
+    (total, _item, index) => total + getShippedQuantity(order, index),
+    0
+  );
+
+  return {
+    totalQuantity,
+    shippedQuantity,
+    remainingQuantity: Math.max(0, totalQuantity - shippedQuantity),
+  };
+}
+
 function formatDate(value) {
   if (!value) {
     return "Unavailable";
@@ -345,6 +412,10 @@ function CustomerManager({
   const [paymentReference, setPaymentReference] = useState("");
   const [itemFulfillment, setItemFulfillment] = useState([]);
   const [restockNote, setRestockNote] = useState("");
+  const [shipmentCarrier, setShipmentCarrier] = useState("USPS");
+  const [shipmentTrackingNumber, setShipmentTrackingNumber] = useState("");
+  const [shipmentNote, setShipmentNote] = useState("");
+  const [shipmentQuantities, setShipmentQuantities] = useState([]);
   const [workflowBusy, setWorkflowBusy] = useState("");
   const [busyId, setBusyId] = useState("");
   const [resetEmail, setResetEmail] = useState("");
@@ -680,6 +751,10 @@ function CustomerManager({
       fulfillment.timingNote ||
         (Array.isArray(fulfillment.items) ? "" : fulfillment.restockNote || "")
     );
+    setShipmentCarrier("USPS");
+    setShipmentTrackingNumber("");
+    setShipmentNote("");
+    setShipmentQuantities(createShipmentQuantityDraft(order));
     setActionMessage("");
     setActionError("");
   }
@@ -929,6 +1004,93 @@ function CustomerManager({
     } catch (requestError) {
       setActionError(
         requestError.message || "The payment could not be recorded."
+      );
+    } finally {
+      setWorkflowBusy("");
+    }
+  }
+
+
+  async function createShipment(order) {
+    const orderId = getOrderId(order);
+
+    if (!ordersReady) {
+      setActionError("Load Cloudflare orders before creating a shipment.");
+      return;
+    }
+
+    if (!order.payment?.receivedAt) {
+      setActionError("Record the customer's payment before creating a shipment.");
+      return;
+    }
+
+    const trackingNumber = shipmentTrackingNumber.trim();
+
+    if (!trackingNumber) {
+      setActionError("Enter the shipment tracking number.");
+      return;
+    }
+
+    const shipmentItems = buildShipmentItemsPayload(order, shipmentQuantities);
+
+    if (shipmentItems.length === 0) {
+      setActionError("Choose at least one product quantity for this shipment.");
+      return;
+    }
+
+    for (const shipmentItem of shipmentItems) {
+      const remaining = getRemainingQuantity(order, shipmentItem.index);
+
+      if (shipmentItem.quantity > remaining) {
+        setActionError(
+          `The shipment quantity for ${getItemDisplayName(
+            getItems(order)[shipmentItem.index]
+          )} is greater than the remaining quantity.`
+        );
+        return;
+      }
+    }
+
+    setWorkflowBusy(`${orderId}:shipment`);
+    setActionError("");
+    setActionMessage("");
+
+    try {
+      const response = await fetch(
+        "/api/admin/order-actions/shipment-sent",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Authorization: `Bearer ${adminSecret}`,
+          },
+          credentials: "same-origin",
+          cache: "no-store",
+          body: JSON.stringify({
+            orderId,
+            carrier: shipmentCarrier,
+            trackingNumber,
+            note: shipmentNote.trim(),
+            shipmentItems,
+          }),
+        }
+      );
+
+      const result = await readJson(response);
+      const updated = result.order || result.record;
+
+      replaceOrderRecord(updated);
+      setDraftStatus(updated.status || "Partially Shipped");
+      setShipmentTrackingNumber("");
+      setShipmentNote("");
+      setShipmentQuantities(createShipmentQuantityDraft(updated));
+      setActionMessage(
+        result.message || `Shipment for order ${orderId} was recorded.`
+      );
+    } catch (requestError) {
+      setActionError(
+        requestError.message || "The shipment could not be recorded."
       );
     } finally {
       setWorkflowBusy("");
@@ -2180,8 +2342,11 @@ function CustomerManager({
                   const paymentBusy =
                     workflowBusy === `${id}:payment`;
 
+                  const shipmentBusy =
+                    workflowBusy === `${id}:shipment`;
+
                   const busy =
-                    recordBusy || invoiceBusy || paymentBusy;
+                    recordBusy || invoiceBusy || paymentBusy || shipmentBusy;
 
                   const fulfillmentDraft =
                     buildItemFulfillmentPayload(
@@ -2207,6 +2372,13 @@ function CustomerManager({
                         fulfillmentDraft[index]?.status ===
                         "preorder"
                     );
+
+                  const shipments = getShipments(order);
+                  const shipmentProgress = getShipmentProgress(order);
+                  const shipmentItems = buildShipmentItemsPayload(
+                    order,
+                    shipmentQuantities
+                  );
 
                   return (
                     <article
@@ -2482,6 +2654,20 @@ function CustomerManager({
                               <p>
                                 <strong>Restock note:</strong>{" "}
                                 {order.fulfillment.restockNote}
+                              </p>
+                            )}
+
+                            <p>
+                              <strong>Shipping:</strong>{" "}
+                              {shipmentProgress.shippedQuantity} of{" "}
+                              {shipmentProgress.totalQuantity} item(s) shipped
+                            </p>
+
+                            {shipments.length > 0 && (
+                              <p>
+                                <strong>Latest tracking:</strong>{" "}
+                                {shipments[shipments.length - 1].carrier}{" "}
+                                {shipments[shipments.length - 1].trackingNumber}
                               </p>
                             )}
                           </div>
@@ -2874,6 +3060,191 @@ function CustomerManager({
                                     ? "Resend Payment Confirmation"
                                     : "Record Payment & Send Confirmation"}
                               </button>
+                            </div>
+
+                            <div className="cm-workflow-card">
+                              <div className="cm-workflow-heading">
+                                <div>
+                                  <span className="cm-workflow-step">STEP 3</span>
+                                  <h4>Create Shipment</h4>
+                                </div>
+
+                                <span className="cm-workflow-state">
+                                  {shipmentProgress.remainingQuantity === 0
+                                    ? "Fully Shipped"
+                                    : `${shipmentProgress.shippedQuantity}/${shipmentProgress.totalQuantity} Shipped`}
+                                </span>
+                              </div>
+
+                              {!order.payment?.receivedAt ? (
+                                <div className="cm-shipment-notice">
+                                  Record payment first. Shipment controls become
+                                  available after payment is saved.
+                                </div>
+                              ) : shipmentProgress.remainingQuantity === 0 ? (
+                                <div className="cm-shipment-notice cm-shipment-complete">
+                                  Every product in this order has been shipped.
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="cm-shipping-grid">
+                                    <label>
+                                      <span>Carrier</span>
+                                      <select
+                                        value={shipmentCarrier}
+                                        disabled={busy}
+                                        onChange={(event) =>
+                                          setShipmentCarrier(event.target.value)
+                                        }
+                                      >
+                                        {SHIPPING_CARRIERS.map((carrier) => (
+                                          <option key={carrier} value={carrier}>
+                                            {carrier}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+
+                                    <label>
+                                      <span>Tracking Number</span>
+                                      <input
+                                        type="text"
+                                        maxLength="200"
+                                        value={shipmentTrackingNumber}
+                                        disabled={busy}
+                                        onChange={(event) =>
+                                          setShipmentTrackingNumber(event.target.value)
+                                        }
+                                        placeholder="Enter carrier tracking number"
+                                      />
+                                    </label>
+                                  </div>
+
+                                  <div className="cm-item-fulfillment">
+                                    <div className="cm-item-fulfillment-heading">
+                                      <div>
+                                        <strong>Products in This Package</strong>
+                                        <small>
+                                          Enter the quantity leaving now. Leave 0
+                                          for products staying open.
+                                        </small>
+                                      </div>
+
+                                      <span>
+                                        {shipmentItems.reduce(
+                                          (total, item) => total + item.quantity,
+                                          0
+                                        )}{" "}
+                                        selected
+                                      </span>
+                                    </div>
+
+                                    {items.map((item, index) => {
+                                      const shipped = getShippedQuantity(order, index);
+                                      const remaining = getRemainingQuantity(order, index);
+
+                                      return (
+                                        <label
+                                          className="cm-shipment-item-row"
+                                          key={`shipment-${item.codeName || item.name || "product"}-${item.strength || "strength"}-${index}`}
+                                        >
+                                          <span>
+                                            <strong>{getItemDisplayName(item)}</strong>
+                                            <small>
+                                              Ordered {item.quantity} · Shipped {shipped} · Remaining {remaining}
+                                            </small>
+                                          </span>
+
+                                          <input
+                                            type="number"
+                                            min="0"
+                                            max={remaining}
+                                            step="1"
+                                            value={shipmentQuantities[index] ?? 0}
+                                            disabled={busy || remaining === 0}
+                                            onChange={(event) => {
+                                              const selected = Math.min(
+                                                remaining,
+                                                Math.max(
+                                                  0,
+                                                  Math.floor(Number(event.target.value) || 0)
+                                                )
+                                              );
+
+                                              setShipmentQuantities((current) => {
+                                                const next = getItems(order).map(
+                                                  (_entry, itemIndex) =>
+                                                    Number(current[itemIndex] || 0)
+                                                );
+                                                next[index] = selected;
+                                                return next;
+                                              });
+                                            }}
+                                          />
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+
+                                  <label>
+                                    <span>Shipping Note (Optional)</span>
+                                    <textarea
+                                      rows="3"
+                                      maxLength="1000"
+                                      value={shipmentNote}
+                                      disabled={busy}
+                                      onChange={(event) =>
+                                        setShipmentNote(event.target.value)
+                                      }
+                                      placeholder="Optional package or delivery note for the customer"
+                                    />
+                                  </label>
+
+                                  <button
+                                    type="button"
+                                    className="primary-btn"
+                                    disabled={busy || shipmentItems.length === 0}
+                                    onClick={() => createShipment(order)}
+                                  >
+                                    {shipmentBusy
+                                      ? "Sending Shipment Email..."
+                                      : "Mark Selected Items Shipped & Email Customer"}
+                                  </button>
+                                </>
+                              )}
+
+                              {shipments.length > 0 && (
+                                <div className="cm-shipment-history">
+                                  <strong>Shipment History</strong>
+
+                                  {[...shipments].reverse().map((shipment, shipmentIndex) => (
+                                    <div
+                                      className="cm-shipment-history-card"
+                                      key={shipment.shipmentId || `${shipment.trackingNumber}-${shipmentIndex}`}
+                                    >
+                                      <div>
+                                        <span>
+                                          Package {shipment.packageNumber || shipments.length - shipmentIndex}
+                                        </span>
+                                        <strong>
+                                          {shipment.carrier} {shipment.trackingNumber}
+                                        </strong>
+                                        <small>{formatDate(shipment.shippedAt)}</small>
+                                      </div>
+
+                                      <div>
+                                        {(shipment.items || []).map((item, index) => (
+                                          <small key={`${shipment.shipmentId || shipmentIndex}-${item.index}-${index}`}>
+                                            {getItemDisplayName(item)} × {item.quantity}
+                                          </small>
+                                        ))}
+                                      </div>
+
+                                      {shipment.note && <p>{shipment.note}</p>}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           </section>
                         </div>
@@ -3704,6 +4075,100 @@ const css = `
   text-transform: uppercase;
 }
 
+
+.cm-shipment-notice {
+  padding: 13px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 12px;
+  background: rgba(0,0,0,.18);
+  color: #aebbc4;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.cm-shipment-complete {
+  border-color: rgba(76,175,80,.25);
+  background: rgba(76,175,80,.09);
+  color: #bde9c2;
+}
+
+.cm-shipping-grid {
+  display: grid;
+  grid-template-columns: minmax(150px, .55fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.cm-shipment-item-row {
+  grid-template-columns: minmax(0, 1fr) 100px;
+  align-items: center;
+  gap: 12px !important;
+  padding: 11px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 11px;
+  background: rgba(255,255,255,.035);
+}
+
+.cm-shipment-item-row > span {
+  display: grid;
+  gap: 3px;
+}
+
+.cm-shipment-item-row > span > strong {
+  color: #eef7ff;
+  font-size: 12px;
+}
+
+.cm-shipment-item-row input {
+  text-align: center;
+}
+
+.cm-shipment-history {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+
+.cm-shipment-history > strong {
+  color: #fff;
+  font-size: 13px;
+}
+
+.cm-shipment-history-card {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 12px;
+  background: rgba(0,0,0,.18);
+}
+
+.cm-shipment-history-card > div {
+  display: grid;
+  gap: 3px;
+}
+
+.cm-shipment-history-card > div:first-child > span {
+  color: #8ed3ff;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+}
+
+.cm-shipment-history-card > div:first-child > strong {
+  color: #fff;
+  font-size: 13px;
+}
+
+.cm-shipment-history-card small,
+.cm-shipment-history-card p {
+  margin: 0;
+  color: #aeb8bf;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .cm-money-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3759,7 +4224,9 @@ const css = `
 
   .cm-reset form,
   .cm-filters,
-  .cm-item-fulfillment-row {
+  .cm-item-fulfillment-row,
+  .cm-shipment-item-row,
+  .cm-shipping-grid {
     grid-template-columns:
       minmax(0, 1fr);
   }

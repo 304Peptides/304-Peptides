@@ -16,6 +16,8 @@ const MAX_ORDER_WORKFLOW_REQUEST_LENGTH = 30000;
 const MAX_ORDER_PAYMENT_LINK_LENGTH = 2048;
 const MAX_ORDER_PAYMENT_DESTINATION_LENGTH = 300;
 const MAX_ORDER_PAYMENT_REFERENCE_LENGTH = 200;
+const MAX_ORDER_SHIPMENT_TRACKING_LENGTH = 200;
+const MAX_ORDER_SHIPMENT_NOTE_LENGTH = 1000;
 const MAX_ORDER_RESTOCK_NOTE_LENGTH = 1000;
 const MAX_ORDER_TIMING_NOTE_LENGTH = 500;
 const MAX_ORDER_WORKFLOW_MESSAGE_LENGTH = 1000;
@@ -109,7 +111,9 @@ export default {
       url.pathname ===
         "/api/admin/order-actions/invoice" ||
       url.pathname ===
-        "/api/admin/order-actions/payment-received"
+        "/api/admin/order-actions/payment-received" ||
+      url.pathname ===
+        "/api/admin/order-actions/shipment-sent"
     ) {
       return handleAdminOrderWorkflowAction(
         request,
@@ -867,6 +871,18 @@ async function handleAdminOrderWorkflowAction(
       );
     }
 
+    if (
+      url.pathname ===
+      "/api/admin/order-actions/shipment-sent"
+    ) {
+      return await processShipmentSentWorkflowAction(
+        env,
+        order,
+        body,
+        actor
+      );
+    }
+
     throw new ApiRequestError(
       "Order workflow route not found.",
       404
@@ -1551,6 +1567,252 @@ async function processPaymentReceivedWorkflowAction(
   }
 }
 
+
+async function processShipmentSentWorkflowAction(
+  env,
+  order,
+  body,
+  actor
+) {
+  const orderId =
+    normalizeOrderId(
+      order.orderId ||
+      order.id
+    );
+
+  if (
+    !order.payment ||
+    !order.payment.receivedAt
+  ) {
+    throw new ApiRequestError(
+      "Record payment before creating a shipment.",
+      409
+    );
+  }
+
+  const existingShipments =
+    Array.isArray(order.shipments)
+      ? order.shipments
+      : [];
+
+  const carrier =
+    normalizeWorkflowShipmentCarrier(
+      body.carrier
+    );
+
+  const trackingNumber =
+    cleanText(
+      body.trackingNumber,
+      MAX_ORDER_SHIPMENT_TRACKING_LENGTH
+    );
+
+  if (!trackingNumber) {
+    throw new ApiRequestError(
+      "Enter the shipment tracking number.",
+      400
+    );
+  }
+
+  const note =
+    cleanMultilineText(
+      body.note,
+      MAX_ORDER_SHIPMENT_NOTE_LENGTH
+    );
+
+  const shipmentItems =
+    normalizeWorkflowShipmentItems(
+      body.shipmentItems,
+      order.items,
+      existingShipments
+    );
+
+  const now =
+    new Date().toISOString();
+
+  const eventId =
+    createOrderWorkflowEventId(
+      "shipment"
+    );
+
+  const shipment = {
+    shipmentId:
+      eventId,
+
+    packageNumber:
+      existingShipments.length + 1,
+
+    carrier,
+
+    trackingNumber,
+
+    trackingUrl:
+      buildWorkflowTrackingUrl(
+        carrier,
+        trackingNumber
+      ),
+
+    note,
+
+    items:
+      shipmentItems,
+
+    shippedAt:
+      now,
+
+    sentBy:
+      actor,
+  };
+
+  const updatedShipments = [
+    ...existingShipments,
+    shipment,
+  ];
+
+  const shippingSummary =
+    buildWorkflowShippingSummary(
+      order.items,
+      updatedShipments
+    );
+
+  const event = {
+    eventId,
+    type:
+      "shipment_sent",
+    state:
+      "sending",
+    createdAt:
+      now,
+    createdBy:
+      actor,
+    shipmentId:
+      shipment.shipmentId,
+    carrier,
+    trackingNumber,
+  };
+
+  const pendingOrder = {
+    ...order,
+
+    workflowPending:
+      event,
+
+    updatedAt:
+      now,
+  };
+
+  await putOrderRecord(
+    env,
+    pendingOrder
+  );
+
+  try {
+    const serviceResult =
+      await sendOrderWorkflowToWorkspace(
+        env,
+        {
+          action:
+            "shipment_sent",
+
+          eventId,
+
+          order:
+            pendingOrder,
+
+          shipment,
+
+          shippingSummary,
+        }
+      );
+
+    const completedAt =
+      new Date().toISOString();
+
+    const completedEvent = {
+      ...event,
+
+      state:
+        "sent",
+
+      completedAt,
+
+      serviceMessage:
+        cleanText(
+          serviceResult.message ||
+          "Shipment email sent.",
+          MAX_ORDER_WORKFLOW_MESSAGE_LENGTH
+        ),
+    };
+
+    const updatedOrder = {
+      ...order,
+
+      status:
+        shippingSummary.complete
+          ? "Shipped"
+          : "Partially Shipped",
+
+      shipments:
+        updatedShipments,
+
+      shippingSummary,
+
+      shipmentHistory:
+        appendOrderWorkflowHistory(
+          order.shipmentHistory,
+          completedEvent
+        ),
+
+      workflowHistory:
+        appendOrderWorkflowHistory(
+          order.workflowHistory,
+          completedEvent
+        ),
+
+      workflowPending:
+        null,
+
+      updatedAt:
+        completedAt,
+    };
+
+    await putOrderRecord(
+      env,
+      updatedOrder
+    );
+
+    return jsonResponse({
+      success:
+        true,
+
+      order:
+        updatedOrder,
+
+      record:
+        updatedOrder,
+
+      shipment,
+
+      shippingSummary,
+
+      message:
+        shippingSummary.complete
+          ? `Order ${orderId} was marked shipped and the customer was emailed.`
+          : `A partial shipment for order ${orderId} was recorded and the customer was emailed.`,
+    });
+  } catch (
+    error
+  ) {
+    await recordFailedOrderWorkflowAction(
+      env,
+      order,
+      event,
+      error
+    );
+
+    throw error;
+  }
+}
+
 async function sendOrderWorkflowToWorkspace(
   env,
   payload
@@ -1665,6 +1927,365 @@ async function recordFailedOrderWorkflowAction(
       storageError
     );
   }
+}
+
+
+function normalizeWorkflowShipmentCarrier(
+  value
+) {
+  const normalized =
+    cleanText(
+      value,
+      50
+    )
+      .toLowerCase()
+      .replace(
+        /[\s_-]+/g,
+        ""
+      );
+
+  const carriers = {
+    usps:
+      "USPS",
+    ups:
+      "UPS",
+    fedex:
+      "FedEx",
+    other:
+      "Other",
+  };
+
+  const carrier =
+    carriers[normalized];
+
+  if (!carrier) {
+    throw new ApiRequestError(
+      "Choose USPS, UPS, FedEx, or Other as the shipping carrier.",
+      400
+    );
+  }
+
+  return carrier;
+}
+
+function normalizeWorkflowShipmentItems(
+  value,
+  orderItems,
+  existingShipments
+) {
+  if (!Array.isArray(value)) {
+    throw new ApiRequestError(
+      "Shipment products must be submitted as a list.",
+      400
+    );
+  }
+
+  const savedItems =
+    Array.isArray(orderItems)
+      ? orderItems
+      : [];
+
+  const shippedByIndex =
+    getWorkflowShippedQuantities(
+      existingShipments
+    );
+
+  const selectedByIndex =
+    new Map();
+
+  value.forEach(
+    (entry) => {
+      if (
+        !entry ||
+        typeof entry !==
+          "object" ||
+        Array.isArray(entry)
+      ) {
+        throw new ApiRequestError(
+          "One of the shipment product selections is invalid.",
+          400
+        );
+      }
+
+      const index =
+        Number(entry.index);
+
+      const quantity =
+        Number(entry.quantity);
+
+      if (
+        !Number.isInteger(index) ||
+        index < 0 ||
+        index >=
+          savedItems.length ||
+        selectedByIndex.has(index)
+      ) {
+        throw new ApiRequestError(
+          "One of the shipment product selections does not match this order.",
+          400
+        );
+      }
+
+      if (
+        !Number.isInteger(quantity) ||
+        quantity < 1
+      ) {
+        throw new ApiRequestError(
+          "Every selected shipment product must have a whole-number quantity of at least one.",
+          400
+        );
+      }
+
+      const orderedQuantity =
+        Math.max(
+          1,
+          Number(
+            savedItems[index]?.quantity ||
+            1
+          )
+        );
+
+      const alreadyShipped =
+        shippedByIndex.get(index) ||
+        0;
+
+      const remaining =
+        Math.max(
+          0,
+          orderedQuantity -
+          alreadyShipped
+        );
+
+      if (quantity > remaining) {
+        throw new ApiRequestError(
+          "A shipment quantity is greater than the quantity still open on this order.",
+          409
+        );
+      }
+
+      selectedByIndex.set(
+        index,
+        quantity
+      );
+    }
+  );
+
+  if (
+    selectedByIndex.size ===
+    0
+  ) {
+    throw new ApiRequestError(
+      "Choose at least one product for this shipment.",
+      400
+    );
+  }
+
+  return Array.from(
+    selectedByIndex.entries()
+  ).map(
+    ([index, quantity]) => {
+      const item =
+        savedItems[index] ||
+        {};
+
+      return {
+        index,
+
+        name:
+          cleanText(
+            item.name,
+            150
+          ) ||
+          "Product",
+
+        codeName:
+          cleanText(
+            item.codeName,
+            100
+          ),
+
+        strength:
+          cleanText(
+            item.strength,
+            100
+          ),
+
+        quantity,
+      };
+    }
+  );
+}
+
+function getWorkflowShippedQuantities(
+  shipments
+) {
+  const quantities =
+    new Map();
+
+  for (
+    const shipment of Array.isArray(shipments)
+      ? shipments
+      : []
+  ) {
+    for (
+      const item of Array.isArray(shipment?.items)
+        ? shipment.items
+        : []
+    ) {
+      const index =
+        Number(item?.index);
+
+      const quantity =
+        Math.max(
+          0,
+          Number(
+            item?.quantity ||
+            0
+          )
+        );
+
+      if (
+        Number.isInteger(index) &&
+        index >= 0
+      ) {
+        quantities.set(
+          index,
+          (quantities.get(index) || 0) +
+          quantity
+        );
+      }
+    }
+  }
+
+  return quantities;
+}
+
+function buildWorkflowShippingSummary(
+  orderItems,
+  shipments
+) {
+  const savedItems =
+    Array.isArray(orderItems)
+      ? orderItems
+      : [];
+
+  const shippedByIndex =
+    getWorkflowShippedQuantities(
+      shipments
+    );
+
+  const items =
+    savedItems.map(
+      (item, index) => {
+        const orderedQuantity =
+          Math.max(
+            1,
+            Number(
+              item?.quantity ||
+              1
+            )
+          );
+
+        const shippedQuantity =
+          Math.min(
+            orderedQuantity,
+            Math.max(
+              0,
+              shippedByIndex.get(index) ||
+              0
+            )
+          );
+
+        return {
+          index,
+
+          name:
+            cleanText(
+              item?.name,
+              150
+            ) ||
+            "Product",
+
+          codeName:
+            cleanText(
+              item?.codeName,
+              100
+            ),
+
+          strength:
+            cleanText(
+              item?.strength,
+              100
+            ),
+
+          orderedQuantity,
+
+          shippedQuantity,
+
+          remainingQuantity:
+            Math.max(
+              0,
+              orderedQuantity -
+              shippedQuantity
+            ),
+        };
+      }
+    );
+
+  const totalQuantity =
+    items.reduce(
+      (total, item) =>
+        total + item.orderedQuantity,
+      0
+    );
+
+  const shippedQuantity =
+    items.reduce(
+      (total, item) =>
+        total + item.shippedQuantity,
+      0
+    );
+
+  const remainingQuantity =
+    Math.max(
+      0,
+      totalQuantity -
+      shippedQuantity
+    );
+
+  return {
+    totalQuantity,
+    shippedQuantity,
+    remainingQuantity,
+    complete:
+      totalQuantity > 0 &&
+      remainingQuantity === 0,
+    items,
+  };
+}
+
+function buildWorkflowTrackingUrl(
+  carrier,
+  trackingNumber
+) {
+  const encoded =
+    encodeURIComponent(
+      trackingNumber
+    );
+
+  if (carrier === "USPS") {
+    return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encoded}`;
+  }
+
+  if (carrier === "UPS") {
+    return `https://www.ups.com/track?tracknum=${encoded}`;
+  }
+
+  if (carrier === "FedEx") {
+    return `https://www.fedex.com/fedextrack/?trknbr=${encoded}`;
+  }
+
+  return "";
 }
 
 function normalizeWorkflowPaymentMethod(
@@ -4157,6 +4778,21 @@ function toCustomerOrderRecord(
       ? order.fulfillment
       : {};
 
+  const shipments =
+    Array.isArray(order.shipments)
+      ? order.shipments
+      : [];
+
+  const shippingSummary =
+    order.shippingSummary &&
+    typeof order.shippingSummary ===
+      "object"
+      ? order.shippingSummary
+      : buildWorkflowShippingSummary(
+          order.items,
+          shipments
+        );
+
   const paymentReceivedForCustomer =
     Boolean(
       payment.receivedAt
@@ -4418,6 +5054,121 @@ function toCustomerOrderRecord(
               ),
           }
         : null,
+
+    shipments:
+      shipments.map(
+        (shipment, shipmentIndex) => ({
+          shipmentId:
+            cleanText(
+              shipment?.shipmentId,
+              150
+            ),
+
+          packageNumber:
+            Math.max(
+              1,
+              Number(
+                shipment?.packageNumber ||
+                shipmentIndex + 1
+              )
+            ),
+
+          carrier:
+            cleanText(
+              shipment?.carrier,
+              50
+            ),
+
+          trackingNumber:
+            cleanText(
+              shipment?.trackingNumber,
+              MAX_ORDER_SHIPMENT_TRACKING_LENGTH
+            ),
+
+          trackingUrl:
+            cleanText(
+              shipment?.trackingUrl,
+              MAX_ORDER_PAYMENT_LINK_LENGTH
+            ),
+
+          note:
+            cleanMultilineText(
+              shipment?.note,
+              MAX_ORDER_SHIPMENT_NOTE_LENGTH
+            ),
+
+          shippedAt:
+            shipment?.shippedAt ||
+            "",
+
+          items:
+            Array.isArray(
+              shipment?.items
+            )
+              ? shipment.items.map(
+                  (item, index) => ({
+                    index:
+                      Number.isInteger(
+                        Number(item?.index)
+                      )
+                        ? Number(item.index)
+                        : index,
+
+                    name:
+                      cleanText(
+                        item?.name,
+                        150
+                      ),
+
+                    codeName:
+                      cleanText(
+                        item?.codeName,
+                        100
+                      ),
+
+                    strength:
+                      cleanText(
+                        item?.strength,
+                        100
+                      ),
+
+                    quantity:
+                      Math.max(
+                        1,
+                        Number(
+                          item?.quantity ||
+                          1
+                        )
+                      ),
+                  })
+                )
+              : [],
+        })
+      ),
+
+    shippingSummary: {
+      totalQuantity:
+        Number(
+          shippingSummary.totalQuantity ||
+          0
+        ),
+
+      shippedQuantity:
+        Number(
+          shippingSummary.shippedQuantity ||
+          0
+        ),
+
+      remainingQuantity:
+        Number(
+          shippingSummary.remainingQuantity ||
+          0
+        ),
+
+      complete:
+        shippingSummary.complete ===
+        true,
+    },
   };
 }
 
