@@ -4534,6 +4534,40 @@ const css = `
   max-width: 850px;
 }
 
+
+/* Keep the light Shippo panels readable inside the dark order manager. */
+.cm-integrated-shipping {
+  color: #111827;
+}
+
+.cm-integrated-shipping-heading strong {
+  color: #111827;
+}
+
+.cm-integrated-shipping .cm-parcel-grid label > span {
+  color: #334155;
+}
+
+.cm-integrated-shipping .cm-rate-list > label {
+  color: #111827;
+}
+
+.cm-integrated-shipping .cm-rate-list > label > span {
+  color: #111827;
+}
+
+.cm-integrated-shipping .cm-rate-list > label b {
+  color: #111827;
+}
+
+.cm-integrated-shipping .cm-label-ready {
+  color: #14532d;
+}
+
+.cm-integrated-shipping .cm-label-ready > div > strong,
+.cm-integrated-shipping .cm-label-ready > div > span {
+  color: #14532d;
+}
 @media (max-width: 1000px) {
   .cm-account-stats {
     grid-template-columns:
