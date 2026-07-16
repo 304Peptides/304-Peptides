@@ -1882,3 +1882,35 @@ textarea:focus {
     width: 100%;
   }
 }
+/* Shippo rate and label panels: force readable text on light backgrounds */
+.cm-integrated-shipping,
+.cm-integrated-shipping label,
+.cm-integrated-shipping span,
+.cm-integrated-shipping strong,
+.cm-integrated-shipping p,
+.cm-integrated-shipping h2,
+.cm-integrated-shipping h3,
+.cm-integrated-shipping h4,
+.cm-rate-list,
+.cm-rate-list label,
+.cm-rate-list span,
+.cm-rate-list strong {
+  color: #111827 !important;
+}
+
+.cm-integrated-shipping input,
+.cm-integrated-shipping select {
+  background: #ffffff !important;
+  color: #111827 !important;
+}
+
+.cm-integrated-shipping button {
+  color: #ffffff !important;
+}
+
+.cm-label-ready,
+.cm-label-ready span,
+.cm-label-ready strong,
+.cm-label-ready p {
+  color: #14532d !important;
+}
