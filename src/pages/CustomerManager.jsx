@@ -467,6 +467,7 @@ function CustomerManager({
   const [selectedLabelRateId, setSelectedLabelRateId] = useState("");
   const [purchasedLabel, setPurchasedLabel] = useState(null);
   const [labelBusy, setLabelBusy] = useState("");
+  const [labelError, setLabelError] = useState("");
   const [workflowBusy, setWorkflowBusy] = useState("");
   const [busyId, setBusyId] = useState("");
   const [resetEmail, setResetEmail] = useState("");
@@ -1105,6 +1106,7 @@ function CustomerManager({
     }
 
     setLabelBusy("rates");
+    setLabelError("");
     setActionError("");
     setActionMessage("");
     setPurchasedLabel(null);
@@ -1139,7 +1141,9 @@ function CustomerManager({
       setLabelRates([]);
       setLabelShipmentId("");
       setSelectedLabelRateId("");
-      setActionError(requestError.message || "Shipping rates could not be loaded.");
+      const message = requestError.message || "Shipping rates could not be loaded.";
+      setLabelError(message);
+      setActionError(message);
     } finally {
       setLabelBusy("");
     }
@@ -3382,6 +3386,12 @@ function CustomerManager({
                                     >
                                       {labelBusy === "rates" ? "Loading Rates…" : "Get Shipping Rates"}
                                     </button>
+
+                                    {labelError && (
+                                      <div className="cm-error" role="alert">
+                                        {labelError}
+                                      </div>
+                                    )}
 
                                     {labelRates.length > 0 && (
                                       <div className="cm-rate-list">
