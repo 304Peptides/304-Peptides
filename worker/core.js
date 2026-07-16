@@ -1335,14 +1335,7 @@ async function buyShippingLabel(body, env) {
   const transaction = await shippoRequest(env, "/transactions/", {
     method: "POST",
     body: {
-      shipment: {
-        address_from: origin,
-        address_to: buildShippoAddressFromOrder(order),
-        parcels,
-        metadata: orderId,
-      },
-      carrier_account: carrierAccount,
-      servicelevel_token: serviceToken,
+      rate: rateId,
       label_file_type: "PDF",
       async: false,
       metadata: orderId,
