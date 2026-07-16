@@ -1153,6 +1153,24 @@ function CustomerManager({
       return;
     }
 
+    const selectedRate = labelRates.find(
+      (rate) => rate.id === selectedLabelRateId
+    );
+    const rateAmount = Number(selectedRate?.rate || 0).toLocaleString(
+      "en-US",
+      {
+        style: "currency",
+        currency: selectedRate?.currency || "USD",
+      }
+    );
+    const confirmed = window.confirm(
+      `Purchase ${selectedRate?.carrier || "shipping"} ${selectedRate?.service || "label"} for ${rateAmount}?`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
     setLabelBusy("buy");
     setActionError("");
     setActionMessage("");
