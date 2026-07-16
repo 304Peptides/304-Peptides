@@ -1280,6 +1280,23 @@ async function buyShippingLabel(body, env) {
     );
   }
 
+  const existingLabels = Array.isArray(order.shippingLabels)
+    ? order.shippingLabels
+    : [];
+  const labelAlreadyPurchased = existingLabels.some(function (entry) {
+    return (
+      cleanText(entry?.shipmentId || entry?.shipment_id, 120) === shipmentId ||
+      cleanText(entry?.rateId || entry?.rate_id, 120) === rateId
+    );
+  });
+
+  if (labelAlreadyPurchased) {
+    throw new ApiRequestError(
+      "A shipping label has already been purchased from this quote. Request fresh rates before purchasing another label.",
+      409
+    );
+  }
+
   const [rate, quotedShipment] = await Promise.all([
     shippoRequest(
       env,
@@ -1385,9 +1402,6 @@ async function buyShippingLabel(body, env) {
     );
   }
 
-  const existingLabels = Array.isArray(order.shippingLabels)
-    ? order.shippingLabels
-    : [];
   const updatedOrder = {
     ...order,
     shippingLabels: [...existingLabels, label].slice(-50),
