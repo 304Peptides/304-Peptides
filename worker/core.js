@@ -128,6 +128,7 @@ export default {
 
     if (
       url.pathname === "/api/admin/shipping/settings" ||
+      url.pathname === "/api/admin/shipping/debug" ||
       url.pathname === "/api/admin/shipping/rates" ||
       url.pathname === "/api/admin/shipping/buy"
     ) {
@@ -1007,6 +1008,21 @@ async function handleAdminShippingRequest(request, env, url) {
       throw new ApiRequestError("Method not allowed.", 405);
     }
 
+    if (url.pathname === "/api/admin/shipping/debug") {
+      if (request.method !== "GET") {
+        throw new ApiRequestError("Method not allowed.", 405);
+      }
+
+      if (!env.SHIPPO_API_TOKEN) {
+        throw new ApiRequestError(
+          "Shippo is not connected. Add the SHIPPO_API_TOKEN Cloudflare secret first.",
+          503
+        );
+      }
+
+      return getShippoShippingDebug(url, env);
+    }
+
     if (request.method !== "POST") {
       throw new ApiRequestError("Method not allowed.", 405);
     }
@@ -1038,6 +1054,110 @@ async function handleAdminShippingRequest(request, env, url) {
     console.error("Shipping label request error:", error);
     return handleApiError(error);
   }
+}
+
+async function getShippoShippingDebug(url, env) {
+  const orderId = normalizeOrderId(url.searchParams.get("orderId"));
+  const order = await getOrderRecord(env, orderId);
+  const transactionList = await shippoRequest(
+    env,
+    "/transactions/?results=100",
+    { method: "GET" }
+  );
+  const transactions = Array.isArray(transactionList.results)
+    ? transactionList.results
+    : [];
+
+  const sanitizeTransaction = function (transaction) {
+    const rate = transaction && typeof transaction.rate === "object"
+      ? transaction.rate
+      : {};
+
+    return {
+      objectId: cleanText(transaction?.object_id, 120),
+      status: cleanText(transaction?.status, 50),
+      metadata: cleanText(transaction?.metadata, 150),
+      createdAt: cleanText(transaction?.object_created, 80),
+      test: Boolean(transaction?.test || transaction?.was_test),
+      trackingNumber: cleanText(transaction?.tracking_number, 200),
+      trackingUrl: cleanText(transaction?.tracking_url_provider, 2048),
+      labelUrlPresent: Boolean(cleanText(transaction?.label_url, 2048)),
+      labelFileType: cleanText(transaction?.label_file_type, 50),
+      carrier: cleanText(rate.provider, 80),
+      service: cleanText(
+        rate.servicelevel_name || rate.servicelevel_token,
+        100
+      ),
+      rateId: cleanText(
+        typeof transaction?.rate === "string"
+          ? transaction.rate
+          : rate.object_id,
+        120
+      ),
+      messages: Array.isArray(transaction?.messages)
+        ? transaction.messages.slice(0, 10).map(function (entry) {
+            return {
+              source: cleanText(entry?.source, 80),
+              code: cleanText(entry?.code, 100),
+              text: cleanText(
+                entry?.text || entry?.message || entry?.detail || entry,
+                500
+              ),
+            };
+          })
+        : [],
+    };
+  };
+
+  const matchingTransactions = transactions
+    .filter(function (transaction) {
+      return cleanText(transaction?.metadata, 150).toUpperCase() === orderId;
+    })
+    .map(sanitizeTransaction);
+
+  const recentTransactions = transactions
+    .slice(0, 10)
+    .map(sanitizeTransaction);
+
+  const storedLabels = Array.isArray(order?.shippingLabels)
+    ? order.shippingLabels.map(function (label) {
+        return {
+          labelId: cleanText(label?.labelId, 120),
+          provider: cleanText(label?.provider, 80),
+          carrier: cleanText(label?.carrier, 80),
+          service: cleanText(label?.service, 100),
+          trackingNumber: cleanText(
+            label?.trackingNumber || label?.tracking_number,
+            200
+          ),
+          trackingUrl: cleanText(
+            label?.trackingUrl || label?.tracking_url_provider,
+            2048
+          ),
+          labelUrlPresent: Boolean(
+            cleanText(label?.labelUrl || label?.label_url, 2048)
+          ),
+          test: Boolean(label?.test),
+          purchasedAt: cleanText(label?.purchasedAt, 80),
+        };
+      })
+    : [];
+
+  return jsonResponse({
+    success: true,
+    debugOnly: true,
+    orderId,
+    orderFound: Boolean(order),
+    storedOrderId: cleanText(order?.orderId || order?.id, 100),
+    storedLabelCount: storedLabels.length,
+    storedLabels,
+    matchingTransactionCount: matchingTransactions.length,
+    matchingTransactions,
+    recentTransactions: matchingTransactions.length ? [] : recentTransactions,
+    message: matchingTransactions.length
+      ? "Shippo transaction data found for this order."
+      : "No Shippo transaction metadata matched this order. Recent sanitized transactions are included for diagnosis.",
+  });
 }
 
 function getShippoProviderStatus(env) {
