@@ -227,6 +227,48 @@ function getFulfillmentTypeLabel(type) {
   return "In Stock";
 }
 
+function normalizePurchasedShippingLabel(source) {
+  if (!source || typeof source !== "object") {
+    return null;
+  }
+
+  const trackingNumber = String(
+    source.trackingNumber || source.tracking_number || ""
+  ).trim();
+  const labelUrl = String(source.labelUrl || source.label_url || "").trim();
+
+  if (!trackingNumber && !labelUrl) {
+    return null;
+  }
+
+  return {
+    ...source,
+    orderId: String(source.orderId || source.order_id || ""),
+    carrier: String(source.carrier || source.provider || ""),
+    trackingNumber,
+    trackingUrl: String(
+      source.trackingUrl || source.tracking_url_provider || ""
+    ).trim(),
+    labelUrl,
+  };
+}
+
+function getLatestShippingLabel(order) {
+  const labels = Array.isArray(order?.shippingLabels)
+    ? order.shippingLabels
+    : [];
+
+  for (let index = labels.length - 1; index >= 0; index -= 1) {
+    const label = normalizePurchasedShippingLabel(labels[index]);
+
+    if (label) {
+      return label;
+    }
+  }
+
+  return null;
+}
+
 function getItemDisplayName(item) {
   return [item?.name || item?.codeName || "Product", item?.strength || ""]
     .filter(Boolean)
@@ -760,14 +802,19 @@ function CustomerManager({
       fulfillment.timingNote ||
         (Array.isArray(fulfillment.items) ? "" : fulfillment.restockNote || "")
     );
-    setShipmentCarrier("USPS");
-    setShipmentTrackingNumber("");
+    const latestShippingLabel = getLatestShippingLabel(order);
+    setShipmentCarrier(
+      SHIPPING_CARRIERS.includes(latestShippingLabel?.carrier)
+        ? latestShippingLabel.carrier
+        : "USPS"
+    );
+    setShipmentTrackingNumber(latestShippingLabel?.trackingNumber || "");
     setShipmentNote("");
     setShipmentQuantities(createShipmentQuantityDraft(order));
     setLabelRates([]);
     setLabelShipmentId("");
     setSelectedLabelRateId("");
-    setPurchasedLabel(null);
+    setPurchasedLabel(latestShippingLabel);
     loadShippingDefaults();
     setActionMessage("");
     setActionError("");
@@ -1127,12 +1174,36 @@ function CustomerManager({
         }),
       });
       const result = await readJson(response);
-      const label = result.label || {};
+      const returnedLabel = result.label || {};
+      const savedLabel = getLatestShippingLabel(result.order) || {};
+      const label = normalizePurchasedShippingLabel({
+        ...savedLabel,
+        ...returnedLabel,
+        trackingNumber:
+          returnedLabel.trackingNumber ||
+          returnedLabel.tracking_number ||
+          savedLabel.trackingNumber ||
+          savedLabel.tracking_number ||
+          "",
+        labelUrl:
+          returnedLabel.labelUrl ||
+          returnedLabel.label_url ||
+          savedLabel.labelUrl ||
+          savedLabel.label_url ||
+          "",
+      });
+
+      if (!label?.trackingNumber) {
+        throw new Error(
+          "Shippo created the label, but Customer Manager could not read its tracking number."
+        );
+      }
+
       setPurchasedLabel(label);
       setShipmentCarrier(
         SHIPPING_CARRIERS.includes(label.carrier) ? label.carrier : "Other"
       );
-      setShipmentTrackingNumber(label.trackingNumber || "");
+      setShipmentTrackingNumber(label.trackingNumber);
       if (result.order) replaceOrderRecord(result.order);
       setActionMessage(
         result.message || "Shipping label purchased and tracking filled in."
@@ -1157,7 +1228,15 @@ function CustomerManager({
       return;
     }
 
-    const trackingNumber = (shipmentTrackingNumber || purchasedLabel?.trackingNumber || "").trim();
+    const savedShippingLabel = getLatestShippingLabel(order);
+    const activePurchasedLabel =
+      purchasedLabel?.orderId === orderId ? purchasedLabel : null;
+    const trackingNumber = String(
+      shipmentTrackingNumber ||
+        activePurchasedLabel?.trackingNumber ||
+        savedShippingLabel?.trackingNumber ||
+        ""
+    ).trim();
 
     if (!trackingNumber) {
       setActionError("Enter the shipment tracking number.");
@@ -2516,6 +2595,11 @@ function CustomerManager({
                     order,
                     shipmentQuantities
                   );
+                  const savedShippingLabel = getLatestShippingLabel(order);
+                  const activePurchasedLabel =
+                    purchasedLabel?.orderId === id ? purchasedLabel : null;
+                  const activeShippingLabel =
+                    activePurchasedLabel || savedShippingLabel;
 
                   return (
                     <article
@@ -3303,13 +3387,13 @@ function CustomerManager({
                                       </div>
                                     )}
 
-                                    {purchasedLabel?.labelUrl && (
+                                    {activeShippingLabel?.labelUrl && (
                                       <div className="cm-label-ready">
                                         <div>
-                                          <strong>{purchasedLabel.test ? "Test label ready" : "Label ready"}</strong>
-                                          <span>{purchasedLabel.carrier} {purchasedLabel.trackingNumber}</span>
+                                          <strong>{activeShippingLabel.test ? "Test label ready" : "Label ready"}</strong>
+                                          <span>{activeShippingLabel.carrier} {activeShippingLabel.trackingNumber}</span>
                                         </div>
-                                        <a href={purchasedLabel.labelUrl} target="_blank" rel="noreferrer">
+                                        <a href={activeShippingLabel.labelUrl} target="_blank" rel="noreferrer">
                                           Open & Print Label
                                         </a>
                                       </div>
@@ -3339,7 +3423,7 @@ function CustomerManager({
                                       <input
                                         type="text"
                                         maxLength="200"
-                                        value={shipmentTrackingNumber || purchasedLabel?.trackingNumber || ""}
+                                        value={shipmentTrackingNumber || activeShippingLabel?.trackingNumber || ""}
                                         disabled={busy}
                                         onChange={(event) =>
                                           setShipmentTrackingNumber(event.target.value)
