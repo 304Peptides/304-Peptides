@@ -40,7 +40,7 @@ const COUPON_KEY_PREFIX = "coupon:";
 const COUPON_REDEMPTION_KEY_PREFIX = "coupon:redemption:";
 const SHIPPING_SETTINGS_KEY = "settings:shipping";
 const SHIPPING_LABEL_KEY_PREFIX = "shipping:label:";
-const EASYPOST_API_URL = "https://api.easypost.com/v2";
+const SHIPPO_API_URL = "https://api.goshippo.com";
 const FREE_SHIPPING_THRESHOLD_CENTS = 10000;
 const FLAT_SHIPPING_FEE_CENTS = 1500;
 const ACCOUNT_KEY_PREFIX = "account:";
@@ -972,13 +972,14 @@ async function handleAdminShippingRequest(request, env, url) {
     await requireAdmin(request, env);
 
     if (url.pathname === "/api/admin/shipping/settings") {
+      const providerStatus = getShippoProviderStatus(env);
+
       if (request.method === "GET") {
         const settings =
           (await env.DOCUMENTS_KV.get(SHIPPING_SETTINGS_KEY, "json")) || null;
         return jsonResponse({
           success: true,
-          configured: Boolean(env.EASYPOST_API_KEY),
-          provider: "EasyPost",
+          ...providerStatus,
           settings,
         });
       }
@@ -997,8 +998,7 @@ async function handleAdminShippingRequest(request, env, url) {
         );
         return jsonResponse({
           success: true,
-          configured: Boolean(env.EASYPOST_API_KEY),
-          provider: "EasyPost",
+          ...providerStatus,
           settings,
           message: "Shipping settings saved.",
         });
@@ -1011,9 +1011,9 @@ async function handleAdminShippingRequest(request, env, url) {
       throw new ApiRequestError("Method not allowed.", 405);
     }
 
-    if (!env.EASYPOST_API_KEY) {
+    if (!env.SHIPPO_API_TOKEN) {
       throw new ApiRequestError(
-        "EasyPost is not connected. Add the EASYPOST_API_KEY Cloudflare secret first.",
+        "Shippo is not connected. Add the SHIPPO_API_TOKEN Cloudflare secret first.",
         503
       );
     }
@@ -1038,6 +1038,21 @@ async function handleAdminShippingRequest(request, env, url) {
     console.error("Shipping label request error:", error);
     return handleApiError(error);
   }
+}
+
+function getShippoProviderStatus(env) {
+  const token = String(env.SHIPPO_API_TOKEN || "");
+  return {
+    configured: Boolean(token),
+    provider: "Shippo",
+    mode: token.startsWith("shippo_live_")
+      ? "live"
+      : token.startsWith("shippo_test_")
+        ? "test"
+        : token
+          ? "unknown"
+          : "not_connected",
+  };
 }
 
 function prepareShippingSettings(source) {
@@ -1095,7 +1110,7 @@ async function getShippingSettings(env) {
   return settings;
 }
 
-function buildEasyPostAddressFromOrder(order) {
+function buildShippoAddressFromOrder(order) {
   const customer = order.customer || {};
   return {
     name: cleanText(
@@ -1108,10 +1123,11 @@ function buildEasyPostAddressFromOrder(order) {
     zip: cleanText(customer.zip, 20),
     country: "US",
     email: cleanText(customer.email, 254),
+    is_residential: true,
   };
 }
 
-function buildEasyPostOrigin(settings) {
+function buildShippoOrigin(settings) {
   return {
     name: settings.fromName,
     company: settings.company || undefined,
@@ -1154,35 +1170,52 @@ async function createShippingRates(body, env) {
     ),
   };
 
-  const shipment = await easyPostRequest(env, "/shipments", {
+  const shipment = await shippoRequest(env, "/shipments/", {
     method: "POST",
     body: {
-      shipment: {
-        reference: orderId,
-        to_address: buildEasyPostAddressFromOrder(order),
-        from_address: buildEasyPostOrigin(settings),
-        parcel,
-        options: {
-          label_format: "PDF",
-          label_size: "4x6",
+      address_from: buildShippoOrigin(settings),
+      address_to: buildShippoAddressFromOrder(order),
+      parcels: [
+        {
+          length: String(parcel.length),
+          width: String(parcel.width),
+          height: String(parcel.height),
+          distance_unit: "in",
+          weight: String(parcel.weight),
+          mass_unit: "oz",
         },
-      },
+      ],
+      async: false,
+      metadata: orderId,
     },
   });
 
+  if (String(shipment.status || "").toUpperCase() !== "SUCCESS") {
+    throw new ApiRequestError(
+      shippoMessage(shipment) || "Shippo could not create a valid shipment quote.",
+      502
+    );
+  }
+
   const rates = (Array.isArray(shipment.rates) ? shipment.rates : [])
     .map(function (rate) {
+      const serviceLevel = rate.servicelevel || {};
       return {
-        id: cleanText(rate.id, 120),
-        carrier: cleanText(rate.carrier, 80),
-        service: cleanText(rate.service, 100),
-        rate: Number(rate.rate || 0),
-        retailRate: Number(rate.retail_rate || 0),
+        id: cleanText(rate.object_id, 120),
+        carrier: cleanText(rate.provider, 80),
+        service: cleanText(
+          serviceLevel.name || serviceLevel.token || "Standard",
+          100
+        ),
+        serviceToken: cleanText(serviceLevel.token, 100),
+        rate: Number(rate.amount || 0),
+        retailRate: Number(rate.amount_local || 0),
         currency: cleanText(rate.currency || "USD", 10),
-        deliveryDays: Number.isFinite(Number(rate.delivery_days))
-          ? Number(rate.delivery_days)
+        deliveryDays: Number.isFinite(Number(rate.estimated_days))
+          ? Number(rate.estimated_days)
           : null,
-        deliveryDate: cleanText(rate.delivery_date, 50),
+        deliveryDate: cleanText(rate.arrives_by, 50),
+        durationTerms: cleanText(rate.duration_terms, 300),
       };
     })
     .filter(function (rate) {
@@ -1194,9 +1227,10 @@ async function createShippingRates(body, env) {
 
   return jsonResponse({
     success: true,
-    provider: "EasyPost",
+    provider: "Shippo",
+    mode: getShippoProviderStatus(env).mode,
     orderId,
-    shipmentId: shipment.id,
+    shipmentId: cleanText(shipment.object_id, 120),
     parcel,
     rates,
     message: rates.length
@@ -1210,10 +1244,10 @@ async function buyShippingLabel(body, env) {
   const shipmentId = cleanText(body.shipmentId, 120);
   const rateId = cleanText(body.rateId, 120);
 
-  if (!/^shp_[A-Za-z0-9]+$/.test(shipmentId)) {
+  if (!/^[a-f0-9]{32}$/i.test(shipmentId)) {
     throw new ApiRequestError("The shipping quote is invalid.", 400);
   }
-  if (!/^rate_[A-Za-z0-9]+$/.test(rateId)) {
+  if (!/^[a-f0-9]{32}$/i.test(rateId)) {
     throw new ApiRequestError("Choose a valid shipping rate.", 400);
   }
 
@@ -1222,38 +1256,62 @@ async function buyShippingLabel(body, env) {
     throw new ApiRequestError(`Order ${orderId} was not found.`, 404);
   }
 
-  const shipment = await easyPostRequest(
+  const rate = await shippoRequest(
     env,
-    `/shipments/${encodeURIComponent(shipmentId)}/buy`,
-    {
-      method: "POST",
-      body: { rate: { id: rateId } },
-    }
+    `/rates/${encodeURIComponent(rateId)}`,
+    { method: "GET" }
   );
 
-  const postage = shipment.postage_label || {};
-  const selectedRate = shipment.selected_rate || {};
+  if (
+    cleanText(rate.shipment, 120) &&
+    cleanText(rate.shipment, 120) !== shipmentId
+  ) {
+    throw new ApiRequestError(
+      "The selected rate does not belong to this shipping quote.",
+      400
+    );
+  }
+
+  const transaction = await shippoRequest(env, "/transactions/", {
+    method: "POST",
+    body: {
+      rate: rateId,
+      label_file_type: "PDF",
+      async: false,
+      metadata: orderId,
+    },
+  });
+
+  if (String(transaction.status || "").toUpperCase() !== "SUCCESS") {
+    throw new ApiRequestError(
+      shippoMessage(transaction) || "Shippo could not create the shipping label.",
+      502
+    );
+  }
+
+  const serviceLevel = rate.servicelevel || {};
   const label = {
-    labelId: cleanText(postage.id, 120),
+    labelId: cleanText(transaction.object_id, 120),
     orderId,
-    shipmentId: cleanText(shipment.id || shipmentId, 120),
-    rateId: cleanText(selectedRate.id || rateId, 120),
-    provider: "EasyPost",
-    carrier: cleanText(selectedRate.carrier, 80),
-    service: cleanText(selectedRate.service, 100),
-    postage: Number(selectedRate.rate || 0),
-    trackingNumber: cleanText(shipment.tracking_code, 200),
-    trackingUrl: cleanText(shipment.tracker?.public_url, 2048),
-    labelUrl: cleanText(
-      postage.label_pdf_url || postage.label_url || postage.label_zpl_url,
-      2048
+    shipmentId,
+    rateId,
+    provider: "Shippo",
+    carrier: cleanText(rate.provider, 80),
+    service: cleanText(
+      serviceLevel.name || serviceLevel.token || "Standard",
+      100
     ),
-    purchasedAt: new Date().toISOString(),
+    postage: Number(rate.amount || 0),
+    trackingNumber: cleanText(transaction.tracking_number, 200),
+    trackingUrl: cleanText(transaction.tracking_url_provider, 2048),
+    labelUrl: cleanText(transaction.label_url, 2048),
+    test: Boolean(transaction.test),
+    purchasedAt: cleanText(transaction.object_created, 80) || new Date().toISOString(),
   };
 
   if (!label.trackingNumber || !label.labelUrl) {
     throw new ApiRequestError(
-      "The label was purchased, but EasyPost did not return tracking and a printable label.",
+      "The label was created, but Shippo did not return tracking and a printable label.",
       502
     );
   }
@@ -1276,17 +1334,39 @@ async function buyShippingLabel(body, env) {
     success: true,
     order: updatedOrder,
     label,
-    message: "Shipping label purchased. Print it, then record the shipment to email the customer.",
+    message: label.test
+      ? "Test label created. Print it only for workflow testing; it is not valid postage."
+      : "Shipping label purchased. Print it, then record the shipment to email the customer.",
   });
 }
 
-async function easyPostRequest(env, path, options) {
-  const response = await fetch(`${EASYPOST_API_URL}${path}`, {
+function shippoMessage(result) {
+  const messages = Array.isArray(result?.messages) ? result.messages : [];
+  const messageText = messages
+    .map(function (entry) {
+      if (typeof entry === "string") return entry;
+      return entry?.text || entry?.message || entry?.detail || "";
+    })
+    .filter(Boolean)
+    .join(" ");
+
+  return cleanText(
+    result?.detail ||
+      result?.message ||
+      result?.error ||
+      messageText,
+    1000
+  );
+}
+
+async function shippoRequest(env, path, options) {
+  const response = await fetch(`${SHIPPO_API_URL}${path}`, {
     method: options.method || "GET",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
-      Authorization: `Basic ${btoa(`${String(env.EASYPOST_API_KEY)}:`)}`,
+      Authorization: `ShippoToken ${String(env.SHIPPO_API_TOKEN)}`,
+      "Shippo-API-Version": "2018-02-08",
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
@@ -1301,11 +1381,8 @@ async function easyPostRequest(env, path, options) {
 
   if (!response.ok) {
     const message =
-      result?.error?.message ||
-      result?.error?.errors?.[0]?.message ||
-      result?.message ||
-      `EasyPost returned status ${response.status}.`;
-    throw new ApiRequestError(cleanText(message, 1000), 502);
+      shippoMessage(result) || `Shippo returned status ${response.status}.`;
+    throw new ApiRequestError(message, 502);
   }
 
   return result;

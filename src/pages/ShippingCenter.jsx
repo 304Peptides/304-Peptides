@@ -46,6 +46,7 @@ function ShippingCenter({ onNavigate = () => {} }) {
   const [secretInput, setSecretInput] = useState("");
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [configured, setConfigured] = useState(false);
+  const [providerMode, setProviderMode] = useState("not_connected");
   const [loading, setLoading] = useState(Boolean(getSecret()));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -69,6 +70,7 @@ function ShippingCenter({ onNavigate = () => {} }) {
         const result = await readJson(response);
         if (!active) return;
         setConfigured(Boolean(result.configured));
+        setProviderMode(result.mode || "not_connected");
         setSettings({ ...DEFAULT_SETTINGS, ...(result.settings || {}) });
       } catch (requestError) {
         if (!active) return;
@@ -119,6 +121,7 @@ function ShippingCenter({ onNavigate = () => {} }) {
       });
       const result = await readJson(response);
       setConfigured(Boolean(result.configured));
+      setProviderMode(result.mode || "not_connected");
       setSettings({ ...DEFAULT_SETTINGS, ...(result.settings || settings) });
       setMessage(result.message || "Shipping settings saved.");
     } catch (requestError) {
@@ -174,8 +177,8 @@ function ShippingCenter({ onNavigate = () => {} }) {
       <section className="shipping-status-grid">
         <article className={configured ? "connected" : "not-connected"}>
           <span>Label provider</span>
-          <strong>EasyPost</strong>
-          <p>{configured ? "API key connected" : "API key not connected"}</p>
+          <strong>Shippo</strong>
+          <p>{configured ? `${providerMode === "test" ? "Test" : providerMode === "live" ? "Live" : "API"} token connected` : "API token not connected"}</p>
         </article>
         <article>
           <span>Default package</span>
@@ -189,12 +192,19 @@ function ShippingCenter({ onNavigate = () => {} }) {
         </article>
       </section>
 
+      {configured && providerMode === "test" && (
+        <div className="shipping-setup-note">
+          <strong>Shippo test mode is connected.</strong>
+          <span>Rates and labels are for testing only. Test labels are not valid postage and will not charge your account.</span>
+        </div>
+      )}
+
       {!configured && (
         <div className="shipping-setup-note">
           <strong>One secure connection step remains.</strong>
           <span>
-            Add an EasyPost API key to Cloudflare as the secret
-            <code>EASYPOST_API_KEY</code>. The key is never stored in the browser or
+            Add your Shippo token to Cloudflare as the secret
+            <code>SHIPPO_API_TOKEN</code>. The key is never stored in the browser or
             shown on this page.
           </span>
         </div>

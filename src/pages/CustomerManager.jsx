@@ -1129,7 +1129,9 @@ function CustomerManager({
       const result = await readJson(response);
       const label = result.label || {};
       setPurchasedLabel(label);
-      setShipmentCarrier(label.carrier || "Other");
+      setShipmentCarrier(
+        SHIPPING_CARRIERS.includes(label.carrier) ? label.carrier : "Other"
+      );
       setShipmentTrackingNumber(label.trackingNumber || "");
       if (result.order) replaceOrderRecord(result.order);
       setActionMessage(
@@ -3266,7 +3268,7 @@ function CustomerManager({
                                       disabled={busy || Boolean(labelBusy) || shipmentItems.length === 0}
                                       onClick={() => getShippingLabelRates(order)}
                                     >
-                                      {labelBusy === "rates" ? "Loading Rates…" : "Get Live Shipping Rates"}
+                                      {labelBusy === "rates" ? "Loading Rates…" : "Get Shipping Rates"}
                                     </button>
 
                                     {labelRates.length > 0 && (
@@ -3304,7 +3306,7 @@ function CustomerManager({
                                     {purchasedLabel?.labelUrl && (
                                       <div className="cm-label-ready">
                                         <div>
-                                          <strong>Label ready</strong>
+                                          <strong>{purchasedLabel.test ? "Test label ready" : "Label ready"}</strong>
                                           <span>{purchasedLabel.carrier} {purchasedLabel.trackingNumber}</span>
                                         </div>
                                         <a href={purchasedLabel.labelUrl} target="_blank" rel="noreferrer">
