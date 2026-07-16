@@ -2621,6 +2621,13 @@ function CustomerManager({
                     purchasedLabel?.orderId === id ? purchasedLabel : null;
                   const activeShippingLabel =
                     activePurchasedLabel || savedShippingLabel;
+                  const shippingLabelHistory = (Array.isArray(order.shippingLabels)
+                    ? order.shippingLabels
+                    : []
+                  )
+                    .map(normalizePurchasedShippingLabel)
+                    .filter(Boolean)
+                    .reverse();
 
                   return (
                     <article
@@ -3417,6 +3424,29 @@ function CustomerManager({
                                         <a href={activeShippingLabel.labelUrl} target="_blank" rel="noreferrer">
                                           Open & Print Label
                                         </a>
+                                      </div>
+                                    )}
+
+                                    {shippingLabelHistory.length > 0 && (
+                                      <div className="cm-label-history">
+                                        <strong>Shipping Label History</strong>
+                                        {shippingLabelHistory.map((label, index) => (
+                                          <div
+                                            className="cm-label-ready"
+                                            key={label.labelId || `${label.trackingNumber}-${index}`}
+                                          >
+                                            <div>
+                                              <strong>{label.carrier || "Carrier"} · {label.service || "Shipping label"}</strong>
+                                              <span>{label.trackingNumber || "Tracking unavailable"}</span>
+                                              <small>{formatMoney(label.postage)} · {formatDate(label.purchasedAt)}</small>
+                                            </div>
+                                            {label.labelUrl && (
+                                              <a href={label.labelUrl} target="_blank" rel="noreferrer">
+                                                Reprint Label
+                                              </a>
+                                            )}
+                                          </div>
+                                        ))}
                                       </div>
                                     )}
                                   </div>
