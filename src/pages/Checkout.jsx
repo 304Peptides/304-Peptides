@@ -1,4 +1,4 @@
-﻿import {
+import {
   useCallback,
   useEffect,
   useMemo,
@@ -10,8 +10,14 @@ import zelleLogo from "../assets/images/payments/zelle.png";
 import venmoLogo from "../assets/images/payments/venmo.png";
 import cashAppLogo from "../assets/images/payments/cashapp.png";
 
+import {
+  calculateShippingFee,
+  getFreeShippingRemaining,
+} from "../utils/shipping";
+
 const storageKey = "304-site-settings";
 const customerAccountSessionKey = "304-customer-account";
+const couponStorageKey = "304-coupon-code";
 const turnstileSiteKey = "0x4AAAAAAD0F6auvBsjzeYVA";
 const turnstileScriptId = "cloudflare-turnstile-script";
 
@@ -539,6 +545,24 @@ function Checkout({
   );
   const [isValidatingReferral, setIsValidatingReferral] =
     useState(false);
+  const [couponCode, setCouponCode] = useState(() => {
+    try {
+      return String(window.localStorage.getItem(couponStorageKey) || "")
+        .trim()
+        .toUpperCase();
+    } catch {
+      return "";
+    }
+  });
+  const [validatedCouponCode, setValidatedCouponCode] = useState("");
+  const [couponResult, setCouponResult] = useState(null);
+  const [couponStatus, setCouponStatus] = useState(
+    couponCode ? "unverified" : "idle"
+  );
+  const [couponMessage, setCouponMessage] = useState(
+    couponCode ? "Apply this coupon before submitting the order." : ""
+  );
+  const [isValidatingCoupon, setIsValidatingCoupon] = useState(false);
 
   const submissionLockRef = useRef(false);
 
@@ -702,6 +726,37 @@ function Checkout({
     [cartItems]
   );
 
+  const discount = useMemo(
+    () => Math.max(0, Number(couponResult?.discountCents || 0) / 100),
+    [couponResult]
+  );
+
+  const discountedSubtotal = useMemo(
+    () => Math.max(0, subtotal - discount),
+    [discount, subtotal]
+  );
+
+  const shippingFee = useMemo(
+    () =>
+      couponResult?.freeShipping
+        ? 0
+        : calculateShippingFee(discountedSubtotal),
+    [couponResult, discountedSubtotal]
+  );
+
+  const orderTotal = useMemo(
+    () => discountedSubtotal + shippingFee,
+    [discountedSubtotal, shippingFee]
+  );
+
+  const freeShippingRemaining = useMemo(
+    () =>
+      couponResult?.freeShipping
+        ? 0
+        : getFreeShippingRemaining(discountedSubtotal),
+    [couponResult, discountedSubtotal]
+  );
+
   const invalidPriceItems = useMemo(
     () =>
       cartItems.filter(
@@ -745,6 +800,11 @@ function Checkout({
     (referralStatus === "valid" &&
       validatedReferralCode === referralCode);
 
+  const couponReady =
+    !couponCode ||
+    (couponStatus === "valid" &&
+      validatedCouponCode === couponCode);
+
   const canPlaceOrder =
     cartItems.length > 0 &&
     checkoutAvailable &&
@@ -755,6 +815,7 @@ function Checkout({
     Boolean(turnstileToken) &&
     accountEmailMatches &&
     referralReady &&
+    couponReady &&
     !isSubmitting;
 
   const storeStatusLabel =
@@ -825,6 +886,108 @@ function Checkout({
     setValidatedReferralCode("");
     setReferralStatus("idle");
     setReferralMessage("");
+  }
+
+  function handleCouponCodeChange(event) {
+    const nextCode = String(event.target.value || "")
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, "")
+      .slice(0, 50);
+
+    setSubmitError("");
+    setCouponCode(nextCode);
+    setValidatedCouponCode("");
+    setCouponResult(null);
+    setCouponStatus(nextCode ? "unverified" : "idle");
+    setCouponMessage(
+      nextCode ? "Apply this coupon before submitting the order." : ""
+    );
+  }
+
+  function removeCouponCode() {
+    setSubmitError("");
+    setCouponCode("");
+    setValidatedCouponCode("");
+    setCouponResult(null);
+    setCouponStatus("idle");
+    setCouponMessage("");
+
+    try {
+      window.localStorage.removeItem(couponStorageKey);
+    } catch {
+      // Storage may be unavailable.
+    }
+  }
+
+  async function validateCouponCode() {
+    if (isValidatingCoupon || isSubmitting) {
+      return;
+    }
+
+    const code = String(couponCode || "").trim().toUpperCase();
+    setCouponCode(code);
+    setSubmitError("");
+
+    if (!code) {
+      removeCouponCode();
+      return;
+    }
+
+    if (!/^[A-Z0-9][A-Z0-9_-]{2,49}$/.test(code)) {
+      setValidatedCouponCode("");
+      setCouponResult(null);
+      setCouponStatus("invalid");
+      setCouponMessage(
+        "Coupon codes must contain at least three letters, numbers, dashes, or underscores."
+      );
+      return;
+    }
+
+    setIsValidatingCoupon(true);
+    setCouponStatus("checking");
+    setCouponMessage("Checking coupon...");
+
+    try {
+      const response = await fetch("/api/coupon/validate", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          code,
+          subtotalCents: Math.round(subtotal * 100),
+        }),
+      });
+      const result = await readApiJson(
+        response,
+        "The coupon could not be checked."
+      );
+
+      setValidatedCouponCode(code);
+      setCouponResult({
+        ...(result.coupon || {}),
+        discountCents: Number(result.discountCents || 0),
+        freeShipping: Boolean(result.freeShipping),
+      });
+      setCouponStatus("valid");
+      setCouponMessage(result.message || `${code} applied.`);
+
+      try {
+        window.localStorage.setItem(couponStorageKey, code);
+      } catch {
+        // Storage may be unavailable.
+      }
+    } catch (error) {
+      setValidatedCouponCode("");
+      setCouponResult(null);
+      setCouponStatus("error");
+      setCouponMessage(
+        error.message || "The coupon could not be checked."
+      );
+    } finally {
+      setIsValidatingCoupon(false);
+    }
   }
 
   async function validateReferralCode() {
@@ -930,6 +1093,13 @@ function Checkout({
       return;
     }
 
+    if (!couponReady) {
+      setSubmitError(
+        "Apply the coupon code or remove it before submitting the order."
+      );
+      return;
+    }
+
     if (
       !canPlaceOrder ||
       isSubmitting ||
@@ -956,6 +1126,11 @@ function Checkout({
       ...(validatedReferralCode
         ? {
             referralCode: validatedReferralCode,
+          }
+        : {}),
+      ...(validatedCouponCode
+        ? {
+            couponCode: validatedCouponCode,
           }
         : {}),
       items: cartItems.map((item) => ({
@@ -1003,6 +1178,12 @@ function Checkout({
         result.createdAt ||
         new Date().toISOString();
 
+      try {
+        window.localStorage.removeItem(couponStorageKey);
+      } catch {
+        // Storage may be unavailable.
+      }
+
       onPlaceOrder({
         ...orderPayload,
         ...confirmedOrder,
@@ -1022,10 +1203,28 @@ function Checkout({
         totalQuantity:
           Number(confirmedOrder.totalQuantity) ||
           totalQuantity,
+        merchandiseSubtotal:
+          Number.isFinite(Number(confirmedOrder.merchandiseSubtotal))
+            ? Number(confirmedOrder.merchandiseSubtotal)
+            : subtotal,
+        discount:
+          Number.isFinite(Number(confirmedOrder.discount))
+            ? Number(confirmedOrder.discount)
+            : discount,
+        couponCode:
+          confirmedOrder.couponCode || validatedCouponCode || "",
         subtotal:
           Number.isFinite(Number(confirmedOrder.subtotal))
             ? Number(confirmedOrder.subtotal)
-            : subtotal,
+            : discountedSubtotal,
+        shippingFee:
+          Number.isFinite(Number(confirmedOrder.shippingFee))
+            ? Number(confirmedOrder.shippingFee)
+            : shippingFee,
+        total:
+          Number.isFinite(Number(confirmedOrder.total))
+            ? Number(confirmedOrder.total)
+            : orderTotal,
         referralCode:
           confirmedOrder.referralCode ||
           validatedReferralCode ||
@@ -1507,6 +1706,70 @@ function Checkout({
 
               <section className="checkout-section-card">
                 <p className="eyebrow">
+                  PROMOTION
+                </p>
+                <h2>Coupon Code — Optional</h2>
+
+                <p className="checkout-section-copy">
+                  Enter a current coupon code. Scheduled codes only work during
+                  their active dates and all discounts are verified by the server.
+                </p>
+
+                <div className="checkout-referral-row">
+                  <input
+                    type="text"
+                    value={couponCode}
+                    onChange={handleCouponCodeChange}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        validateCouponCode();
+                      }
+                    }}
+                    placeholder="Enter coupon code"
+                    autoComplete="off"
+                    maxLength="50"
+                    disabled={isSubmitting || isValidatingCoupon}
+                    aria-label="Coupon code"
+                  />
+
+                  <button
+                    type="button"
+                    className="secondary-btn checkout-referral-apply"
+                    onClick={validateCouponCode}
+                    disabled={!couponCode || isSubmitting || isValidatingCoupon}
+                  >
+                    {isValidatingCoupon
+                      ? "Checking..."
+                      : couponStatus === "valid"
+                      ? "Applied"
+                      : "Apply Coupon"}
+                  </button>
+
+                  {couponCode && (
+                    <button
+                      type="button"
+                      className="checkout-referral-remove"
+                      onClick={removeCouponCode}
+                      disabled={isSubmitting || isValidatingCoupon}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+
+                {couponMessage && (
+                  <div
+                    className={`checkout-referral-message checkout-referral-${couponStatus}`}
+                    aria-live="polite"
+                  >
+                    {couponMessage}
+                  </div>
+                )}
+              </section>
+
+              <section className="checkout-section-card">
+                <p className="eyebrow">
                   REQUIRED AGREEMENTS
                 </p>
                 <h2>Research-Use Confirmation</h2>
@@ -1628,6 +1891,26 @@ function Checkout({
               />
 
               <SummaryRow
+                label="Coupon"
+                value={
+                  validatedCouponCode ||
+                  (couponCode ? "Not Applied" : "None")
+                }
+              />
+
+              {discount > 0 && (
+                <SummaryRow
+                  label="Discount"
+                  value={`-${formatPrice(discount)}`}
+                />
+              )}
+
+              <SummaryRow
+                label="Discounted Product Total"
+                value={formatPrice(discountedSubtotal)}
+              />
+
+              <SummaryRow
                 label="Referral Code"
                 value={
                   validatedReferralCode ||
@@ -1639,12 +1922,16 @@ function Checkout({
 
               <SummaryRow
                 label="Shipping"
-                value="Confirmed By Invoice"
+                value={
+                  shippingFee === 0
+                    ? "FREE"
+                    : formatPrice(shippingFee)
+                }
               />
 
               <SummaryRow
-                label="Taxes"
-                value="Confirmed By Invoice"
+                label="Order Total"
+                value={formatPrice(orderTotal)}
               />
 
               <SummaryRow
@@ -1661,10 +1948,11 @@ function Checkout({
                 </strong>
 
                 <span>
-                  The final invoice may include
-                  applicable shipping and taxes. Review
-                  the complete invoice before sending
-                  payment.
+                  {freeShippingRemaining > 0
+                    ? `A $15 flat shipping fee applies. Add ${formatPrice(
+                        freeShippingRemaining
+                      )} more to qualify for free shipping.`
+                    : "Free shipping is included because the product subtotal is $100 or more."}
                 </span>
               </div>
 

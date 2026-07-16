@@ -7,6 +7,11 @@ import {
   products,
 } from "../data/products";
 
+import {
+  calculateOrderTotal,
+  calculateShippingFee,
+} from "../utils/shipping";
+
 function normalizeValue(
   value
 ) {
@@ -265,6 +270,16 @@ function OrderConfirmation({
   onNavigate = () => {},
   latestOrder,
 }) {
+  const rawItems = useMemo(
+    () => latestOrder?.items || latestOrder?.cartItems || [],
+    [latestOrder]
+  );
+
+  const items = useMemo(
+    () => rawItems.map(getOrderItemDetails),
+    [rawItems]
+  );
+
   if (
     !latestOrder
   ) {
@@ -325,22 +340,6 @@ function OrderConfirmation({
     );
   }
 
-  const rawItems =
-    latestOrder.items ||
-    latestOrder.cartItems ||
-    [];
-
-  const items =
-    useMemo(
-      () =>
-        rawItems.map(
-          getOrderItemDetails
-        ),
-      [
-        rawItems,
-      ]
-    );
-
   const subtotal =
     items.reduce(
       (
@@ -367,6 +366,20 @@ function OrderConfirmation({
       },
       0
     );
+
+  const shippingFee =
+    Number.isFinite(
+      Number(latestOrder.shippingFee)
+    )
+      ? Number(latestOrder.shippingFee)
+      : calculateShippingFee(subtotal);
+
+  const orderTotal =
+    Number.isFinite(
+      Number(latestOrder.total)
+    )
+      ? Number(latestOrder.total)
+      : calculateOrderTotal(subtotal);
 
   const totalQuantity =
     latestOrder.totalQuantity ||
@@ -700,11 +713,7 @@ function OrderConfirmation({
               </p>
 
               <h2>
-                {
-                  formatMoney(
-                    subtotal
-                  )
-                }
+                {formatMoney(orderTotal)}
               </h2>
 
               <SummaryRow
@@ -732,12 +741,16 @@ function OrderConfirmation({
 
               <SummaryRow
                 label="Shipping"
-                value="Confirmed By Invoice"
+                value={
+                  shippingFee === 0
+                    ? "FREE"
+                    : formatMoney(shippingFee)
+                }
               />
 
               <SummaryRow
-                label="Taxes"
-                value="Confirmed By Invoice"
+                label="Order Total"
+                value={formatMoney(orderTotal)}
               />
 
               <SummaryRow
@@ -755,15 +768,7 @@ function OrderConfirmation({
                 </strong>
 
                 <span>
-                  The final
-                  invoice may
-                  include
-                  applicable
-                  shipping and
-                  taxes. Review
-                  the invoice
-                  before sending
-                  payment.
+                  Shipping is $15 for product subtotals under $100 and free at $100 or more. Review the invoice before sending payment.
                 </span>
               </div>
 

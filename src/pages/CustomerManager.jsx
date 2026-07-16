@@ -416,6 +416,15 @@ function CustomerManager({
   const [shipmentTrackingNumber, setShipmentTrackingNumber] = useState("");
   const [shipmentNote, setShipmentNote] = useState("");
   const [shipmentQuantities, setShipmentQuantities] = useState([]);
+  const [parcelLength, setParcelLength] = useState("8");
+  const [parcelWidth, setParcelWidth] = useState("6");
+  const [parcelHeight, setParcelHeight] = useState("4");
+  const [parcelWeight, setParcelWeight] = useState("8");
+  const [labelRates, setLabelRates] = useState([]);
+  const [labelShipmentId, setLabelShipmentId] = useState("");
+  const [selectedLabelRateId, setSelectedLabelRateId] = useState("");
+  const [purchasedLabel, setPurchasedLabel] = useState(null);
+  const [labelBusy, setLabelBusy] = useState("");
   const [workflowBusy, setWorkflowBusy] = useState("");
   const [busyId, setBusyId] = useState("");
   const [resetEmail, setResetEmail] = useState("");
@@ -755,6 +764,11 @@ function CustomerManager({
     setShipmentTrackingNumber("");
     setShipmentNote("");
     setShipmentQuantities(createShipmentQuantityDraft(order));
+    setLabelRates([]);
+    setLabelShipmentId("");
+    setSelectedLabelRateId("");
+    setPurchasedLabel(null);
+    loadShippingDefaults();
     setActionMessage("");
     setActionError("");
   }
@@ -1011,6 +1025,123 @@ function CustomerManager({
   }
 
 
+  async function loadShippingDefaults() {
+    if (!adminSecret) return;
+
+    try {
+      const response = await fetch("/api/admin/shipping/settings", {
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${adminSecret}`,
+        },
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const result = await readJson(response);
+      const settings = result.settings || {};
+      setParcelLength(String(settings.defaultLength || 8));
+      setParcelWidth(String(settings.defaultWidth || 6));
+      setParcelHeight(String(settings.defaultHeight || 4));
+      setParcelWeight(String(settings.defaultWeight || 8));
+    } catch {
+      // Shipping Center will show any missing setup when rates are requested.
+    }
+  }
+
+  async function getShippingLabelRates(order) {
+    const orderId = getOrderId(order);
+    const shipmentItems = buildShipmentItemsPayload(order, shipmentQuantities);
+
+    if (!shipmentItems.length) {
+      setActionError("Choose the products and quantities in this package before requesting rates.");
+      return;
+    }
+
+    setLabelBusy("rates");
+    setActionError("");
+    setActionMessage("");
+    setPurchasedLabel(null);
+
+    try {
+      const response = await fetch("/api/admin/shipping/rates", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminSecret}`,
+        },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({
+          orderId,
+          parcel: {
+            length: Number(parcelLength),
+            width: Number(parcelWidth),
+            height: Number(parcelHeight),
+            weight: Number(parcelWeight),
+          },
+        }),
+      });
+      const result = await readJson(response);
+      const rates = Array.isArray(result.rates) ? result.rates : [];
+      setLabelRates(rates);
+      setLabelShipmentId(result.shipmentId || "");
+      setSelectedLabelRateId(rates[0]?.id || "");
+      setActionMessage(result.message || "Shipping rates loaded.");
+    } catch (requestError) {
+      setLabelRates([]);
+      setLabelShipmentId("");
+      setSelectedLabelRateId("");
+      setActionError(requestError.message || "Shipping rates could not be loaded.");
+    } finally {
+      setLabelBusy("");
+    }
+  }
+
+  async function purchaseShippingLabel(order) {
+    const orderId = getOrderId(order);
+
+    if (!labelShipmentId || !selectedLabelRateId) {
+      setActionError("Choose a shipping rate before purchasing a label.");
+      return;
+    }
+
+    setLabelBusy("buy");
+    setActionError("");
+    setActionMessage("");
+
+    try {
+      const response = await fetch("/api/admin/shipping/buy", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminSecret}`,
+        },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({
+          orderId,
+          shipmentId: labelShipmentId,
+          rateId: selectedLabelRateId,
+        }),
+      });
+      const result = await readJson(response);
+      const label = result.label || {};
+      setPurchasedLabel(label);
+      setShipmentCarrier(label.carrier || "Other");
+      setShipmentTrackingNumber(label.trackingNumber || "");
+      if (result.order) replaceOrderRecord(result.order);
+      setActionMessage(
+        result.message || "Shipping label purchased and tracking filled in."
+      );
+    } catch (requestError) {
+      setActionError(requestError.message || "The shipping label could not be purchased.");
+    } finally {
+      setLabelBusy("");
+    }
+  }
+
   async function createShipment(order) {
     const orderId = getOrderId(order);
 
@@ -1085,6 +1216,10 @@ function CustomerManager({
       setShipmentTrackingNumber("");
       setShipmentNote("");
       setShipmentQuantities(createShipmentQuantityDraft(updated));
+      setLabelRates([]);
+      setLabelShipmentId("");
+      setSelectedLabelRateId("");
+      setPurchasedLabel(null);
       setActionMessage(
         result.message || `Shipment for order ${orderId} was recorded.`
       );
@@ -3087,6 +3222,98 @@ function CustomerManager({
                                 </div>
                               ) : (
                                 <>
+                                  <div className="cm-integrated-shipping">
+                                    <div className="cm-integrated-shipping-heading">
+                                      <div>
+                                        <span>INTEGRATED POSTAGE</span>
+                                        <strong>Compare rates and print a 4 × 6 label</strong>
+                                        <small>
+                                          Select package quantities below, confirm the parcel size,
+                                          then purchase a rate. Tracking fills in automatically.
+                                        </small>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        className="secondary-btn"
+                                        onClick={() => onNavigate("shippingCenter")}
+                                      >
+                                        Shipping Settings
+                                      </button>
+                                    </div>
+
+                                    <div className="cm-parcel-grid">
+                                      <label>
+                                        <span>Length (in)</span>
+                                        <input type="number" min="0.1" step="0.1" value={parcelLength} disabled={busy || Boolean(labelBusy)} onChange={(event) => setParcelLength(event.target.value)} />
+                                      </label>
+                                      <label>
+                                        <span>Width (in)</span>
+                                        <input type="number" min="0.1" step="0.1" value={parcelWidth} disabled={busy || Boolean(labelBusy)} onChange={(event) => setParcelWidth(event.target.value)} />
+                                      </label>
+                                      <label>
+                                        <span>Height (in)</span>
+                                        <input type="number" min="0.1" step="0.1" value={parcelHeight} disabled={busy || Boolean(labelBusy)} onChange={(event) => setParcelHeight(event.target.value)} />
+                                      </label>
+                                      <label>
+                                        <span>Weight (oz)</span>
+                                        <input type="number" min="0.1" step="0.1" value={parcelWeight} disabled={busy || Boolean(labelBusy)} onChange={(event) => setParcelWeight(event.target.value)} />
+                                      </label>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      className="secondary-btn"
+                                      disabled={busy || Boolean(labelBusy) || shipmentItems.length === 0}
+                                      onClick={() => getShippingLabelRates(order)}
+                                    >
+                                      {labelBusy === "rates" ? "Loading Rates…" : "Get Live Shipping Rates"}
+                                    </button>
+
+                                    {labelRates.length > 0 && (
+                                      <div className="cm-rate-list">
+                                        {labelRates.map((rate) => (
+                                          <label key={rate.id} className={selectedLabelRateId === rate.id ? "selected" : ""}>
+                                            <input
+                                              type="radio"
+                                              name={`shipping-rate-${id}`}
+                                              value={rate.id}
+                                              checked={selectedLabelRateId === rate.id}
+                                              onChange={() => setSelectedLabelRateId(rate.id)}
+                                            />
+                                            <span>
+                                              <strong>{rate.carrier} · {rate.service}</strong>
+                                              <small>
+                                                {rate.deliveryDays ? `${rate.deliveryDays} estimated day(s)` : "Delivery estimate unavailable"}
+                                              </small>
+                                            </span>
+                                            <b>{Number(rate.rate || 0).toLocaleString("en-US", { style: "currency", currency: "USD" })}</b>
+                                          </label>
+                                        ))}
+
+                                        <button
+                                          type="button"
+                                          className="primary-btn"
+                                          disabled={busy || Boolean(labelBusy) || !selectedLabelRateId}
+                                          onClick={() => purchaseShippingLabel(order)}
+                                        >
+                                          {labelBusy === "buy" ? "Purchasing Label…" : "Purchase Selected Label"}
+                                        </button>
+                                      </div>
+                                    )}
+
+                                    {purchasedLabel?.labelUrl && (
+                                      <div className="cm-label-ready">
+                                        <div>
+                                          <strong>Label ready</strong>
+                                          <span>{purchasedLabel.carrier} {purchasedLabel.trackingNumber}</span>
+                                        </div>
+                                        <a href={purchasedLabel.labelUrl} target="_blank" rel="noreferrer">
+                                          Open & Print Label
+                                        </a>
+                                      </div>
+                                    )}
+                                  </div>
+
                                   <div className="cm-shipping-grid">
                                     <label>
                                       <span>Carrier</span>
@@ -4076,6 +4303,114 @@ const css = `
 }
 
 
+.cm-integrated-shipping {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #c7d2fe;
+  border-radius: 16px;
+  background: #f5f7ff;
+}
+
+.cm-integrated-shipping-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.cm-integrated-shipping-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.cm-integrated-shipping-heading span {
+  color: #4338ca;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.11em;
+}
+
+.cm-integrated-shipping-heading small {
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.cm-parcel-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cm-parcel-grid label {
+  display: grid;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.cm-parcel-grid input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.cm-rate-list {
+  display: grid;
+  gap: 8px;
+}
+
+.cm-rate-list > label {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #dbe3f0;
+  border-radius: 12px;
+  background: #fff;
+  padding: 11px 12px;
+  cursor: pointer;
+}
+
+.cm-rate-list > label.selected {
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.1);
+}
+
+.cm-rate-list > label span {
+  display: grid;
+  gap: 2px;
+}
+
+.cm-rate-list > label small {
+  color: #64748b;
+}
+
+.cm-label-ready {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #86efac;
+  border-radius: 12px;
+  background: #f0fdf4;
+  padding: 12px;
+}
+
+.cm-label-ready > div {
+  display: grid;
+  gap: 2px;
+}
+
+.cm-label-ready a {
+  border-radius: 10px;
+  background: #166534;
+  color: #fff;
+  padding: 9px 12px;
+  text-decoration: none;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .cm-shipment-notice {
   padding: 13px;
   border: 1px solid rgba(255,255,255,.1);
@@ -4225,6 +4560,8 @@ const css = `
   .cm-reset form,
   .cm-filters,
   .cm-item-fulfillment-row,
+  .cm-integrated-shipping-heading,
+  .cm-label-ready,
   .cm-shipment-item-row,
   .cm-shipping-grid {
     grid-template-columns:

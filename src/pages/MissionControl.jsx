@@ -904,9 +904,9 @@ function MissionControl({
             <div className="mission-tools-grid">
               <ToolCard
                 icon="01"
-                title="Product Manager"
-                description="Review products, strengths, images, codes, pricing, and storefront readiness."
-                buttonLabel="Manage Products"
+                title="Catalog & Inventory"
+                description="Add products and strengths, change quantity, choose in-stock or preorder labels, and hide products without deleting them."
+                buttonLabel="Manage Catalog"
                 onClick={() =>
                   onNavigate(
                     "productManager"
@@ -916,6 +916,42 @@ function MissionControl({
 
               <ToolCard
                 icon="02"
+                title="Coupon Manager"
+                description="Create manual or scheduled percentage, fixed-dollar, and free-shipping coupon codes."
+                buttonLabel="Manage Coupons"
+                onClick={() =>
+                  onNavigate(
+                    "couponManager"
+                  )
+                }
+              />
+
+              <ToolCard
+                icon="03"
+                title="Vial Label Generator"
+                description="Create product labels from the live catalog, add lot and QR information, preview a full sticker sheet, and print at actual size."
+                buttonLabel="Create Vial Labels"
+                onClick={() =>
+                  onNavigate(
+                    "vialLabelGenerator"
+                  )
+                }
+              />
+
+              <ToolCard
+                icon="04"
+                title="Shipping Center"
+                description="Save the ship-from address and package defaults used to compare live rates, buy postage, print labels, and fill tracking automatically."
+                buttonLabel="Open Shipping Center"
+                onClick={() =>
+                  onNavigate(
+                    "shippingCenter"
+                  )
+                }
+              />
+
+              <ToolCard
+                icon="05"
                 title="COA Manager"
                 description="Create and review certificate records, batch information, laboratory details, and public verification links."
                 buttonLabel="Manage Documentation"
@@ -927,7 +963,7 @@ function MissionControl({
               />
 
               <ToolCard
-                icon="03"
+                icon="06"
                 title="QR Manager"
                 description="Generate downloadable and printable QR codes for genuine published documentation records."
                 buttonLabel="Open QR Manager"
@@ -939,7 +975,7 @@ function MissionControl({
               />
 
               <ToolCard
-                icon="04"
+                icon="07"
                 title="Customer Manager"
                 description="Review prototype customer accounts, research acceptance, and order activity."
                 buttonLabel="Manage Customers"
@@ -951,7 +987,7 @@ function MissionControl({
               />
 
               <ToolCard
-                icon="05"
+                icon="08"
                 title="Site Settings"
                 description="Manage storefront messages, contact details, availability, and website settings."
                 buttonLabel="Open Settings"
@@ -963,7 +999,7 @@ function MissionControl({
               />
 
               <ToolCard
-                icon="06"
+                icon="09"
                 title="Partner HQ"
                 description="Review research partner activity, affiliate tools, applications, and rewards."
                 buttonLabel="Open Partner HQ"
@@ -975,7 +1011,7 @@ function MissionControl({
               />
 
               <ToolCard
-                icon="07"
+                icon="10"
                 title="Marketing Center"
                 description="Prepare social posts, launch messages, promotions, and brand content."
                 buttonLabel="Open Marketing"

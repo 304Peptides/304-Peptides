@@ -31,6 +31,9 @@ import PartnerHQ from "./pages/PartnerHQ";
 import MarketingCenter from "./pages/MarketingCenter";
 import MissionControl from "./pages/MissionControl";
 import ProductManager from "./pages/ProductManager";
+import CouponManager from "./pages/CouponManager";
+import VialLabelGenerator from "./pages/VialLabelGenerator";
+import ShippingCenter from "./pages/ShippingCenter";
 import COAManager from "./pages/COAManager";
 import CustomerManager from "./pages/CustomerManager";
 import SiteSettings from "./pages/SiteSettings";
@@ -75,6 +78,9 @@ const pagePaths = {
   marketingCenter: "/admin/marketing",
   missionControl: "/admin",
   productManager: "/admin/products",
+  couponManager: "/admin/coupons",
+  vialLabelGenerator: "/admin/vial-labels",
+  shippingCenter: "/admin/shipping",
   coaManager: "/admin/coa",
   qrManager: "/admin/qr",
   customerManager: "/admin/customers",
@@ -360,6 +366,11 @@ function App() {
   });
 
   const [
+    cartNotice,
+    setCartNotice,
+  ] = useState(null);
+
+  const [
     orders,
     setOrders,
   ] = useState(() => {
@@ -395,6 +406,18 @@ function App() {
     () => calculateTotalQuantity(cartItems),
     [cartItems]
   );
+
+  useEffect(() => {
+    if (!cartNotice) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      setCartNotice(null);
+    }, 4200);
+
+    return () => window.clearTimeout(timer);
+  }, [cartNotice]);
 
   const goToPage = useCallback((page, options = {}) => {
     const suppliedCode =
@@ -984,45 +1007,82 @@ function App() {
   }
 
   function handleAddToCart(product) {
+    const availability =
+      product?.availability || {
+        key: "in_stock",
+        label: "In Stock",
+        purchasable: true,
+      };
+
+    if (availability.purchasable === false) {
+      setCartNotice({
+        type: "error",
+        title: "Item not added",
+        message: `${product?.name || "This item"} is currently ${
+          availability.label || "unavailable"
+        }.`,
+      });
+      return;
+    }
+
     const productKey = getCartItemKey(product);
 
     setCartItems((currentItems) => {
       const existingItem = currentItems.find(
-        (item) =>
-          getCartItemKey(item) === productKey
+        (item) => getCartItemKey(item) === productKey
       );
+      const existingQuantity = Number(existingItem?.quantity || 0);
+      const nextQuantity = existingQuantity + 1;
+      const availableQuantity = Math.max(
+        0,
+        Math.floor(Number(product?.quantity || 0))
+      );
+
+      if (
+        product?.trackQuantity === true &&
+        availability.key === "in_stock" &&
+        nextQuantity > availableQuantity
+      ) {
+        setCartNotice({
+          type: "error",
+          title: "Stock limit reached",
+          message: `Only ${availableQuantity} unit${
+            availableQuantity === 1 ? " is" : "s are"
+          } currently available.`,
+        });
+        return currentItems;
+      }
 
       const nextItems = existingItem
         ? currentItems.map((item) =>
             getCartItemKey(item) === productKey
               ? {
                   ...item,
-
-                  quantity:
-                    Number(
-                      item.quantity || 0
-                    ) + 1,
+                  ...product,
+                  quantity: nextQuantity,
                 }
               : item
           )
         : [
             ...currentItems,
-
             {
               ...product,
               quantity: 1,
             },
           ];
 
-      writeStorage(
-        storageKeys.cartItems,
-        nextItems
-      );
+      writeStorage(storageKeys.cartItems, nextItems);
+
+      setCartNotice({
+        type: "success",
+        title: "Added to cart",
+        message: `${product?.name || "Product"}${
+          product?.strength ? ` · ${product.strength}` : ""
+        } was added.`,
+      });
 
       return nextItems;
     });
-
-    goToPage("cart");
   }
 
   function handleIncreaseQuantity(itemKey) {
@@ -1474,6 +1534,27 @@ function App() {
           />
         );
 
+      case "couponManager":
+        return (
+          <CouponManager
+            onNavigate={goToPage}
+          />
+        );
+
+      case "vialLabelGenerator":
+        return (
+          <VialLabelGenerator
+            onNavigate={goToPage}
+          />
+        );
+
+      case "shippingCenter":
+        return (
+          <ShippingCenter
+            onNavigate={goToPage}
+          />
+        );
+
       case "coaManager":
         return (
           <COAManager
@@ -1615,12 +1696,114 @@ function App() {
 
       <SiteAlert />
 
+      {cartNotice && (
+        <CartNotice
+          notice={cartNotice}
+          onClose={() => setCartNotice(null)}
+          onViewCart={() => {
+            setCartNotice(null);
+            goToPage("cart");
+          }}
+        />
+      )}
+
       {renderPage()}
 
       <Footer
         onNavigate={goToPage}
       />
     </>
+  );
+}
+
+function CartNotice({
+  notice,
+  onClose,
+  onViewCart,
+}) {
+  return (
+    <aside
+      aria-live="polite"
+      style={{
+        position: "fixed",
+        zIndex: 1200,
+        right: "18px",
+        top: "88px",
+        width: "min(390px, calc(100vw - 36px))",
+        padding: "18px",
+        borderRadius: "18px",
+        border:
+          notice.type === "error"
+            ? "1px solid rgba(255,95,95,.48)"
+            : "1px solid rgba(80,211,145,.42)",
+        background:
+          notice.type === "error"
+            ? "linear-gradient(145deg, rgba(91,25,31,.98), rgba(22,15,18,.98))"
+            : "linear-gradient(145deg, rgba(18,67,48,.98), rgba(12,20,18,.98))",
+        color: "#fff",
+        boxShadow: "0 24px 70px rgba(0,0,0,.5)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: "14px",
+          alignItems: "flex-start",
+        }}
+      >
+        <div>
+          <strong style={{ fontSize: "18px", display: "block" }}>
+            {notice.title}
+          </strong>
+          <span
+            style={{
+              display: "block",
+              marginTop: "6px",
+              color: "rgba(255,255,255,.78)",
+              lineHeight: 1.5,
+            }}
+          >
+            {notice.message}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close cart message"
+          style={{
+            border: 0,
+            background: "rgba(255,255,255,.1)",
+            color: "#fff",
+            borderRadius: "10px",
+            width: "34px",
+            height: "34px",
+            cursor: "pointer",
+            fontSize: "20px",
+          }}
+        >
+          ×
+        </button>
+      </div>
+
+      {notice.type !== "error" && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: "9px",
+            marginTop: "15px",
+          }}
+        >
+          <button type="button" className="secondary-btn" onClick={onClose}>
+            Continue Shopping
+          </button>
+          <button type="button" className="primary-btn" onClick={onViewCart}>
+            View Cart
+          </button>
+        </div>
+      )}
+    </aside>
   );
 }
 

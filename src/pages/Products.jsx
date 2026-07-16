@@ -5,9 +5,11 @@ import {
 } from "react";
 
 import {
-  products,
-  categories,
-} from "../data/products";
+  fetchCatalogOverrides,
+  getCatalogCategories,
+  getVariantAvailability,
+  mergeCatalogRecords,
+} from "../data/catalogRuntime";
 
 const storageKey =
   "304-site-settings";
@@ -151,6 +153,23 @@ function Products({
   ] = useState({});
 
   const [
+    catalogProducts,
+    setCatalogProducts,
+  ] = useState(() =>
+    mergeCatalogRecords([])
+  );
+
+  const [
+    catalogLoading,
+    setCatalogLoading,
+  ] = useState(true);
+
+  const [
+    catalogError,
+    setCatalogError,
+  ] = useState("");
+
+  const [
     documentRecords,
     setDocumentRecords,
   ] = useState({});
@@ -219,6 +238,45 @@ function Products({
         handleStorageChange
       );
     };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadCatalog() {
+      setCatalogLoading(true);
+      setCatalogError("");
+
+      try {
+        const records = await fetchCatalogOverrides({
+          signal: controller.signal,
+        });
+
+        setCatalogProducts(
+          mergeCatalogRecords(records)
+        );
+      } catch (error) {
+        if (error.name === "AbortError") {
+          return;
+        }
+
+        setCatalogProducts(
+          mergeCatalogRecords([])
+        );
+        setCatalogError(
+          error.message ||
+            "Live inventory could not be loaded."
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setCatalogLoading(false);
+        }
+      }
+    }
+
+    loadCatalog();
+
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
@@ -402,7 +460,7 @@ function Products({
           .trim()
           .toLowerCase();
 
-      return products.filter(
+      return catalogProducts.filter(
         (product) => {
           const matchesCategory =
             activeCategory ===
@@ -464,9 +522,15 @@ function Products({
       );
     }, [
       activeCategory,
+      catalogProducts,
       documentRecords,
       searchTerm,
     ]);
+
+  const categoryOptions = useMemo(
+    () => getCatalogCategories(catalogProducts),
+    [catalogProducts]
+  );
 
   const storeStatusLabel =
     settings.storeStatus ===
@@ -582,6 +646,14 @@ function Products({
                         : "s"
                     }`}
               </div>
+
+              <div className="products-document-pill">
+                {catalogLoading
+                  ? "Checking Inventory"
+                  : catalogError
+                  ? "Inventory Status Unavailable"
+                  : "Live Inventory"}
+              </div>
             </div>
 
             {!purchasingEnabled && (
@@ -641,7 +713,7 @@ function Products({
             />
 
             <div className="products-category-row">
-              {categories.map(
+              {categoryOptions.map(
                 (category) => (
                   <button
                     key={category}
@@ -750,6 +822,12 @@ function Products({
                       resolvedProduct.price
                     );
 
+                  const availability =
+                    resolvedProduct.availability ||
+                    getVariantAvailability(
+                      resolvedProduct
+                    );
+
                   const canViewPrice =
                     isLoggedIn ||
                     settings.guestPricingEnabled;
@@ -757,7 +835,8 @@ function Products({
                   const canPurchase =
                     hasPrice &&
                     purchasingEnabled &&
-                    isLoggedIn;
+                    isLoggedIn &&
+                    availability.purchasable;
 
                   const coaLabel =
                     documentsLoading
@@ -806,6 +885,16 @@ function Products({
                               Best Seller
                             </span>
                           )}
+
+                          <span
+                            className={
+                              availability.key === "in_stock"
+                                ? "products-coa-badge"
+                                : "products-best-seller-badge"
+                            }
+                          >
+                            {availability.label}
+                          </span>
 
                           {hasPublishedDocumentation && (
                             <span className="products-coa-badge">
@@ -1149,6 +1238,14 @@ function Products({
                             Purchasing
                             Unavailable
                           </button>
+                        ) : !availability.purchasable ? (
+                          <button
+                            type="button"
+                            className="products-disabled-button"
+                            disabled
+                          >
+                            Out Of Stock
+                          </button>
                         ) : canPurchase ? (
                           <button
                             type="button"
@@ -1159,11 +1256,13 @@ function Products({
                               )
                             }
                           >
-                            Add{" "}
-                            {
-                              resolvedProduct.strength
-                            }{" "}
-                            To Cart
+                            {availability.key === "preorder"
+                              ? "Preorder "
+                              : "Add "}
+                            {resolvedProduct.strength}
+                            {availability.key === "preorder"
+                              ? ""
+                              : " To Cart"}
                           </button>
                         ) : (
                           <button

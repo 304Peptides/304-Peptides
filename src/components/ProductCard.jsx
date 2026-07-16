@@ -4,6 +4,27 @@ function ProductCard({
   onViewDetails,
   onAddToCart,
 }) {
+  const availability =
+    product.availability || {
+      key: "in_stock",
+      label: "In Stock",
+      purchasable: true,
+    };
+
+  const lowStock =
+    availability.key === "in_stock" &&
+    product.trackQuantity === true &&
+    Number(product.quantity || 0) <=
+      Number(product.lowStockThreshold || 0);
+
+  const availabilityLabel = lowStock
+    ? `Only ${Number(product.quantity || 0)} Left`
+    : availability.key === "preorder"
+    ? "Preorder — Ships After Restock"
+    : availability.key === "out_of_stock"
+    ? "Out of Stock"
+    : "In Stock — Ready to Ship";
+
   return (
     <div className="product-card" style={cardStyle}>
 
@@ -17,6 +38,19 @@ function ProductCard({
             Best Seller
           </div>
         )}
+      </div>
+
+      <div
+        style={{
+          ...availabilityBadgeStyle,
+          ...(availability.key === "preorder" || lowStock
+            ? availabilityWarningStyle
+            : availability.key === "out_of_stock"
+            ? availabilityDangerStyle
+            : availabilitySuccessStyle),
+        }}
+      >
+        {availabilityLabel}
       </div>
 
       <div className="bottle">
@@ -113,8 +147,13 @@ function ProductCard({
               className="secondary-btn"
               onClick={onAddToCart}
               style={{ width: "100%" }}
+              disabled={!availability.purchasable}
             >
-              Add to Cart
+              {availability.purchasable
+                ? availability.key === "preorder"
+                  ? "Add Preorder to Cart"
+                  : "Add to Cart"
+                : "Currently Unavailable"}
             </button>
           )}
         </div>
@@ -154,6 +193,38 @@ const bestSellerBadgeStyle = {
   color: "#ffffff",
   fontSize: "11px",
   fontWeight: "900",
+};
+
+const availabilityBadgeStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "10px 12px",
+  borderRadius: "13px",
+  fontSize: "12px",
+  fontWeight: "900",
+  textAlign: "center",
+  marginBottom: "16px",
+};
+
+const availabilitySuccessStyle = {
+  color: "#b7f5d1",
+  background: "rgba(80,211,145,.12)",
+  border: "1px solid rgba(80,211,145,.3)",
+};
+
+const availabilityWarningStyle = {
+  color: "#ffe0a3",
+  background: "rgba(255,183,77,.12)",
+  border: "1px solid rgba(255,183,77,.32)",
+};
+
+const availabilityDangerStyle = {
+  color: "#ffb4b4",
+  background: "rgba(255,83,83,.11)",
+  border: "1px solid rgba(255,83,83,.3)",
 };
 
 const contentStyle = {

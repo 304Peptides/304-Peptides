@@ -4,6 +4,8 @@ import {
   useState,
 } from "react";
 
+import { getVariantAvailability } from "../data/catalogRuntime";
+
 const storageKey =
   "304-site-settings";
 
@@ -474,6 +476,12 @@ function ProductDetails({
       resolvedProduct.price
     );
 
+  const availability =
+    resolvedProduct.availability ||
+    getVariantAvailability(
+      resolvedProduct
+    );
+
   const canViewPrice =
     isLoggedIn ||
     settings.guestPricingEnabled;
@@ -485,7 +493,8 @@ function ProductDetails({
   const canPurchase =
     hasPrice &&
     purchasingEnabled &&
-    isLoggedIn;
+    isLoggedIn &&
+    availability.purchasable;
 
   const storeStatusLabel =
     settings.storeStatus ===
@@ -1104,6 +1113,26 @@ function ProductDetails({
                       Unavailable
                     </button>
                   </>
+                ) : !availability.purchasable ? (
+                  <>
+                    <div>
+                      <span className="product-details-price-label">
+                        Availability
+                      </span>
+
+                      <strong className="product-details-locked-price">
+                        Out Of Stock
+                      </strong>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="product-details-disabled-button"
+                      disabled
+                    >
+                      Out Of Stock
+                    </button>
+                  </>
                 ) : canPurchase ? (
                   <>
                     <div>
@@ -1126,11 +1155,13 @@ function ProductDetails({
                         handleAddToCart
                       }
                     >
-                      Add{" "}
-                      {
-                        resolvedProduct.strength
-                      }{" "}
-                      To Cart
+                      {availability.key === "preorder"
+                        ? "Preorder "
+                        : "Add "}
+                      {resolvedProduct.strength}
+                      {availability.key === "preorder"
+                        ? ""
+                        : " To Cart"}
                     </button>
                   </>
                 ) : (

@@ -4,7 +4,10 @@ import {
   useState,
 } from "react";
 
-import { products } from "../data/products";
+import {
+  fetchCatalogOverrides,
+  mergeCatalogRecords,
+} from "../data/catalogRuntime";
 
 const storageKey =
   "304-site-settings";
@@ -87,6 +90,13 @@ function Home({
     setDocumentationError,
   ] = useState(false);
 
+  const [
+    catalogProducts,
+    setCatalogProducts,
+  ] = useState(() =>
+    mergeCatalogRecords([])
+  );
+
   useEffect(() => {
     function updateSettings(
       event
@@ -143,6 +153,27 @@ function Home({
         handleStorageChange
       );
     };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadCatalog() {
+      try {
+        const records = await fetchCatalogOverrides({
+          signal: controller.signal,
+        });
+
+        setCatalogProducts(mergeCatalogRecords(records));
+      } catch (error) {
+        if (error.name !== "AbortError") {
+          setCatalogProducts(mergeCatalogRecords([]));
+        }
+      }
+    }
+
+    loadCatalog();
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
@@ -237,7 +268,7 @@ function Home({
   const bestSellers =
     useMemo(
       () =>
-        products
+        catalogProducts
           .filter(
             (product) =>
               product.isBestSeller
@@ -246,7 +277,7 @@ function Home({
           .map(
             getDisplayVariant
           ),
-      []
+      [catalogProducts]
     );
 
   const storeStatusLabel =

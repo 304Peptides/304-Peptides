@@ -34,6 +34,15 @@ const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 const DOCUMENT_KEY_PREFIX = "document:";
 const ORDER_KEY_PREFIX = "order:";
+const CATALOG_KEY_PREFIX = "catalog:variant:";
+const INVENTORY_EVENT_KEY_PREFIX = "inventory:event:";
+const COUPON_KEY_PREFIX = "coupon:";
+const COUPON_REDEMPTION_KEY_PREFIX = "coupon:redemption:";
+const SHIPPING_SETTINGS_KEY = "settings:shipping";
+const SHIPPING_LABEL_KEY_PREFIX = "shipping:label:";
+const EASYPOST_API_URL = "https://api.easypost.com/v2";
+const FREE_SHIPPING_THRESHOLD_CENTS = 10000;
+const FLAT_SHIPPING_FEE_CENTS = 1500;
 const ACCOUNT_KEY_PREFIX = "account:";
 const SESSION_COOKIE_NAME = "__Host-304_session";
 
@@ -77,6 +86,52 @@ export default {
         request,
         env
       );
+    }
+
+    if (
+      url.pathname === "/api/catalog"
+    ) {
+      return handlePublicCatalogRequest(
+        request,
+        env
+      );
+    }
+
+    if (
+      url.pathname === "/api/admin/catalog"
+    ) {
+      return handleAdminCatalogRequest(
+        request,
+        env,
+        url
+      );
+    }
+
+    if (
+      url.pathname === "/api/coupon/validate"
+    ) {
+      return handleCouponValidationRequest(
+        request,
+        env
+      );
+    }
+
+    if (
+      url.pathname === "/api/admin/coupons"
+    ) {
+      return handleAdminCouponsRequest(
+        request,
+        env,
+        url
+      );
+    }
+
+    if (
+      url.pathname === "/api/admin/shipping/settings" ||
+      url.pathname === "/api/admin/shipping/rates" ||
+      url.pathname === "/api/admin/shipping/buy"
+    ) {
+      return handleAdminShippingRequest(request, env, url);
     }
 
     if (
@@ -158,8 +213,1103 @@ export default {
 };
 
 /* -------------------------------------------------- */
+/* CATALOG AND INVENTORY API                          */
+/* -------------------------------------------------- */
+
+async function handlePublicCatalogRequest(
+  request,
+  env
+) {
+  try {
+    validateStorage(env);
+
+    if (request.method !== "GET") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    const records = await listRecordsByPrefix(
+      env.DOCUMENTS_KV,
+      CATALOG_KEY_PREFIX
+    );
+
+    return jsonResponse({
+      success: true,
+      records: records
+        .map(toPublicCatalogRecord)
+        .filter(Boolean),
+      count: records.length,
+    });
+  } catch (error) {
+    console.error("Public catalog request error:", error);
+    return handleApiError(error);
+  }
+}
+
+async function handleAdminCatalogRequest(
+  request,
+  env,
+  url
+) {
+  try {
+    validateStorage(env);
+    await requireAdmin(request, env);
+
+    if (request.method === "GET") {
+      const records = await listRecordsByPrefix(
+        env.DOCUMENTS_KV,
+        CATALOG_KEY_PREFIX
+      );
+
+      return jsonResponse({
+        success: true,
+        records,
+        count: records.length,
+      });
+    }
+
+    if (request.method === "POST" || request.method === "PUT") {
+      validateJsonContentType(request);
+      const body = await readJsonRequest(
+        request,
+        MAX_DOCUMENT_REQUEST_LENGTH,
+        "catalog update"
+      );
+      const record = prepareCatalogRecord(body.variant || body.record || body);
+
+      await env.DOCUMENTS_KV.put(
+        getCatalogKey(record.codeName),
+        JSON.stringify(record),
+        {
+          metadata: {
+            codeName: record.codeName,
+            productKey: record.productKey,
+            hidden: record.hidden,
+            productHidden: record.productHidden,
+            quantity: record.quantity,
+            availabilityMode: record.availabilityMode,
+            updatedAt: record.updatedAt,
+          },
+        }
+      );
+
+      return jsonResponse({
+        success: true,
+        record,
+        message: `${record.codeName} saved.`,
+      });
+    }
+
+    if (request.method === "DELETE") {
+      const codeName = normalizeCatalogCode(
+        url.searchParams.get("codeName")
+      );
+      await env.DOCUMENTS_KV.delete(getCatalogKey(codeName));
+
+      return jsonResponse({
+        success: true,
+        message: `${codeName} override removed.`,
+      });
+    }
+
+    throw new ApiRequestError("Method not allowed.", 405);
+  } catch (error) {
+    console.error("Admin catalog request error:", error);
+    return handleApiError(error);
+  }
+}
+
+function normalizeCatalogCode(value) {
+  const codeName = cleanText(value, 100).toUpperCase();
+
+  if (!/^[A-Z0-9][A-Z0-9._-]{1,99}$/.test(codeName)) {
+    throw new ApiRequestError("The product code is invalid.", 400);
+  }
+
+  return codeName;
+}
+
+function normalizeCatalogProductKey(value, fallback) {
+  const productKey = cleanText(value || fallback, 100)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  if (!productKey) {
+    throw new ApiRequestError("A product group is required.", 400);
+  }
+
+  return productKey;
+}
+
+function getCatalogKey(codeName) {
+  return `${CATALOG_KEY_PREFIX}${normalizeCatalogCode(codeName)}`;
+}
+
+function prepareCatalogRecord(source) {
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    throw new ApiRequestError("The catalog record is invalid.", 400);
+  }
+
+  const codeName = normalizeCatalogCode(source.codeName);
+  const name = cleanText(source.name, 150);
+  const strength = cleanText(source.strength, 100);
+  const price = Number(source.price);
+  const unitCost = Number(source.unitCost || 0);
+  const quantity = Math.max(0, Math.floor(Number(source.quantity || 0)));
+  const availabilityMode = ["in_stock", "preorder", "out_of_stock"].includes(
+    source.availabilityMode
+  )
+    ? source.availabilityMode
+    : "in_stock";
+
+  if (!name || !strength) {
+    throw new ApiRequestError(
+      "Product name and strength are required.",
+      400
+    );
+  }
+
+  if (!Number.isFinite(price) || price < 0 || price > 100000) {
+    throw new ApiRequestError("Enter a valid product price.", 400);
+  }
+
+  if (!Number.isFinite(unitCost) || unitCost < 0 || unitCost > 100000) {
+    throw new ApiRequestError("Enter a valid unit cost.", 400);
+  }
+
+  if (!Number.isSafeInteger(quantity) || quantity > 1000000) {
+    throw new ApiRequestError("Enter a valid product quantity.", 400);
+  }
+
+  const existingStatic = getOrderCatalogItem(codeName) || {};
+  const now = new Date().toISOString();
+
+  return {
+    productKey: normalizeCatalogProductKey(source.productKey, name),
+    productCodeName: cleanText(
+      source.productCodeName || codeName,
+      100
+    ).toUpperCase(),
+    name,
+    category: cleanText(
+      source.category || "Additional Research Products",
+      150
+    ),
+    description: cleanMultilineText(source.description, 2000),
+    purity: cleanText(source.purity || "≥ 99% Purity", 100),
+    isBestSeller: source.isBestSeller === true,
+    codeName,
+    strength,
+    price: Math.round(price * 100) / 100,
+    unitCost: Math.round(unitCost * 100) / 100,
+    image: cleanText(source.image || source.imageUrl, 2048),
+    imageUrl: cleanText(source.imageUrl || source.image, 2048),
+    composition: cleanText(
+      source.composition || existingStatic.composition,
+      500
+    ),
+    quantity,
+    trackQuantity: source.trackQuantity === true,
+    allowPreorder: source.allowPreorder === true,
+    availabilityMode,
+    hidden: source.hidden === true,
+    productHidden: source.productHidden === true,
+    lowStockThreshold: Math.max(
+      0,
+      Math.min(1000000, Math.floor(Number(source.lowStockThreshold || 5)))
+    ),
+    source: existingStatic.name ? "override" : "new",
+    createdAt: cleanText(source.createdAt, 100) || now,
+    updatedAt: now,
+  };
+}
+
+function resolveCatalogAvailability(record) {
+  if (record.hidden || record.productHidden) {
+    return { key: "hidden", label: "Hidden", purchasable: false };
+  }
+
+  if (record.availabilityMode === "out_of_stock") {
+    return { key: "out_of_stock", label: "Out of Stock", purchasable: false };
+  }
+
+  if (record.availabilityMode === "preorder") {
+    return { key: "preorder", label: "Preorder", purchasable: true };
+  }
+
+  if (record.trackQuantity === true && Number(record.quantity || 0) <= 0) {
+    return record.allowPreorder === true
+      ? { key: "preorder", label: "Preorder", purchasable: true }
+      : { key: "out_of_stock", label: "Out of Stock", purchasable: false };
+  }
+
+  return { key: "in_stock", label: "In Stock", purchasable: true };
+}
+
+function toPublicCatalogRecord(record) {
+  const availability = resolveCatalogAvailability(record);
+
+  if (availability.key === "hidden") {
+    return null;
+  }
+
+  return {
+    productKey: record.productKey,
+    productCodeName: record.productCodeName,
+    name: record.name,
+    category: record.category,
+    description: record.description,
+    purity: record.purity,
+    isBestSeller: record.isBestSeller,
+    codeName: record.codeName,
+    strength: record.strength,
+    price: record.price,
+    image: record.image || record.imageUrl || "",
+    imageUrl: record.imageUrl || record.image || "",
+    composition: record.composition,
+    quantity: record.trackQuantity ? record.quantity : null,
+    trackQuantity: record.trackQuantity,
+    allowPreorder: record.allowPreorder,
+    availabilityMode: record.availabilityMode,
+    lowStockThreshold: record.lowStockThreshold,
+    availability,
+    updatedAt: record.updatedAt,
+  };
+}
+
+async function getCatalogOverride(env, codeName) {
+  return env.DOCUMENTS_KV.get(getCatalogKey(codeName), "json");
+}
+
+async function getProtectedCatalogItem(env, codeName) {
+  const normalized = normalizeCatalogCode(codeName);
+  const override = await getCatalogOverride(env, normalized);
+
+  if (override) {
+    const availability = resolveCatalogAvailability(override);
+
+    if (!availability.purchasable) {
+      throw new OrderRequestError(
+        `Product code ${normalized} is ${availability.label.toLowerCase()}.`,
+        409
+      );
+    }
+
+    return {
+      ...override,
+      availability,
+    };
+  }
+
+  const staticItem = getOrderCatalogItem(normalized);
+
+  if (!staticItem) {
+    throw new OrderRequestError(
+      `Product code ${normalized} is not available.`,
+      400
+    );
+  }
+
+  return {
+    ...staticItem,
+    codeName: normalized,
+    trackQuantity: false,
+    availability: {
+      key: "in_stock",
+      label: "In Stock",
+      purchasable: true,
+    },
+  };
+}
+
+async function commitInventoryForPaidOrder(env, order) {
+  const orderId = normalizeOrderId(order.orderId || order.id);
+  const eventKey = `${INVENTORY_EVENT_KEY_PREFIX}${orderId}`;
+  const existingEvent = await env.DOCUMENTS_KV.get(eventKey, "json");
+
+  if (existingEvent) {
+    return existingEvent;
+  }
+
+  const adjustments = [];
+
+  for (const item of Array.isArray(order.items) ? order.items : []) {
+    const codeName = normalizeCatalogCode(item.codeName);
+    const record = await getCatalogOverride(env, codeName);
+
+    if (!record || record.trackQuantity !== true) {
+      continue;
+    }
+
+    const quantity = Math.max(0, Math.floor(Number(record.quantity || 0)));
+    const orderedQuantity = Math.max(0, Math.floor(Number(item.quantity || 0)));
+    const nextQuantity = Math.max(0, quantity - orderedQuantity);
+    const updatedRecord = {
+      ...record,
+      quantity: nextQuantity,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await env.DOCUMENTS_KV.put(
+      getCatalogKey(codeName),
+      JSON.stringify(updatedRecord)
+    );
+
+    adjustments.push({
+      codeName,
+      previousQuantity: quantity,
+      orderedQuantity,
+      quantity: nextQuantity,
+    });
+  }
+
+  const event = {
+    orderId,
+    adjustments,
+    committedAt: new Date().toISOString(),
+  };
+
+  await env.DOCUMENTS_KV.put(eventKey, JSON.stringify(event));
+  return event;
+}
+
+/* -------------------------------------------------- */
+/* COUPON API                                         */
+/* -------------------------------------------------- */
+
+async function handleCouponValidationRequest(request, env) {
+  try {
+    validateStorage(env);
+
+    if (request.method !== "POST") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    validateJsonContentType(request);
+    const body = await readJsonRequest(
+      request,
+      MAX_DOCUMENT_REQUEST_LENGTH,
+      "coupon validation"
+    );
+    const subtotalCents = normalizeWorkflowMoneyCents(
+      body.subtotalCents,
+      Math.round(Number(body.subtotal || 0) * 100),
+      "coupon subtotal"
+    );
+    const result = await validateCouponForOrder(
+      env,
+      body.code,
+      subtotalCents
+    );
+
+    return jsonResponse({
+      success: true,
+      valid: true,
+      coupon: toPublicCouponRecord(result.record),
+      discountCents: result.discountCents,
+      freeShipping: result.freeShipping,
+      message: buildCouponMessage(result.record, result.discountCents),
+    });
+  } catch (error) {
+    console.error("Coupon validation error:", error);
+    return handleApiError(error);
+  }
+}
+
+async function handleAdminCouponsRequest(request, env, url) {
+  try {
+    validateStorage(env);
+    await requireAdmin(request, env);
+
+    if (request.method === "GET") {
+      const records = await listRecordsByPrefix(
+        env.DOCUMENTS_KV,
+        COUPON_KEY_PREFIX
+      );
+
+      return jsonResponse({
+        success: true,
+        records: records
+          .filter((record) => !record.redemptionEvent)
+          .sort((left, right) =>
+            String(right.updatedAt || "").localeCompare(
+              String(left.updatedAt || "")
+            )
+          ),
+      });
+    }
+
+    if (request.method === "POST" || request.method === "PUT") {
+      validateJsonContentType(request);
+      const body = await readJsonRequest(
+        request,
+        MAX_DOCUMENT_REQUEST_LENGTH,
+        "coupon update"
+      );
+      const existing = body.code
+        ? await getCouponRecord(env, body.code)
+        : null;
+      const record = prepareCouponRecord(
+        body.coupon || body.record || body,
+        existing
+      );
+
+      await env.DOCUMENTS_KV.put(
+        getCouponKey(record.code),
+        JSON.stringify(record),
+        {
+          metadata: {
+            code: record.code,
+            active: record.active,
+            startsAt: record.startsAt,
+            endsAt: record.endsAt,
+            updatedAt: record.updatedAt,
+          },
+        }
+      );
+
+      return jsonResponse({
+        success: true,
+        record,
+        message: `Coupon ${record.code} saved.`,
+      });
+    }
+
+    if (request.method === "DELETE") {
+      const code = normalizeCouponCode(url.searchParams.get("code"));
+      const record = await getCouponRecord(env, code);
+
+      if (!record) {
+        throw new ApiRequestError("Coupon not found.", 404);
+      }
+
+      const disabledRecord = {
+        ...record,
+        active: false,
+        archived: true,
+        updatedAt: new Date().toISOString(),
+      };
+
+      await env.DOCUMENTS_KV.put(
+        getCouponKey(code),
+        JSON.stringify(disabledRecord)
+      );
+
+      return jsonResponse({
+        success: true,
+        record: disabledRecord,
+        message: `Coupon ${code} disabled.`,
+      });
+    }
+
+    throw new ApiRequestError("Method not allowed.", 405);
+  } catch (error) {
+    console.error("Admin coupon request error:", error);
+    return handleApiError(error);
+  }
+}
+
+function normalizeCouponCode(value) {
+  const code = cleanText(value, 50).toUpperCase();
+
+  if (!/^[A-Z0-9][A-Z0-9_-]{2,49}$/.test(code)) {
+    throw new ApiRequestError(
+      "Coupon codes must contain 3 to 50 letters, numbers, dashes, or underscores.",
+      400
+    );
+  }
+
+  return code;
+}
+
+function getCouponKey(code) {
+  return `${COUPON_KEY_PREFIX}${normalizeCouponCode(code)}`;
+}
+
+async function getCouponRecord(env, code) {
+  if (!code) {
+    return null;
+  }
+
+  return env.DOCUMENTS_KV.get(getCouponKey(code), "json");
+}
+
+function normalizeCouponDate(value, label) {
+  const text = cleanText(value, 100);
+
+  if (!text) {
+    return "";
+  }
+
+  const parsed = new Date(text);
+
+  if (Number.isNaN(parsed.getTime())) {
+    throw new ApiRequestError(`Enter a valid ${label}.`, 400);
+  }
+
+  return parsed.toISOString();
+}
+
+function prepareCouponRecord(source, existing = null) {
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    throw new ApiRequestError("The coupon record is invalid.", 400);
+  }
+
+  const code = normalizeCouponCode(source.code || existing?.code);
+  const type = ["percent", "fixed", "free_shipping"].includes(source.type)
+    ? source.type
+    : existing?.type || "percent";
+  const amount = Number(source.amount ?? existing?.amount ?? 0);
+  const minimumSubtotal = Number(
+    source.minimumSubtotal ?? existing?.minimumSubtotal ?? 0
+  );
+  const maxRedemptions = Math.max(
+    0,
+    Math.floor(
+      Number(source.maxRedemptions ?? existing?.maxRedemptions ?? 0)
+    )
+  );
+  const now = new Date().toISOString();
+
+  if (
+    !Number.isFinite(amount) ||
+    amount < 0 ||
+    (type === "percent" && amount > 100) ||
+    (type === "fixed" && amount > 100000)
+  ) {
+    throw new ApiRequestError("Enter a valid coupon amount.", 400);
+  }
+
+  if (!Number.isFinite(minimumSubtotal) || minimumSubtotal < 0) {
+    throw new ApiRequestError("Enter a valid minimum order amount.", 400);
+  }
+
+  const startsAt = normalizeCouponDate(
+    source.startsAt ?? existing?.startsAt,
+    "coupon start date"
+  );
+  const endsAt = normalizeCouponDate(
+    source.endsAt ?? existing?.endsAt,
+    "coupon expiration date"
+  );
+
+  if (startsAt && endsAt && new Date(endsAt) <= new Date(startsAt)) {
+    throw new ApiRequestError(
+      "The coupon expiration must be after its start date.",
+      400
+    );
+  }
+
+  return {
+    code,
+    description: cleanText(
+      source.description ?? existing?.description,
+      300
+    ),
+    type,
+    amount: Math.round(amount * 100) / 100,
+    minimumSubtotal: Math.round(minimumSubtotal * 100) / 100,
+    startsAt,
+    endsAt,
+    maxRedemptions,
+    redemptionCount: Math.max(
+      0,
+      Math.floor(Number(existing?.redemptionCount || 0))
+    ),
+    active: source.active !== false,
+    archived: source.archived === true,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+function toPublicCouponRecord(record) {
+  return {
+    code: record.code,
+    description: record.description,
+    type: record.type,
+    amount: record.amount,
+    minimumSubtotal: record.minimumSubtotal,
+    startsAt: record.startsAt,
+    endsAt: record.endsAt,
+  };
+}
+
+function assertCouponAvailable(record, subtotalCents) {
+  if (!record || record.archived || record.active === false) {
+    throw new ApiRequestError("That coupon is not active.", 409);
+  }
+
+  const now = Date.now();
+
+  if (record.startsAt && new Date(record.startsAt).getTime() > now) {
+    throw new ApiRequestError("That coupon is scheduled but not active yet.", 409);
+  }
+
+  if (record.endsAt && new Date(record.endsAt).getTime() < now) {
+    throw new ApiRequestError("That coupon has expired.", 409);
+  }
+
+  if (
+    Number(record.maxRedemptions || 0) > 0 &&
+    Number(record.redemptionCount || 0) >= Number(record.maxRedemptions)
+  ) {
+    throw new ApiRequestError("That coupon has reached its usage limit.", 409);
+  }
+
+  const minimumCents = Math.round(
+    Number(record.minimumSubtotal || 0) * 100
+  );
+
+  if (subtotalCents < minimumCents) {
+    throw new ApiRequestError(
+      `This coupon requires a product subtotal of at least $${(
+        minimumCents / 100
+      ).toFixed(2)}.`,
+      409
+    );
+  }
+}
+
+function calculateCouponResult(record, subtotalCents) {
+  let discountCents = 0;
+  let freeShipping = false;
+
+  if (record.type === "percent") {
+    discountCents = Math.round(
+      subtotalCents * (Number(record.amount || 0) / 100)
+    );
+  } else if (record.type === "fixed") {
+    discountCents = Math.round(Number(record.amount || 0) * 100);
+  } else if (record.type === "free_shipping") {
+    freeShipping = true;
+  }
+
+  return {
+    discountCents: Math.min(subtotalCents, Math.max(0, discountCents)),
+    freeShipping,
+  };
+}
+
+async function validateCouponForOrder(env, rawCode, subtotalCents) {
+  const code = normalizeCouponCode(rawCode);
+  const record = await getCouponRecord(env, code);
+
+  assertCouponAvailable(record, subtotalCents);
+
+  return {
+    record,
+    ...calculateCouponResult(record, subtotalCents),
+  };
+}
+
+function buildCouponMessage(record, discountCents) {
+  if (record.type === "free_shipping") {
+    return `${record.code} applied for free shipping.`;
+  }
+
+  return `${record.code} applied. You saved $${(
+    Number(discountCents || 0) / 100
+  ).toFixed(2)}.`;
+}
+
+async function commitCouponRedemptionForPaidOrder(env, order) {
+  const couponCode = cleanText(order.couponCode, 50).toUpperCase();
+
+  if (!couponCode) {
+    return null;
+  }
+
+  const orderId = normalizeOrderId(order.orderId || order.id);
+  const eventKey = `${COUPON_REDEMPTION_KEY_PREFIX}${orderId}`;
+  const existingEvent = await env.DOCUMENTS_KV.get(eventKey, "json");
+
+  if (existingEvent) {
+    return existingEvent;
+  }
+
+  const record = await getCouponRecord(env, couponCode);
+
+  if (!record) {
+    return null;
+  }
+
+  const updatedRecord = {
+    ...record,
+    redemptionCount: Math.max(0, Number(record.redemptionCount || 0)) + 1,
+    updatedAt: new Date().toISOString(),
+  };
+  const event = {
+    redemptionEvent: true,
+    orderId,
+    couponCode,
+    discount: Number(order.discount || 0),
+    redeemedAt: new Date().toISOString(),
+  };
+
+  await env.DOCUMENTS_KV.put(
+    getCouponKey(couponCode),
+    JSON.stringify(updatedRecord)
+  );
+  await env.DOCUMENTS_KV.put(eventKey, JSON.stringify(event));
+
+  return event;
+}
+
+
+/* -------------------------------------------------- */
 /* DOCUMENTATION API                                  */
 /* -------------------------------------------------- */
+
+
+/* -------------------------------------------------- */
+/* SHIPPING LABEL API                                 */
+/* -------------------------------------------------- */
+
+async function handleAdminShippingRequest(request, env, url) {
+  try {
+    validateStorage(env);
+    await requireAdmin(request, env);
+
+    if (url.pathname === "/api/admin/shipping/settings") {
+      if (request.method === "GET") {
+        const settings =
+          (await env.DOCUMENTS_KV.get(SHIPPING_SETTINGS_KEY, "json")) || null;
+        return jsonResponse({
+          success: true,
+          configured: Boolean(env.EASYPOST_API_KEY),
+          provider: "EasyPost",
+          settings,
+        });
+      }
+
+      if (request.method === "POST" || request.method === "PUT") {
+        validateJsonContentType(request);
+        const body = await readJsonRequest(
+          request,
+          MAX_DOCUMENT_REQUEST_LENGTH,
+          "shipping settings"
+        );
+        const settings = prepareShippingSettings(body.settings || body);
+        await env.DOCUMENTS_KV.put(
+          SHIPPING_SETTINGS_KEY,
+          JSON.stringify(settings)
+        );
+        return jsonResponse({
+          success: true,
+          configured: Boolean(env.EASYPOST_API_KEY),
+          provider: "EasyPost",
+          settings,
+          message: "Shipping settings saved.",
+        });
+      }
+
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    if (request.method !== "POST") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    if (!env.EASYPOST_API_KEY) {
+      throw new ApiRequestError(
+        "EasyPost is not connected. Add the EASYPOST_API_KEY Cloudflare secret first.",
+        503
+      );
+    }
+
+    validateJsonContentType(request);
+    const body = await readJsonRequest(
+      request,
+      MAX_ORDER_WORKFLOW_REQUEST_LENGTH,
+      "shipping label request"
+    );
+
+    if (url.pathname === "/api/admin/shipping/rates") {
+      return createShippingRates(body, env);
+    }
+
+    if (url.pathname === "/api/admin/shipping/buy") {
+      return buyShippingLabel(body, env);
+    }
+
+    throw new ApiRequestError("Shipping route not found.", 404);
+  } catch (error) {
+    console.error("Shipping label request error:", error);
+    return handleApiError(error);
+  }
+}
+
+function prepareShippingSettings(source) {
+  const settings = {
+    fromName: cleanText(source.fromName, 120),
+    company: cleanText(source.company, 120),
+    street1: cleanText(source.street1, 200),
+    street2: cleanText(source.street2, 200),
+    city: cleanText(source.city, 100),
+    state: cleanText(source.state, 50).toUpperCase(),
+    zip: cleanText(source.zip, 20),
+    country: cleanText(source.country || "US", 2).toUpperCase(),
+    phone: cleanText(source.phone, 30),
+    email: cleanText(source.email, 254).toLowerCase(),
+    defaultLength: normalizeShippingMeasurement(source.defaultLength, 8),
+    defaultWidth: normalizeShippingMeasurement(source.defaultWidth, 6),
+    defaultHeight: normalizeShippingMeasurement(source.defaultHeight, 4),
+    defaultWeight: normalizeShippingMeasurement(source.defaultWeight, 8),
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (
+    !settings.fromName ||
+    !settings.street1 ||
+    !settings.city ||
+    !settings.state ||
+    !settings.zip ||
+    !settings.email
+  ) {
+    throw new ApiRequestError(
+      "Complete the shipping name, street, city, state, ZIP, and email.",
+      400
+    );
+  }
+
+  return settings;
+}
+
+function normalizeShippingMeasurement(value, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0 || number > 1000) {
+    return fallback;
+  }
+  return Math.round(number * 100) / 100;
+}
+
+async function getShippingSettings(env) {
+  const settings = await env.DOCUMENTS_KV.get(SHIPPING_SETTINGS_KEY, "json");
+  if (!settings) {
+    throw new ApiRequestError(
+      "Save the origin address and default package in Shipping Center first.",
+      409
+    );
+  }
+  return settings;
+}
+
+function buildEasyPostAddressFromOrder(order) {
+  const customer = order.customer || {};
+  return {
+    name: cleanText(
+      `${customer.firstName || ""} ${customer.lastName || ""}`.trim(),
+      120
+    ),
+    street1: cleanText(customer.address, 200),
+    city: cleanText(customer.city, 100),
+    state: cleanText(customer.state, 50),
+    zip: cleanText(customer.zip, 20),
+    country: "US",
+    email: cleanText(customer.email, 254),
+  };
+}
+
+function buildEasyPostOrigin(settings) {
+  return {
+    name: settings.fromName,
+    company: settings.company || undefined,
+    street1: settings.street1,
+    street2: settings.street2 || undefined,
+    city: settings.city,
+    state: settings.state,
+    zip: settings.zip,
+    country: settings.country || "US",
+    phone: settings.phone || undefined,
+    email: settings.email,
+  };
+}
+
+async function createShippingRates(body, env) {
+  const orderId = normalizeOrderId(body.orderId);
+  const order = await getOrderRecord(env, orderId);
+  if (!order) {
+    throw new ApiRequestError(`Order ${orderId} was not found.`, 404);
+  }
+
+  const settings = await getShippingSettings(env);
+  const parcelSource = body.parcel || {};
+  const parcel = {
+    length: normalizeShippingMeasurement(
+      parcelSource.length,
+      settings.defaultLength
+    ),
+    width: normalizeShippingMeasurement(
+      parcelSource.width,
+      settings.defaultWidth
+    ),
+    height: normalizeShippingMeasurement(
+      parcelSource.height,
+      settings.defaultHeight
+    ),
+    weight: normalizeShippingMeasurement(
+      parcelSource.weight,
+      settings.defaultWeight
+    ),
+  };
+
+  const shipment = await easyPostRequest(env, "/shipments", {
+    method: "POST",
+    body: {
+      shipment: {
+        reference: orderId,
+        to_address: buildEasyPostAddressFromOrder(order),
+        from_address: buildEasyPostOrigin(settings),
+        parcel,
+        options: {
+          label_format: "PDF",
+          label_size: "4x6",
+        },
+      },
+    },
+  });
+
+  const rates = (Array.isArray(shipment.rates) ? shipment.rates : [])
+    .map(function (rate) {
+      return {
+        id: cleanText(rate.id, 120),
+        carrier: cleanText(rate.carrier, 80),
+        service: cleanText(rate.service, 100),
+        rate: Number(rate.rate || 0),
+        retailRate: Number(rate.retail_rate || 0),
+        currency: cleanText(rate.currency || "USD", 10),
+        deliveryDays: Number.isFinite(Number(rate.delivery_days))
+          ? Number(rate.delivery_days)
+          : null,
+        deliveryDate: cleanText(rate.delivery_date, 50),
+      };
+    })
+    .filter(function (rate) {
+      return rate.id && rate.rate > 0;
+    })
+    .sort(function (left, right) {
+      return left.rate - right.rate;
+    });
+
+  return jsonResponse({
+    success: true,
+    provider: "EasyPost",
+    orderId,
+    shipmentId: shipment.id,
+    parcel,
+    rates,
+    message: rates.length
+      ? `${rates.length} shipping rate(s) found.`
+      : "No shipping rates were returned for this package.",
+  });
+}
+
+async function buyShippingLabel(body, env) {
+  const orderId = normalizeOrderId(body.orderId);
+  const shipmentId = cleanText(body.shipmentId, 120);
+  const rateId = cleanText(body.rateId, 120);
+
+  if (!/^shp_[A-Za-z0-9]+$/.test(shipmentId)) {
+    throw new ApiRequestError("The shipping quote is invalid.", 400);
+  }
+  if (!/^rate_[A-Za-z0-9]+$/.test(rateId)) {
+    throw new ApiRequestError("Choose a valid shipping rate.", 400);
+  }
+
+  const order = await getOrderRecord(env, orderId);
+  if (!order) {
+    throw new ApiRequestError(`Order ${orderId} was not found.`, 404);
+  }
+
+  const shipment = await easyPostRequest(
+    env,
+    `/shipments/${encodeURIComponent(shipmentId)}/buy`,
+    {
+      method: "POST",
+      body: { rate: { id: rateId } },
+    }
+  );
+
+  const postage = shipment.postage_label || {};
+  const selectedRate = shipment.selected_rate || {};
+  const label = {
+    labelId: cleanText(postage.id, 120),
+    orderId,
+    shipmentId: cleanText(shipment.id || shipmentId, 120),
+    rateId: cleanText(selectedRate.id || rateId, 120),
+    provider: "EasyPost",
+    carrier: cleanText(selectedRate.carrier, 80),
+    service: cleanText(selectedRate.service, 100),
+    postage: Number(selectedRate.rate || 0),
+    trackingNumber: cleanText(shipment.tracking_code, 200),
+    trackingUrl: cleanText(shipment.tracker?.public_url, 2048),
+    labelUrl: cleanText(
+      postage.label_pdf_url || postage.label_url || postage.label_zpl_url,
+      2048
+    ),
+    purchasedAt: new Date().toISOString(),
+  };
+
+  if (!label.trackingNumber || !label.labelUrl) {
+    throw new ApiRequestError(
+      "The label was purchased, but EasyPost did not return tracking and a printable label.",
+      502
+    );
+  }
+
+  const existingLabels = Array.isArray(order.shippingLabels)
+    ? order.shippingLabels
+    : [];
+  const updatedOrder = {
+    ...order,
+    shippingLabels: [...existingLabels, label].slice(-50),
+    updatedAt: new Date().toISOString(),
+  };
+  await putOrderRecord(env, updatedOrder);
+  await env.DOCUMENTS_KV.put(
+    `${SHIPPING_LABEL_KEY_PREFIX}${label.labelId || label.shipmentId}`,
+    JSON.stringify(label)
+  );
+
+  return jsonResponse({
+    success: true,
+    order: updatedOrder,
+    label,
+    message: "Shipping label purchased. Print it, then record the shipment to email the customer.",
+  });
+}
+
+async function easyPostRequest(env, path, options) {
+  const response = await fetch(`${EASYPOST_API_URL}${path}`, {
+    method: options.method || "GET",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Authorization: `Basic ${btoa(`${String(env.EASYPOST_API_KEY)}:`)}`,
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+
+  const text = await response.text();
+  let result;
+  try {
+    result = text ? JSON.parse(text) : {};
+  } catch {
+    result = {};
+  }
+
+  if (!response.ok) {
+    const message =
+      result?.error?.message ||
+      result?.error?.errors?.[0]?.message ||
+      result?.message ||
+      `EasyPost returned status ${response.status}.`;
+    throw new ApiRequestError(cleanText(message, 1000), 502);
+  }
+
+  return result;
+}
 
 async function handlePublicDocumentsRequest(
   request,
@@ -1011,7 +2161,7 @@ async function processInvoiceWorkflowAction(
   const shippingCents =
     normalizeWorkflowMoneyCents(
       body.shippingCents,
-      0,
+      Math.round(Number(order.shippingFee || 0) * 100),
       "shipping amount"
     );
 
@@ -1285,6 +2435,7 @@ async function processPaymentReceivedWorkflowAction(
     ) ||
     Math.round(
       Number(
+        order.total ||
         order.subtotal ||
         0
       ) * 100
@@ -1483,6 +2634,22 @@ async function processPaymentReceivedWorkflowAction(
         ),
     };
 
+    const inventoryEvent =
+      isResend
+        ? order.inventoryEvent || null
+        : await commitInventoryForPaidOrder(
+            env,
+            order
+          );
+
+    const couponRedemption =
+      isResend
+        ? order.couponRedemption || null
+        : await commitCouponRedemptionForPaidOrder(
+            env,
+            order
+          );
+
     const updatedOrder = {
       ...order,
 
@@ -1507,6 +2674,26 @@ async function processPaymentReceivedWorkflowAction(
       },
 
       fulfillment,
+
+      inventoryCommittedAt:
+        order.inventoryCommittedAt ||
+        inventoryEvent?.committedAt ||
+        null,
+
+      inventoryEvent:
+        order.inventoryEvent ||
+        inventoryEvent ||
+        null,
+
+      couponRedemption:
+        order.couponRedemption ||
+        couponRedemption ||
+        null,
+
+      couponRedeemedAt:
+        order.couponRedeemedAt ||
+        couponRedemption?.redeemedAt ||
+        null,
 
       paymentHistory:
         appendOrderWorkflowHistory(
@@ -5219,8 +6406,9 @@ async function handleOrderRequest(
       requestBody;
 
     const protectedOrder =
-      prepareOrder(
-        submittedOrder
+      await prepareOrder(
+        submittedOrder,
+        env
       );
 
     const customerSession =
@@ -5620,8 +6808,9 @@ async function validateTurnstile(
   }
 }
 
-function prepareOrder(
-  rawOrder
+async function prepareOrder(
+  rawOrder,
+  env
 ) {
   if (
     !rawOrder ||
@@ -5682,10 +6871,11 @@ function prepareOrder(
     );
   }
 
-  const items =
-    rawOrder.items.map(
-      prepareItem
-    );
+  const items = await Promise.all(
+    rawOrder.items.map((item, index) =>
+      prepareItem(item, index, env)
+    )
+  );
 
   const totalQuantity =
     items.reduce(
@@ -5723,6 +6913,41 @@ function prepareOrder(
       0
     );
 
+  const rawCouponCode = cleanText(rawOrder.couponCode, 50).toUpperCase();
+  let couponCode = "";
+  let couponDescription = "";
+  let couponType = "";
+  let discountInCents = 0;
+  let couponFreeShipping = false;
+
+  if (rawCouponCode) {
+    const couponResult = await validateCouponForOrder(
+      env,
+      rawCouponCode,
+      subtotalInCents
+    );
+
+    couponCode = couponResult.record.code;
+    couponDescription = couponResult.record.description;
+    couponType = couponResult.record.type;
+    discountInCents = couponResult.discountCents;
+    couponFreeShipping = couponResult.freeShipping;
+  }
+
+  const discountedSubtotalInCents = Math.max(
+    0,
+    subtotalInCents - discountInCents
+  );
+
+  const shippingFeeInCents =
+    couponFreeShipping ||
+    discountedSubtotalInCents >= FREE_SHIPPING_THRESHOLD_CENTS
+      ? 0
+      : FLAT_SHIPPING_FEE_CENTS;
+
+  const totalInCents =
+    discountedSubtotalInCents + shippingFeeInCents;
+
   return {
     id:
       createOrderId(),
@@ -5736,9 +6961,34 @@ function prepareOrder(
 
     items,
 
-    subtotal:
+    merchandiseSubtotal:
       subtotalInCents /
       100,
+
+    discount:
+      discountInCents /
+      100,
+
+    couponCode,
+
+    couponDescription,
+
+    couponType,
+
+    subtotal:
+      discountedSubtotalInCents /
+      100,
+
+    shippingFee:
+      shippingFeeInCents /
+      100,
+
+    total:
+      totalInCents /
+      100,
+
+    freeShipping:
+      shippingFeeInCents === 0,
 
     totalQuantity,
   };
@@ -5834,9 +7084,10 @@ function prepareCustomer(
   return customer;
 }
 
-function prepareItem(
+async function prepareItem(
   rawItem,
-  index
+  index,
+  env
 ) {
   if (
     !rawItem ||
@@ -5868,18 +7119,10 @@ function prepareItem(
   }
 
   const catalogItem =
-    getOrderCatalogItem(
+    await getProtectedCatalogItem(
+      env,
       codeName
     );
-
-  if (
-    !catalogItem
-  ) {
-    throw new OrderRequestError(
-      `Product code ${codeName} is not available.`,
-      400
-    );
-  }
 
   const quantity =
     Number(
@@ -5901,6 +7144,17 @@ function prepareItem(
     );
   }
 
+  if (
+    catalogItem.trackQuantity === true &&
+    catalogItem.availability?.key === "in_stock" &&
+    quantity > Number(catalogItem.quantity || 0)
+  ) {
+    throw new OrderRequestError(
+      `Only ${catalogItem.quantity} unit(s) of ${catalogItem.name} ${catalogItem.strength} are currently in stock.`,
+      409
+    );
+  }
+
   return {
     name:
       catalogItem.name,
@@ -5914,6 +7168,9 @@ function prepareItem(
 
     price:
       catalogItem.price,
+
+    unitCost:
+      Number(catalogItem.unitCost || 0),
 
     ...(catalogItem.composition
       ? {

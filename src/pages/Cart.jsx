@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
+import {
+  calculateOrderTotal,
+  calculateShippingFee,
+  getFreeShippingRemaining,
+} from "../utils/shipping";
+
 const storageKey = "304-site-settings";
 
 const defaultSettings = {
@@ -107,6 +113,21 @@ function Cart({
         return total + price * quantity;
       }, 0),
     [cartItems]
+  );
+
+  const shippingFee = useMemo(
+    () => calculateShippingFee(subtotal),
+    [subtotal]
+  );
+
+  const orderTotal = useMemo(
+    () => calculateOrderTotal(subtotal),
+    [subtotal]
+  );
+
+  const freeShippingRemaining = useMemo(
+    () => getFreeShippingRemaining(subtotal),
+    [subtotal]
   );
 
   const invalidPriceItems = useMemo(
@@ -688,17 +709,19 @@ function Cart({
                 </span>
 
                 <strong>
-                  Calculated Later
+                  {shippingFee === 0
+                    ? "FREE"
+                    : `$${shippingFee.toFixed(2)}`}
                 </strong>
               </div>
 
               <div style={summaryRowStyle}>
                 <span>
-                  Taxes
+                  Estimated Total
                 </span>
 
                 <strong>
-                  Calculated Later
+                  ${orderTotal.toFixed(2)}
                 </strong>
               </div>
 
@@ -734,9 +757,9 @@ function Cart({
                 </div>
               ) : (
                 <div style={noticeBoxStyle}>
-                  Shipping and applicable taxes
-                  will be calculated during
-                  checkout.
+                  {freeShippingRemaining > 0
+                    ? `Add $${freeShippingRemaining.toFixed(2)} more for free shipping. Orders under $100 include a $15 flat shipping fee.`
+                    : "Free shipping unlocked. Orders of $100 or more ship free."}
                 </div>
               )}
 
