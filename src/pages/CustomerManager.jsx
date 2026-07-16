@@ -1204,6 +1204,9 @@ function CustomerManager({
         SHIPPING_CARRIERS.includes(label.carrier) ? label.carrier : "Other"
       );
       setShipmentTrackingNumber(label.trackingNumber);
+      setLabelRates([]);
+      setLabelShipmentId("");
+      setSelectedLabelRateId("");
       if (result.order) replaceOrderRecord(result.order);
       setActionMessage(
         result.message || "Shipping label purchased and tracking filled in."
