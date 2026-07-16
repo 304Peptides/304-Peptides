@@ -1157,6 +1157,55 @@ function buildShippoOrigin(settings) {
   };
 }
 
+async function validateShippoRecipientAddress(order, env) {
+  const submittedAddress = buildShippoAddressFromOrder(order);
+  const validatedAddress = await shippoRequest(env, "/addresses/", {
+    method: "POST",
+    body: {
+      ...submittedAddress,
+      validate: true,
+    },
+  });
+
+  const validationResults = validatedAddress.validation_results || {};
+  const validationMessages = Array.isArray(validationResults.messages)
+    ? validationResults.messages
+        .map(function (entry) {
+          return cleanText(entry?.text || entry?.message || entry?.detail, 300);
+        })
+        .filter(Boolean)
+    : [];
+
+  if (validationResults.is_valid === false) {
+    throw new ApiRequestError(
+      `Recipient address invalid: ${validationMessages.join(" ") || "Address could not be verified."}`,
+      400
+    );
+  }
+
+  if (validatedAddress.is_complete === false) {
+    throw new ApiRequestError(
+      "Recipient address is incomplete. Correct the order address before requesting shipping rates.",
+      400
+    );
+  }
+
+  return {
+    name: cleanText(validatedAddress.name || submittedAddress.name, 120),
+    street1: cleanText(validatedAddress.street1 || submittedAddress.street1, 200),
+    street2: cleanText(validatedAddress.street2 || submittedAddress.street2, 200) || undefined,
+    city: cleanText(validatedAddress.city || submittedAddress.city, 100),
+    state: cleanText(validatedAddress.state || submittedAddress.state, 50),
+    zip: cleanText(validatedAddress.zip || submittedAddress.zip, 20),
+    country: cleanText(validatedAddress.country || submittedAddress.country || "US", 2),
+    email: cleanText(validatedAddress.email || submittedAddress.email, 254),
+    is_residential:
+      typeof validatedAddress.is_residential === "boolean"
+        ? validatedAddress.is_residential
+        : true,
+  };
+}
+
 async function createShippingRates(body, env) {
   const orderId = normalizeOrderId(body.orderId);
   const order = await getOrderRecord(env, orderId);
@@ -1185,11 +1234,13 @@ async function createShippingRates(body, env) {
     ),
   };
 
+  const validatedRecipientAddress = await validateShippoRecipientAddress(order, env);
+
   const shipment = await shippoRequest(env, "/shipments/", {
     method: "POST",
     body: {
       address_from: buildShippoOrigin(settings),
-      address_to: buildShippoAddressFromOrder(order),
+      address_to: validatedRecipientAddress,
       parcels: [
         {
           length: String(parcel.length),
