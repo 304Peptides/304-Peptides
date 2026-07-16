@@ -1625,7 +1625,7 @@ function Checkout({
                 <p className="eyebrow">
                   PARTNER REFERRAL
                 </p>
-                <h2>Referral Code â€” Optional</h2>
+                <h2>Referral Code</h2>
 
                 <p className="checkout-section-copy">
                   Enter an approved partner code to
