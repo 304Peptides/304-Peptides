@@ -1157,7 +1157,7 @@ function CustomerManager({
       return;
     }
 
-    const trackingNumber = shipmentTrackingNumber.trim();
+    const trackingNumber = (shipmentTrackingNumber || purchasedLabel?.trackingNumber || "").trim();
 
     if (!trackingNumber) {
       setActionError("Enter the shipment tracking number.");
@@ -3339,7 +3339,7 @@ function CustomerManager({
                                       <input
                                         type="text"
                                         maxLength="200"
-                                        value={shipmentTrackingNumber}
+                                        value={shipmentTrackingNumber || purchasedLabel?.trackingNumber || ""}
                                         disabled={busy}
                                         onChange={(event) =>
                                           setShipmentTrackingNumber(event.target.value)
