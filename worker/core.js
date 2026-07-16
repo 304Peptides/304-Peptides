@@ -1008,21 +1008,6 @@ async function handleAdminShippingRequest(request, env, url) {
       throw new ApiRequestError("Method not allowed.", 405);
     }
 
-    if (url.pathname === "/api/admin/shipping/debug") {
-      if (request.method !== "GET") {
-        throw new ApiRequestError("Method not allowed.", 405);
-      }
-
-      if (!env.SHIPPO_API_TOKEN) {
-        throw new ApiRequestError(
-          "Shippo is not connected. Add the SHIPPO_API_TOKEN Cloudflare secret first.",
-          503
-        );
-      }
-
-      return getShippoShippingDebug(url, env);
-    }
-
     if (request.method !== "POST") {
       throw new ApiRequestError("Method not allowed.", 405);
     }
@@ -1056,110 +1041,6 @@ async function handleAdminShippingRequest(request, env, url) {
   }
 }
 
-async function getShippoShippingDebug(url, env) {
-  const orderId = normalizeOrderId(url.searchParams.get("orderId"));
-  const order = await getOrderRecord(env, orderId);
-  const transactionList = await shippoRequest(
-    env,
-    "/transactions/?results=100",
-    { method: "GET" }
-  );
-  const transactions = Array.isArray(transactionList.results)
-    ? transactionList.results
-    : [];
-
-  const sanitizeTransaction = function (transaction) {
-    const rate = transaction && typeof transaction.rate === "object"
-      ? transaction.rate
-      : {};
-
-    return {
-      objectId: cleanText(transaction?.object_id, 120),
-      status: cleanText(transaction?.status, 50),
-      metadata: cleanText(transaction?.metadata, 150),
-      createdAt: cleanText(transaction?.object_created, 80),
-      test: Boolean(transaction?.test || transaction?.was_test),
-      trackingNumber: cleanText(transaction?.tracking_number, 200),
-      trackingUrl: cleanText(transaction?.tracking_url_provider, 2048),
-      labelUrlPresent: Boolean(cleanText(transaction?.label_url, 2048)),
-      labelFileType: cleanText(transaction?.label_file_type, 50),
-      carrier: cleanText(rate.provider, 80),
-      service: cleanText(
-        rate.servicelevel_name || rate.servicelevel_token,
-        100
-      ),
-      rateId: cleanText(
-        typeof transaction?.rate === "string"
-          ? transaction.rate
-          : rate.object_id,
-        120
-      ),
-      messages: Array.isArray(transaction?.messages)
-        ? transaction.messages.slice(0, 10).map(function (entry) {
-            return {
-              source: cleanText(entry?.source, 80),
-              code: cleanText(entry?.code, 100),
-              text: cleanText(
-                entry?.text || entry?.message || entry?.detail || entry,
-                500
-              ),
-            };
-          })
-        : [],
-    };
-  };
-
-  const matchingTransactions = transactions
-    .filter(function (transaction) {
-      return cleanText(transaction?.metadata, 150).toUpperCase() === orderId;
-    })
-    .map(sanitizeTransaction);
-
-  const recentTransactions = transactions
-    .slice(0, 10)
-    .map(sanitizeTransaction);
-
-  const storedLabels = Array.isArray(order?.shippingLabels)
-    ? order.shippingLabels.map(function (label) {
-        return {
-          labelId: cleanText(label?.labelId, 120),
-          provider: cleanText(label?.provider, 80),
-          carrier: cleanText(label?.carrier, 80),
-          service: cleanText(label?.service, 100),
-          trackingNumber: cleanText(
-            label?.trackingNumber || label?.tracking_number,
-            200
-          ),
-          trackingUrl: cleanText(
-            label?.trackingUrl || label?.tracking_url_provider,
-            2048
-          ),
-          labelUrlPresent: Boolean(
-            cleanText(label?.labelUrl || label?.label_url, 2048)
-          ),
-          test: Boolean(label?.test),
-          purchasedAt: cleanText(label?.purchasedAt, 80),
-        };
-      })
-    : [];
-
-  return jsonResponse({
-    success: true,
-    debugOnly: true,
-    orderId,
-    orderFound: Boolean(order),
-    storedOrderId: cleanText(order?.orderId || order?.id, 100),
-    storedLabelCount: storedLabels.length,
-    storedLabels,
-    matchingTransactionCount: matchingTransactions.length,
-    matchingTransactions,
-    recentTransactions: matchingTransactions.length ? [] : recentTransactions,
-    message: matchingTransactions.length
-      ? "Shippo transaction data found for this order."
-      : "No Shippo transaction metadata matched this order. Recent sanitized transactions are included for diagnosis.",
-  });
-}
-
 function getShippoProviderStatus(env) {
   const token = String(env.SHIPPO_API_TOKEN || "");
   return {
@@ -1185,7 +1066,7 @@ function prepareShippingSettings(source) {
     state: cleanText(source.state, 50).toUpperCase(),
     zip: cleanText(source.zip, 20),
     country: cleanText(source.country || "US", 2).toUpperCase(),
-    phone: cleanText(source.phone, 30),
+    phone: normalizeShippoPhone(source.phone),
     email: cleanText(source.email, 254).toLowerCase(),
     defaultLength: normalizeShippingMeasurement(source.defaultLength, 8),
     defaultWidth: normalizeShippingMeasurement(source.defaultWidth, 6),
@@ -1200,15 +1081,29 @@ function prepareShippingSettings(source) {
     !settings.city ||
     !settings.state ||
     !settings.zip ||
-    !settings.email
+    !settings.email ||
+    !settings.phone
   ) {
     throw new ApiRequestError(
-      "Complete the shipping name, street, city, state, ZIP, and email.",
+      "Complete the shipping name, street, city, state, ZIP, email, and phone.",
       400
     );
   }
 
   return settings;
+}
+
+function normalizeShippoPhone(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  const normalized = digits.length === 11 && digits.startsWith("1")
+    ? digits.slice(1)
+    : digits;
+
+  if (normalized.length < 8 || normalized.length > 15) {
+    return "";
+  }
+
+  return normalized;
 }
 
 function normalizeShippingMeasurement(value, fallback) {
@@ -1376,11 +1271,27 @@ async function buyShippingLabel(body, env) {
     throw new ApiRequestError(`Order ${orderId} was not found.`, 404);
   }
 
-  const rate = await shippoRequest(
-    env,
-    `/rates/${encodeURIComponent(rateId)}`,
-    { method: "GET" }
-  );
+  const settings = await getShippingSettings(env);
+  const origin = buildShippoOrigin(settings);
+  if (!origin.email || !origin.phone) {
+    throw new ApiRequestError(
+      "Shipping Center must contain both a valid sender email and phone number before purchasing USPS postage.",
+      409
+    );
+  }
+
+  const [rate, quotedShipment] = await Promise.all([
+    shippoRequest(
+      env,
+      `/rates/${encodeURIComponent(rateId)}`,
+      { method: "GET" }
+    ),
+    shippoRequest(
+      env,
+      `/shipments/${encodeURIComponent(shipmentId)}`,
+      { method: "GET" }
+    ),
+  ]);
 
   if (
     cleanText(rate.shipment, 120) &&
@@ -1392,10 +1303,46 @@ async function buyShippingLabel(body, env) {
     );
   }
 
+  const serviceLevel = rate.servicelevel || {};
+  const carrierAccount = cleanText(rate.carrier_account, 120);
+  const serviceToken = cleanText(
+    serviceLevel.token || rate.servicelevel_token,
+    100
+  );
+  const parcels = Array.isArray(quotedShipment.parcels)
+    ? quotedShipment.parcels.map(function (parcel) {
+        if (typeof parcel === "string") return parcel;
+        const parcelId = cleanText(parcel?.object_id, 120);
+        if (parcelId) return parcelId;
+        return {
+          length: String(parcel?.length || ""),
+          width: String(parcel?.width || ""),
+          height: String(parcel?.height || ""),
+          distance_unit: cleanText(parcel?.distance_unit || "in", 10),
+          weight: String(parcel?.weight || ""),
+          mass_unit: cleanText(parcel?.mass_unit || "oz", 10),
+        };
+      })
+    : [];
+
+  if (!carrierAccount || !serviceToken || !parcels.length) {
+    throw new ApiRequestError(
+      "Shippo did not return enough information to purchase the selected rate. Request fresh rates and try again.",
+      409
+    );
+  }
+
   const transaction = await shippoRequest(env, "/transactions/", {
     method: "POST",
     body: {
-      rate: rateId,
+      shipment: {
+        address_from: origin,
+        address_to: buildShippoAddressFromOrder(order),
+        parcels,
+        metadata: orderId,
+      },
+      carrier_account: carrierAccount,
+      servicelevel_token: serviceToken,
       label_file_type: "PDF",
       async: false,
       metadata: orderId,
@@ -1409,24 +1356,33 @@ async function buyShippingLabel(body, env) {
     );
   }
 
-  const serviceLevel = rate.servicelevel || {};
+  const transactionRate =
+    transaction && typeof transaction.rate === "object"
+      ? transaction.rate
+      : rate;
+  const transactionServiceLevel = transactionRate.servicelevel || serviceLevel;
   const label = {
     labelId: cleanText(transaction.object_id, 120),
     orderId,
     shipmentId,
     rateId,
     provider: "Shippo",
-    carrier: cleanText(rate.provider, 80),
+    carrier: cleanText(transactionRate.provider || rate.provider, 80),
     service: cleanText(
-      serviceLevel.name || serviceLevel.token || "Standard",
+      transactionServiceLevel.name ||
+        transactionServiceLevel.token ||
+        serviceLevel.name ||
+        serviceToken ||
+        "Standard",
       100
     ),
-    postage: Number(rate.amount || 0),
+    postage: Number(transactionRate.amount || rate.amount || 0),
     trackingNumber: cleanText(transaction.tracking_number, 200),
     trackingUrl: cleanText(transaction.tracking_url_provider, 2048),
     labelUrl: cleanText(transaction.label_url, 2048),
     test: Boolean(transaction.test),
-    purchasedAt: cleanText(transaction.object_created, 80) || new Date().toISOString(),
+    purchasedAt:
+      cleanText(transaction.object_created, 80) || new Date().toISOString(),
   };
 
   if (!label.trackingNumber || !label.labelUrl) {
