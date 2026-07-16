@@ -1914,3 +1914,20 @@ textarea:focus {
 .cm-label-ready p {
   color: #14532d !important;
 }
+/* Make shipment carrier and tracking fields readable */
+.cm-shipping-grid input,
+.cm-shipping-grid select {
+  background: #ffffff !important;
+  color: #111827 !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+.cm-shipping-grid input::placeholder {
+  color: #64748b !important;
+  opacity: 1;
+}
+
+.cm-shipping-grid select option {
+  background: #ffffff !important;
+  color: #111827 !important;
+}
