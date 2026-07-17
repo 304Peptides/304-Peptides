@@ -281,6 +281,16 @@ function getShipments(order) {
   return Array.isArray(order?.shipments) ? order.shipments : [];
 }
 
+function formatTrackingStatus(value) {
+  return String(value || "Unknown")
+    .trim()
+    .toLowerCase()
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 function getShippedQuantity(order, itemIndex) {
   return getShipments(order).reduce(
     (total, shipment) =>
@@ -821,7 +831,10 @@ function CustomerManager({
     loadShippingDefaults();
     setActionMessage("");
     setActionError("");
-    void refreshShippingRefundStatuses(order);
+    void (async () => {
+      const refreshedOrder = await refreshShippingRefundStatuses(order);
+      await refreshShipmentTrackingStatuses(refreshedOrder || order);
+    })();
   }
 
   async function saveOrder(order) {
@@ -1255,7 +1268,7 @@ function CustomerManager({
     );
 
     if (!hasPendingRefund) {
-      return;
+      return order;
     }
 
     try {
@@ -1281,11 +1294,67 @@ function CustomerManager({
           result.message || "A shipping label refund status was updated."
         );
       }
+
+      return result.order || order;
     } catch (requestError) {
       setActionError(
         requestError.message ||
           "The shipping label refund status could not be refreshed."
       );
+      return order;
+    }
+  }
+
+  async function refreshShipmentTrackingStatuses(order) {
+    const orderId = getOrderId(order);
+    const hasTrackableShipment = getShipments(order).some((shipment) => {
+      const carrier = String(shipment?.carrier || "")
+        .toLowerCase()
+        .replace(/[\s_-]+/g, "");
+      const status = String(shipment?.trackingStatus || "").toUpperCase();
+
+      return (
+        ["usps", "ups", "fedex"].includes(carrier) &&
+        String(shipment?.trackingNumber || "").trim() &&
+        !["DELIVERED", "RETURNED"].includes(status)
+      );
+    });
+
+    if (!hasTrackableShipment) {
+      return order;
+    }
+
+    try {
+      const response = await fetch("/api/admin/shipping/tracking-status", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminSecret}`,
+        },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({ orderId }),
+      });
+      const result = await readJson(response);
+
+      if (result.order) {
+        replaceOrderRecord(result.order);
+      }
+
+      if (Number(result.changedCount || 0) > 0) {
+        setActionMessage(
+          result.message || "A shipment tracking status was updated."
+        );
+      }
+
+      return result.order || order;
+    } catch (requestError) {
+      setActionError(
+        requestError.message ||
+          "The shipment tracking status could not be refreshed."
+      );
+      return order;
     }
   }
 
@@ -3748,6 +3817,49 @@ function CustomerManager({
                                         <small>{formatDate(shipment.shippedAt)}</small>
                                       </div>
 
+                                      {shipment.trackingStatus && (
+                                        <div
+                                          className={`cm-tracking-status cm-tracking-status--${String(
+                                            shipment.trackingStatus
+                                          )
+                                            .toLowerCase()
+                                            .replace(/[^a-z0-9]+/g, "-")}`}
+                                        >
+                                          <strong>
+                                            {formatTrackingStatus(shipment.trackingStatus)}
+                                          </strong>
+
+                                          {shipment.trackingStatusDetails && (
+                                            <span>{shipment.trackingStatusDetails}</span>
+                                          )}
+
+                                          {shipment.trackingStatusLocation && (
+                                            <small>
+                                              Location: {shipment.trackingStatusLocation}
+                                            </small>
+                                          )}
+
+                                          {shipment.trackingEta && (
+                                            <small>
+                                              Estimated delivery: {formatDate(shipment.trackingEta)}
+                                            </small>
+                                          )}
+
+                                          {shipment.trackingStatusDate && (
+                                            <small>
+                                              Carrier update: {formatDate(shipment.trackingStatusDate)}
+                                            </small>
+                                          )}
+                                        </div>
+                                      )}
+
+                                      {shipment.trackingError && (
+                                        <div className="cm-tracking-status cm-tracking-status--error">
+                                          <strong>Tracking Check Needed</strong>
+                                          <span>{shipment.trackingError}</span>
+                                        </div>
+                                      )}
+
                                       <div>
                                         {(shipment.items || []).map((item, index) => (
                                           <small key={`${shipment.shipmentId || shipmentIndex}-${item.index}-${index}`}>
@@ -4835,6 +4947,50 @@ const css = `
   color: #aeb8bf;
   font-size: 11px;
   line-height: 1.5;
+}
+.cm-tracking-status {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(142,211,255,.22);
+  border-radius: 10px;
+  background: rgba(48,145,210,.08);
+}
+
+.cm-tracking-status > strong {
+  color: #8ed3ff;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+}
+
+.cm-tracking-status > span {
+  color: #dce7ed;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.cm-tracking-status--delivered {
+  border-color: rgba(79,211,138,.3);
+  background: rgba(34,139,85,.1);
+}
+
+.cm-tracking-status--delivered > strong {
+  color: #78e5a8;
+}
+
+.cm-tracking-status--failure,
+.cm-tracking-status--returned,
+.cm-tracking-status--error {
+  border-color: rgba(255,122,122,.32);
+  background: rgba(170,45,45,.11);
+}
+
+.cm-tracking-status--failure > strong,
+.cm-tracking-status--returned > strong,
+.cm-tracking-status--error > strong {
+  color: #ff9b9b;
 }
 
 .cm-money-grid {

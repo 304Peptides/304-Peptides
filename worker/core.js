@@ -132,7 +132,8 @@ export default {
       url.pathname === "/api/admin/shipping/rates" ||
       url.pathname === "/api/admin/shipping/buy" ||
       url.pathname === "/api/admin/shipping/refund" ||
-      url.pathname === "/api/admin/shipping/refund-status"
+      url.pathname === "/api/admin/shipping/refund-status" ||
+      url.pathname === "/api/admin/shipping/tracking-status"
     ) {
       return handleAdminShippingRequest(request, env, url);
     }
@@ -1044,6 +1045,10 @@ async function handleAdminShippingRequest(request, env, url) {
       return refreshShippingRefundStatuses(body, env);
     }
 
+    if (url.pathname === "/api/admin/shipping/tracking-status") {
+      return refreshShipmentTrackingStatuses(body, env);
+    }
+
     throw new ApiRequestError("Shipping route not found.", 404);
   } catch (error) {
     console.error("Shipping label request error:", error);
@@ -1720,6 +1725,186 @@ async function refreshShippingRefundStatuses(body, env) {
     message: changedCount
       ? `${changedCount} shipping label refund status update(s) found.`
       : "Pending shipping label refund statuses are unchanged.",
+  });
+}
+
+async function refreshShipmentTrackingStatuses(body, env) {
+  const orderId = normalizeOrderId(body.orderId);
+  const order = await getOrderRecord(env, orderId);
+
+  if (!order) {
+    throw new ApiRequestError(`Order ${orderId} was not found.`, 404);
+  }
+
+  const existingShipments = Array.isArray(order.shipments)
+    ? order.shipments
+    : [];
+  const updatedShipments = existingShipments.slice();
+  const refreshedShipments = [];
+  const checkedAt = new Date().toISOString();
+  let checkedCount = 0;
+  let changedCount = 0;
+
+  for (let index = 0; index < existingShipments.length; index += 1) {
+    const existingShipment = existingShipments[index];
+    const normalizedCarrier = cleanText(existingShipment?.carrier, 50)
+      .toLowerCase()
+      .replace(/[\s_-]+/g, "");
+    const carrierTokens = {
+      usps: "usps",
+      ups: "ups",
+      fedex: "fedex",
+    };
+    const carrierToken = carrierTokens[normalizedCarrier];
+    const trackingNumber = cleanText(
+      existingShipment?.trackingNumber,
+      MAX_ORDER_SHIPMENT_TRACKING_LENGTH
+    );
+    const currentStatus = cleanText(
+      existingShipment?.trackingStatus,
+      50
+    ).toUpperCase();
+    const lastCheckedAt = Date.parse(
+      cleanText(existingShipment?.trackingLastCheckedAt, 80)
+    );
+    const refreshDue =
+      !Number.isFinite(lastCheckedAt) ||
+      Date.now() - lastCheckedAt >= 15 * 60 * 1000;
+
+    if (!carrierToken || !trackingNumber || !refreshDue) {
+      continue;
+    }
+
+    if (["DELIVERED", "RETURNED"].includes(currentStatus)) {
+      continue;
+    }
+
+    checkedCount += 1;
+    let updatedShipment;
+
+    try {
+      const trackingResult = await shippoRequest(
+        env,
+        `/tracks/${carrierToken}/${encodeURIComponent(trackingNumber)}`,
+        { method: "GET" }
+      );
+      const returnedTrackingNumber = cleanText(
+        trackingResult.tracking_number,
+        MAX_ORDER_SHIPMENT_TRACKING_LENGTH
+      );
+      const expectedTrackingKey = trackingNumber
+        .replace(/[\s-]+/g, "")
+        .toUpperCase();
+      const returnedTrackingKey = returnedTrackingNumber
+        .replace(/[\s-]+/g, "")
+        .toUpperCase();
+
+      if (returnedTrackingKey && returnedTrackingKey !== expectedTrackingKey) {
+        throw new ApiRequestError(
+          "Shippo returned tracking information for a different package.",
+          502
+        );
+      }
+
+      const trackingStatus =
+        trackingResult.tracking_status &&
+        typeof trackingResult.tracking_status === "object"
+          ? trackingResult.tracking_status
+          : {};
+      const trackingLocation =
+        trackingStatus.location &&
+        typeof trackingStatus.location === "object"
+          ? trackingStatus.location
+          : {};
+      const nextLocation = [
+        cleanText(trackingLocation.city, 100),
+        cleanText(trackingLocation.state, 50),
+        cleanText(trackingLocation.zip, 20),
+        cleanText(trackingLocation.country, 2),
+      ]
+        .filter(Boolean)
+        .join(", ");
+
+      updatedShipment = {
+        ...existingShipment,
+        trackingStatus:
+          cleanText(trackingStatus.status, 50).toUpperCase() ||
+          currentStatus ||
+          "UNKNOWN",
+        trackingStatusDetails: cleanMultilineText(
+          trackingStatus.status_details,
+          1000
+        ),
+        trackingStatusDate: cleanText(trackingStatus.status_date, 80),
+        trackingStatusLocation: nextLocation,
+        trackingEta: cleanText(trackingResult.eta, 80),
+        trackingLastCheckedAt: checkedAt,
+        trackingError: "",
+      };
+    } catch (error) {
+      updatedShipment = {
+        ...existingShipment,
+        trackingLastCheckedAt: checkedAt,
+        trackingError: cleanMultilineText(
+          error?.message || "The tracking status could not be retrieved.",
+          1000
+        ),
+      };
+    }
+
+    const visibleFieldsChanged =
+      cleanText(updatedShipment.trackingStatus, 50) !==
+        cleanText(existingShipment?.trackingStatus, 50) ||
+      cleanMultilineText(updatedShipment.trackingStatusDetails, 1000) !==
+        cleanMultilineText(existingShipment?.trackingStatusDetails, 1000) ||
+      cleanText(updatedShipment.trackingStatusDate, 80) !==
+        cleanText(existingShipment?.trackingStatusDate, 80) ||
+      cleanText(updatedShipment.trackingStatusLocation, 200) !==
+        cleanText(existingShipment?.trackingStatusLocation, 200) ||
+      cleanText(updatedShipment.trackingEta, 80) !==
+        cleanText(existingShipment?.trackingEta, 80) ||
+      cleanMultilineText(updatedShipment.trackingError, 1000) !==
+        cleanMultilineText(existingShipment?.trackingError, 1000);
+
+    updatedShipments[index] = updatedShipment;
+    refreshedShipments.push(updatedShipment);
+
+    if (visibleFieldsChanged) {
+      changedCount += 1;
+    }
+  }
+
+  if (checkedCount === 0) {
+    return jsonResponse({
+      success: true,
+      order,
+      shipments: [],
+      checkedCount: 0,
+      changedCount: 0,
+      message: "No eligible shipments were found for tracking.",
+    });
+  }
+
+  const updatedOrder = {
+    ...order,
+    shipments: updatedShipments,
+    updatedAt:
+      changedCount > 0
+        ? new Date().toISOString()
+        : order.updatedAt || checkedAt,
+  };
+
+  await putOrderRecord(env, updatedOrder);
+
+  return jsonResponse({
+    success: true,
+    order: updatedOrder,
+    shipments: refreshedShipments,
+    checkedCount,
+    changedCount,
+    message: changedCount
+      ? `${changedCount} shipment tracking update(s) found.`
+      : "Shipment tracking statuses are unchanged.",
   });
 }
 
@@ -6736,6 +6921,36 @@ function toCustomerOrderRecord(
             cleanText(
               shipment?.trackingUrl,
               MAX_ORDER_PAYMENT_LINK_LENGTH
+            ),
+
+          trackingStatus:
+            cleanText(
+              shipment?.trackingStatus,
+              50
+            ),
+
+          trackingStatusDetails:
+            cleanMultilineText(
+              shipment?.trackingStatusDetails,
+              1000
+            ),
+
+          trackingStatusDate:
+            cleanText(
+              shipment?.trackingStatusDate,
+              80
+            ),
+
+          trackingStatusLocation:
+            cleanText(
+              shipment?.trackingStatusLocation,
+              200
+            ),
+
+          trackingEta:
+            cleanText(
+              shipment?.trackingEta,
+              80
             ),
 
           note:
