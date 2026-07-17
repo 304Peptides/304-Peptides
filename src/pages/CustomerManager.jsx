@@ -263,7 +263,7 @@ function getLatestShippingLabel(order) {
 
     const refundStatus = String(label?.refundStatus || "").toUpperCase();
 
-    if (label && !["QUEUED", "PENDING", "SUCCESS"].includes(refundStatus)) {
+    if (label && !refundStatus) {
       return label;
     }
   }
@@ -821,6 +821,7 @@ function CustomerManager({
     loadShippingDefaults();
     setActionMessage("");
     setActionError("");
+    void refreshShippingRefundStatuses(order);
   }
 
   async function saveOrder(order) {
@@ -1239,6 +1240,52 @@ function CustomerManager({
       setActionError(requestError.message || "The shipping label could not be purchased.");
     } finally {
       setLabelBusy("");
+    }
+  }
+
+  async function refreshShippingRefundStatuses(order) {
+    const orderId = getOrderId(order);
+    const hasPendingRefund = (Array.isArray(order?.shippingLabels)
+      ? order.shippingLabels
+      : []
+    ).some((label) =>
+      ["QUEUED", "PENDING"].includes(
+        String(label?.refundStatus || "").toUpperCase()
+      )
+    );
+
+    if (!hasPendingRefund) {
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/admin/shipping/refund-status", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminSecret}`,
+        },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({ orderId }),
+      });
+      const result = await readJson(response);
+
+      if (result.order) {
+        replaceOrderRecord(result.order);
+      }
+
+      if (Number(result.changedCount || 0) > 0) {
+        setActionMessage(
+          result.message || "A shipping label refund status was updated."
+        );
+      }
+    } catch (requestError) {
+      setActionError(
+        requestError.message ||
+          "The shipping label refund status could not be refreshed."
+      );
     }
   }
 

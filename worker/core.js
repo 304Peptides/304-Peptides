@@ -131,7 +131,8 @@ export default {
       url.pathname === "/api/admin/shipping/debug" ||
       url.pathname === "/api/admin/shipping/rates" ||
       url.pathname === "/api/admin/shipping/buy" ||
-      url.pathname === "/api/admin/shipping/refund"
+      url.pathname === "/api/admin/shipping/refund" ||
+      url.pathname === "/api/admin/shipping/refund-status"
     ) {
       return handleAdminShippingRequest(request, env, url);
     }
@@ -1039,6 +1040,10 @@ async function handleAdminShippingRequest(request, env, url) {
       return refundShippingLabel(body, env);
     }
 
+    if (url.pathname === "/api/admin/shipping/refund-status") {
+      return refreshShippingRefundStatuses(body, env);
+    }
+
     throw new ApiRequestError("Shipping route not found.", 404);
   } catch (error) {
     console.error("Shipping label request error:", error);
@@ -1579,6 +1584,142 @@ async function refundShippingLabel(body, env) {
         : refundStatus === "ERROR"
           ? "Shippo rejected the shipping label refund."
           : `The shipping label refund was submitted (${refundStatus}).`,
+  });
+}
+
+async function refreshShippingRefundStatuses(body, env) {
+  const orderId = normalizeOrderId(body.orderId);
+  const order = await getOrderRecord(env, orderId);
+
+  if (!order) {
+    throw new ApiRequestError(`Order ${orderId} was not found.`, 404);
+  }
+
+  const existingLabels = Array.isArray(order.shippingLabels)
+    ? order.shippingLabels
+    : [];
+  const updatedLabels = existingLabels.slice();
+  const refreshedLabels = [];
+  let changedCount = 0;
+
+  for (let index = 0; index < existingLabels.length; index += 1) {
+    const existingLabel = existingLabels[index];
+    const currentStatus = cleanText(existingLabel?.refundStatus, 30).toUpperCase();
+    const refundId = cleanText(existingLabel?.refundId, 120);
+
+    if (!["QUEUED", "PENDING"].includes(currentStatus)) {
+      continue;
+    }
+
+    if (!/^[a-f0-9]{32}$/i.test(refundId)) {
+      continue;
+    }
+
+    const refundResult = await shippoRequest(
+      env,
+      `/refunds/${encodeURIComponent(refundId)}`,
+      { method: "GET" }
+    );
+    const returnedRefundId = cleanText(refundResult.object_id, 120);
+    const returnedTransactionId = cleanText(refundResult.transaction, 120);
+    const labelId = cleanText(
+      existingLabel?.labelId || existingLabel?.transactionId,
+      120
+    );
+
+    if (returnedRefundId && returnedRefundId !== refundId) {
+      throw new ApiRequestError(
+        "Shippo returned a different refund record than the one requested.",
+        502
+      );
+    }
+
+    if (returnedTransactionId && labelId && returnedTransactionId !== labelId) {
+      throw new ApiRequestError(
+        "Shippo returned a refund belonging to a different shipping label.",
+        502
+      );
+    }
+
+    const nextStatus =
+      cleanText(refundResult.status, 30).toUpperCase() || currentStatus;
+    const now = new Date().toISOString();
+    const nextRefundUpdatedAt =
+      cleanText(refundResult.object_updated, 80) ||
+      cleanText(existingLabel?.refundUpdatedAt, 80) ||
+      now;
+    const nextRefundError =
+      nextStatus === "ERROR"
+        ? shippoMessage(refundResult) || "Shippo rejected this refund."
+        : "";
+    const updatedLabel = {
+      ...existingLabel,
+      refundId: returnedRefundId || refundId,
+      refundStatus: nextStatus,
+      refundRequestedAt:
+        cleanText(existingLabel?.refundRequestedAt, 80) ||
+        cleanText(refundResult.object_created, 80) ||
+        now,
+      refundUpdatedAt: nextRefundUpdatedAt,
+      refundError: nextRefundError,
+    };
+    const labelChanged =
+      nextStatus !== currentStatus ||
+      nextRefundUpdatedAt !== cleanText(existingLabel?.refundUpdatedAt, 80) ||
+      nextRefundError !== cleanText(existingLabel?.refundError, 1000);
+
+    refreshedLabels.push(updatedLabel);
+
+    if (labelChanged) {
+      updatedLabels[index] = updatedLabel;
+      changedCount += 1;
+
+      await env.DOCUMENTS_KV.put(
+        `${SHIPPING_LABEL_KEY_PREFIX}${labelId || refundId}`,
+        JSON.stringify(updatedLabel)
+      );
+    }
+  }
+
+  if (refreshedLabels.length === 0) {
+    return jsonResponse({
+      success: true,
+      order,
+      labels: [],
+      refreshedCount: 0,
+      changedCount: 0,
+      message: "No pending shipping label refunds were found.",
+    });
+  }
+
+  if (changedCount === 0) {
+    return jsonResponse({
+      success: true,
+      order,
+      labels: refreshedLabels,
+      refreshedCount: refreshedLabels.length,
+      changedCount: 0,
+      message: "Pending shipping label refund statuses are unchanged.",
+    });
+  }
+
+  const updatedOrder = {
+    ...order,
+    shippingLabels: updatedLabels,
+    updatedAt: new Date().toISOString(),
+  };
+
+  await putOrderRecord(env, updatedOrder);
+
+  return jsonResponse({
+    success: true,
+    order: updatedOrder,
+    labels: refreshedLabels,
+    refreshedCount: refreshedLabels.length,
+    changedCount,
+    message: changedCount
+      ? `${changedCount} shipping label refund status update(s) found.`
+      : "Pending shipping label refund statuses are unchanged.",
   });
 }
 
