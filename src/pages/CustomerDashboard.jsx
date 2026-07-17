@@ -12,6 +12,20 @@ function getItems(order) {
   return Array.isArray(order?.items) ? order.items : [];
 }
 
+function getShipments(order) {
+  return Array.isArray(order?.shipments) ? order.shipments : [];
+}
+
+function formatTrackingStatus(value) {
+  return String(value || "Tracking Available")
+    .trim()
+    .toLowerCase()
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 function getCustomer(order) {
   return order?.customer || {};
 }
@@ -762,6 +776,11 @@ function CustomerDashboard({
                         order
                       );
 
+                    const shipments =
+                      getShipments(
+                        order
+                      );
+
                     return (
                       <article
                         key={
@@ -988,6 +1007,114 @@ function CustomerDashboard({
                                 }
                               />
                             </section>
+
+                            {shipments.length > 0 && (
+                              <section className="customer-dashboard-shipment-section">
+                                <h4>
+                                  Shipment Tracking
+                                </h4>
+
+                                <div className="customer-dashboard-shipment-stack">
+                                  {[...shipments].reverse().map(
+                                    (shipment, shipmentIndex) => (
+                                      <article
+                                        key={
+                                          shipment.shipmentId ||
+                                          `${shipment.trackingNumber}-${shipmentIndex}`
+                                        }
+                                        className={`customer-dashboard-shipment-card customer-dashboard-shipment-card--${String(
+                                          shipment.trackingStatus || "available"
+                                        )
+                                          .toLowerCase()
+                                          .replace(/[^a-z0-9]+/g, "-")}`}
+                                      >
+                                        <div className="customer-dashboard-shipment-heading">
+                                          <div>
+                                            <span>
+                                              Package {shipment.packageNumber || shipments.length - shipmentIndex}
+                                            </span>
+
+                                            <strong>
+                                              {shipment.carrier || "Carrier"}{" "}
+                                              {shipment.trackingNumber || "Tracking unavailable"}
+                                            </strong>
+                                          </div>
+
+                                          {shipment.trackingUrl && (
+                                            <a
+                                              href={shipment.trackingUrl}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                            >
+                                              Track Package
+                                            </a>
+                                          )}
+                                        </div>
+
+                                        <div className="customer-dashboard-tracking-status">
+                                          <strong>
+                                            {formatTrackingStatus(
+                                              shipment.trackingStatus
+                                            )}
+                                          </strong>
+
+                                          {shipment.trackingStatusDetails && (
+                                            <p>
+                                              {shipment.trackingStatusDetails}
+                                            </p>
+                                          )}
+
+                                          {shipment.trackingStatusLocation && (
+                                            <small>
+                                              Location: {shipment.trackingStatusLocation}
+                                            </small>
+                                          )}
+
+                                          {shipment.trackingEta && (
+                                            <small>
+                                              Estimated delivery: {formatDate(shipment.trackingEta)}
+                                            </small>
+                                          )}
+
+                                          {shipment.trackingStatusDate && (
+                                            <small>
+                                              Carrier update: {formatDate(shipment.trackingStatusDate)}
+                                            </small>
+                                          )}
+
+                                          <small>
+                                            Shipped: {formatDate(shipment.shippedAt)}
+                                          </small>
+                                        </div>
+
+                                        {Array.isArray(shipment.items) &&
+                                          shipment.items.length > 0 && (
+                                            <div className="customer-dashboard-shipment-items">
+                                              {shipment.items.map((item, itemIndex) => (
+                                                <small
+                                                  key={`${shipment.shipmentId || shipmentIndex}-${item.index}-${itemIndex}`}
+                                                >
+                                                  {Number(item.quantity || 0)} ×{" "}
+                                                  {item.name || item.codeName || "Research Product"}
+                                                  {item.strength
+                                                    ? ` — ${item.strength}`
+                                                    : ""}
+                                                </small>
+                                              ))}
+                                            </div>
+                                          )}
+
+                                        {shipment.note && (
+                                          <p className="customer-dashboard-shipment-note">
+                                            {shipment.note}
+                                          </p>
+                                        )}
+                                      </article>
+                                    )
+                                  )}
+                                </div>
+                              </section>
+                            )}
                           </div>
                         )}
                       </article>
@@ -1468,6 +1595,140 @@ const customerDashboardCss = `
 
 .customer-dashboard-detail-row:last-child {
   border-bottom: 0;
+}
+.customer-dashboard-shipment-section {
+  grid-column: 1 / -1;
+}
+
+.customer-dashboard-shipment-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.customer-dashboard-shipment-card {
+  display: grid;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid rgba(61, 165, 255, .2);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, .16);
+}
+
+.customer-dashboard-shipment-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.customer-dashboard-shipment-heading > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.customer-dashboard-shipment-heading span {
+  color: #9ed8ff;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+}
+
+.customer-dashboard-shipment-heading strong {
+  overflow-wrap: anywhere;
+}
+
+.customer-dashboard-shipment-heading a {
+  flex: 0 0 auto;
+  padding: 8px 11px;
+  border: 1px solid rgba(61, 165, 255, .34);
+  border-radius: 9px;
+  color: #9ed8ff;
+  font-size: 11px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.customer-dashboard-shipment-heading a:hover {
+  border-color: rgba(61, 165, 255, .7);
+  background: rgba(61, 165, 255, .1);
+}
+
+.customer-dashboard-tracking-status {
+  display: grid;
+  gap: 5px;
+  padding: 11px;
+  border: 1px solid rgba(61, 165, 255, .18);
+  border-radius: 11px;
+  background: rgba(61, 165, 255, .07);
+}
+
+.customer-dashboard-tracking-status > strong {
+  color: #9ed8ff;
+  font-size: 12px;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+}
+
+.customer-dashboard-tracking-status p,
+.customer-dashboard-tracking-status small,
+.customer-dashboard-shipment-items small,
+.customer-dashboard-shipment-note {
+  margin: 0;
+  color: #aeb8bf;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.customer-dashboard-shipment-items {
+  display: grid;
+  gap: 3px;
+}
+
+.customer-dashboard-shipment-note {
+  padding-top: 9px;
+  border-top: 1px solid rgba(255, 255, 255, .07);
+}
+
+.customer-dashboard-shipment-card--delivered {
+  border-color: rgba(72, 214, 151, .3);
+}
+
+.customer-dashboard-shipment-card--delivered .customer-dashboard-tracking-status {
+  border-color: rgba(72, 214, 151, .25);
+  background: rgba(72, 214, 151, .08);
+}
+
+.customer-dashboard-shipment-card--delivered .customer-dashboard-tracking-status > strong {
+  color: #b8f3d8;
+}
+
+.customer-dashboard-shipment-card--failure,
+.customer-dashboard-shipment-card--returned {
+  border-color: rgba(255, 122, 122, .3);
+}
+
+.customer-dashboard-shipment-card--failure .customer-dashboard-tracking-status,
+.customer-dashboard-shipment-card--returned .customer-dashboard-tracking-status {
+  border-color: rgba(255, 122, 122, .27);
+  background: rgba(170, 45, 45, .1);
+}
+
+.customer-dashboard-shipment-card--failure .customer-dashboard-tracking-status > strong,
+.customer-dashboard-shipment-card--returned .customer-dashboard-tracking-status > strong {
+  color: #ffaaaa;
+}
+
+@media (max-width: 680px) {
+  .customer-dashboard-shipment-heading {
+    display: grid;
+  }
+
+  .customer-dashboard-shipment-heading a {
+    width: 100%;
+    text-align: center;
+  }
 }
 
 .customer-dashboard-research-notice {
