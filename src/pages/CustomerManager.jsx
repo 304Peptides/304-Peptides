@@ -261,7 +261,9 @@ function getLatestShippingLabel(order) {
   for (let index = labels.length - 1; index >= 0; index -= 1) {
     const label = normalizePurchasedShippingLabel(labels[index]);
 
-    if (label) {
+    const refundStatus = String(label?.refundStatus || "").toUpperCase();
+
+    if (label && !["QUEUED", "PENDING", "SUCCESS"].includes(refundStatus)) {
       return label;
     }
   }
@@ -1235,6 +1237,79 @@ function CustomerManager({
       );
     } catch (requestError) {
       setActionError(requestError.message || "The shipping label could not be purchased.");
+    } finally {
+      setLabelBusy("");
+    }
+  }
+
+  async function refundShippingLabel(order, label) {
+    const orderId = getOrderId(order);
+    const labelId = String(label?.labelId || label?.transactionId || "").trim();
+    const refundStatus = String(label?.refundStatus || "").toUpperCase();
+
+    if (!labelId) {
+      setActionError("This shipping label is missing its Shippo transaction ID.");
+      return;
+    }
+
+    if (["QUEUED", "PENDING", "SUCCESS"].includes(refundStatus)) {
+      setActionError(`A refund has already been requested for this label (${refundStatus}).`);
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Request a refund for ${label.carrier || "this"} ${label.service || "shipping"} label ${
+        label.trackingNumber || labelId
+      }? The label must not be used or scanned.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setLabelBusy(`refund:${labelId}`);
+    setActionError("");
+    setActionMessage("");
+
+    try {
+      const response = await fetch("/api/admin/shipping/refund", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminSecret}`,
+        },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({ orderId, labelId }),
+      });
+      const result = await readJson(response);
+
+      if (result.order) {
+        replaceOrderRecord(result.order);
+      }
+
+      const returnedRefundStatus = String(result.label?.refundStatus || "").toUpperCase();
+
+      if (returnedRefundStatus === "ERROR") {
+        setActionError(result.message || "Shippo rejected the shipping label refund.");
+      } else {
+        if (purchasedLabel?.labelId === labelId) {
+          setPurchasedLabel(null);
+        }
+
+        if (shipmentTrackingNumber === label.trackingNumber) {
+          setShipmentTrackingNumber("");
+        }
+
+        setActionMessage(
+          result.message || "The shipping label refund request was submitted."
+        );
+      }
+    } catch (requestError) {
+      setActionError(
+        requestError.message || "The shipping label refund could not be requested."
+      );
     } finally {
       setLabelBusy("");
     }
@@ -3442,19 +3517,39 @@ function CustomerManager({
                                         <strong>Shipping Label History</strong>
                                         {shippingLabelHistory.map((label, index) => (
                                           <div
-                                            className="cm-label-ready"
+                                            className={String(label.refundStatus || "").toUpperCase() === "ERROR" ? "cm-label-ready cm-label-refund-rejected" : label.refundStatus ? "cm-label-ready cm-label-refunded" : "cm-label-ready"}
                                             key={label.labelId || `${label.trackingNumber}-${index}`}
                                           >
                                             <div>
                                               <strong>{label.carrier || "Carrier"} · {label.service || "Shipping label"}</strong>
                                               <span>{label.trackingNumber || "Tracking unavailable"}</span>
                                               <small>{formatMoney(label.postage)} · {formatDate(label.purchasedAt)}</small>
+                                              {label.refundStatus && (
+                                                <small className="cm-label-refund-status">
+                                                  Refund {String(label.refundStatus).toUpperCase()} · {formatDate(label.refundUpdatedAt || label.refundRequestedAt)}
+                                                  {label.refundError ? ` · ${label.refundError}` : ""}
+                                                </small>
+                                              )}
                                             </div>
-                                            {label.labelUrl && (
-                                              <a href={label.labelUrl} target="_blank" rel="noreferrer">
-                                                Reprint Label
-                                              </a>
-                                            )}
+                                            <div className="cm-label-actions">
+                                              {label.labelUrl && !label.refundStatus && (
+                                                <a href={label.labelUrl} target="_blank" rel="noreferrer">
+                                                  Reprint Label
+                                                </a>
+                                              )}
+                                              {String(label.test).toLowerCase() !== "true" && !label.refundStatus && (
+                                                <button
+                                                  type="button"
+                                                  className="cm-label-refund-btn"
+                                                  disabled={busy || Boolean(labelBusy) || !(label.labelId || label.transactionId)}
+                                                  onClick={() => refundShippingLabel(order, label)}
+                                                >
+                                                  {labelBusy === `refund:${label.labelId || label.transactionId}`
+                                                    ? "Submitting…"
+                                                    : "Void / Refund"}
+                                                </button>
+                                              )}
+                                            </div>
                                           </div>
                                         ))}
                                       </div>
@@ -4558,6 +4653,50 @@ const css = `
   white-space: nowrap;
 }
 
+.cm-label-actions {
+  gap: 8px !important;
+}
+
+.cm-label-refund-btn {
+  min-width: 145px;
+  border: 0;
+  border-radius: 10px;
+  background: #991b1b;
+  color: #ffffff;
+  padding: 9px 12px;
+  font: inherit;
+  font-weight: 900;
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cm-label-refund-btn:hover:not(:disabled) {
+  background: #7f1d1d;
+}
+
+.cm-label-refund-btn:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+
+.cm-label-refunded {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.cm-label-refund-rejected {
+  border-color: #dc2626;
+  background: #fef2f2;
+}
+
+.cm-label-refund-status {
+  margin-top: 4px;
+  color: #92400e !important;
+  font-weight: 900;
+  line-height: 1.45;
+}
+
 .cm-shipment-notice {
   padding: 13px;
   border: 1px solid rgba(255,255,255,.1);
@@ -4713,6 +4852,35 @@ const css = `
 .cm-integrated-shipping .cm-label-ready > div > span {
   color: #14532d;
 }
+/* Improve contrast inside the light shipping panel. */
+.cm-integrated-shipping .cm-error {
+  border: 1px solid #7f1d1d;
+  background: #991b1b;
+  color: #ffffff;
+  box-shadow: 0 8px 20px rgba(127,29,29,.22);
+  font-weight: 750;
+}
+
+.cm-integrated-shipping .secondary-btn {
+  border: 1px solid #1e3a8a;
+  background: #1e3a8a;
+  color: #ffffff;
+  box-shadow: 0 7px 16px rgba(30,58,138,.18);
+}
+
+.cm-integrated-shipping .secondary-btn:hover:not(:disabled) {
+  border-color: #172554;
+  background: #172554;
+  color: #ffffff;
+}
+
+.cm-integrated-shipping .secondary-btn:disabled {
+  border-color: #64748b;
+  background: #64748b;
+  color: #f8fafc;
+  opacity: .7;
+}
+
 @media (max-width: 1000px) {
   .cm-account-stats {
     grid-template-columns:

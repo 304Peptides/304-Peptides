@@ -130,7 +130,8 @@ export default {
       url.pathname === "/api/admin/shipping/settings" ||
       url.pathname === "/api/admin/shipping/debug" ||
       url.pathname === "/api/admin/shipping/rates" ||
-      url.pathname === "/api/admin/shipping/buy"
+      url.pathname === "/api/admin/shipping/buy" ||
+      url.pathname === "/api/admin/shipping/refund"
     ) {
       return handleAdminShippingRequest(request, env, url);
     }
@@ -1034,6 +1035,10 @@ async function handleAdminShippingRequest(request, env, url) {
       return buyShippingLabel(body, env);
     }
 
+    if (url.pathname === "/api/admin/shipping/refund") {
+      return refundShippingLabel(body, env);
+    }
+
     throw new ApiRequestError("Shipping route not found.", 404);
   } catch (error) {
     console.error("Shipping label request error:", error);
@@ -1471,6 +1476,109 @@ async function buyShippingLabel(body, env) {
     message: label.test
       ? "Test label created. Print it only for workflow testing; it is not valid postage."
       : "Shipping label purchased. Print it, then record the shipment to email the customer.",
+  });
+}
+
+async function refundShippingLabel(body, env) {
+  const orderId = normalizeOrderId(body.orderId);
+  const labelId = cleanText(body.labelId || body.transactionId, 120);
+
+  if (!/^[a-f0-9]{32}$/i.test(labelId)) {
+    throw new ApiRequestError("Choose a valid shipping label to refund.", 400);
+  }
+
+  const order = await getOrderRecord(env, orderId);
+  if (!order) {
+    throw new ApiRequestError(`Order ${orderId} was not found.`, 404);
+  }
+
+  const existingLabels = Array.isArray(order.shippingLabels)
+    ? order.shippingLabels
+    : [];
+  const labelIndex = existingLabels.findIndex(function (entry) {
+    return cleanText(entry?.labelId || entry?.transactionId, 120) === labelId;
+  });
+
+  if (labelIndex < 0) {
+    throw new ApiRequestError("That shipping label is not attached to this order.", 404);
+  }
+
+  const existingLabel = existingLabels[labelIndex];
+
+  if (existingLabel?.test === true || String(existingLabel?.test).toLowerCase() === "true") {
+    throw new ApiRequestError(
+      "Test labels do not use real postage and do not need a refund.",
+      409
+    );
+  }
+
+  const existingRefundStatus = cleanText(existingLabel?.refundStatus, 30).toUpperCase();
+  if (existingRefundStatus) {
+    throw new ApiRequestError(
+      `A refund result has already been recorded for this label (${existingRefundStatus}).`,
+      409
+    );
+  }
+
+  const labelTrackingNumber = cleanText(existingLabel?.trackingNumber, 200);
+  const shipmentAlreadyRecorded = Array.isArray(order.shipments) &&
+    order.shipments.some(function (shipment) {
+      return (
+        labelTrackingNumber &&
+        cleanText(shipment?.trackingNumber, 200) === labelTrackingNumber
+      );
+    });
+
+  if (shipmentAlreadyRecorded) {
+    throw new ApiRequestError(
+      "This label is attached to a recorded shipment and cannot be refunded here.",
+      409
+    );
+  }
+
+  const refundResult = await shippoRequest(env, "/refunds/", {
+    method: "POST",
+    body: { transaction: labelId },
+  });
+  const refundStatus = cleanText(refundResult.status, 30).toUpperCase() || "QUEUED";
+  const now = new Date().toISOString();
+  const updatedLabel = {
+    ...existingLabel,
+    refundId: cleanText(refundResult.object_id, 120),
+    refundStatus,
+    refundRequestedAt:
+      cleanText(refundResult.object_created, 80) || now,
+    refundUpdatedAt:
+      cleanText(refundResult.object_updated, 80) || now,
+    refundError:
+      refundStatus === "ERROR" ? shippoMessage(refundResult) : "",
+  };
+  const updatedLabels = existingLabels.map(function (entry, index) {
+    return index === labelIndex ? updatedLabel : entry;
+  });
+  const updatedOrder = {
+    ...order,
+    shippingLabels: updatedLabels,
+    updatedAt: now,
+  };
+
+  await putOrderRecord(env, updatedOrder);
+  await env.DOCUMENTS_KV.put(
+    `${SHIPPING_LABEL_KEY_PREFIX}${labelId}`,
+    JSON.stringify(updatedLabel)
+  );
+
+  return jsonResponse({
+    success: true,
+    order: updatedOrder,
+    label: updatedLabel,
+    refund: refundResult,
+    message:
+      refundStatus === "SUCCESS"
+        ? "The shipping label refund was accepted."
+        : refundStatus === "ERROR"
+          ? "Shippo rejected the shipping label refund."
+          : `The shipping label refund was submitted (${refundStatus}).`,
   });
 }
 
