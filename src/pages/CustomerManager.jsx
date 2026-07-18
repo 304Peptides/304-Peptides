@@ -543,6 +543,7 @@ function CustomerManager({
   const [labelBusy, setLabelBusy] = useState("");
   const [labelError, setLabelError] = useState("");
   const [workflowBusy, setWorkflowBusy] = useState("");
+  const [trackingBusyId, setTrackingBusyId] = useState("");
   const [busyId, setBusyId] = useState("");
   const [resetEmail, setResetEmail] = useState("");
   const [resetting, setResetting] = useState(false);
@@ -1367,22 +1368,35 @@ function CustomerManager({
     }
   }
 
-  async function refreshShipmentTrackingStatuses(order) {
+  async function refreshShipmentTrackingStatuses(order, force = false) {
     const orderId = getOrderId(order);
     const hasTrackableShipment = getShipments(order).some((shipment) => {
       const carrier = String(shipment?.carrier || "")
         .toLowerCase()
         .replace(/[\s_-]+/g, "");
       const status = String(shipment?.trackingStatus || "").toUpperCase();
+      const notificationStatus = String(
+        shipment?.trackingNotificationStatus || ""
+      ).toUpperCase();
+      const notificationPending =
+        Boolean(status) &&
+        status !== "UNKNOWN" &&
+        (status !== notificationStatus ||
+          Boolean(shipment?.trackingNotificationError));
 
       return (
         ["usps", "ups", "fedex"].includes(carrier) &&
         String(shipment?.trackingNumber || "").trim() &&
-        !["DELIVERED", "RETURNED"].includes(status)
+        (!["DELIVERED", "RETURNED"].includes(status) ||
+          notificationPending)
       );
     });
 
     if (!hasTrackableShipment) {
+      if (force) {
+        setActionMessage("No eligible shipments were found for tracking.");
+      }
+
       return order;
     }
 
@@ -1396,7 +1410,7 @@ function CustomerManager({
         },
         credentials: "same-origin",
         cache: "no-store",
-        body: JSON.stringify({ orderId }),
+        body: JSON.stringify({ orderId, force }),
       });
       const result = await readJson(response);
 
@@ -1404,7 +1418,11 @@ function CustomerManager({
         replaceOrderRecord(result.order);
       }
 
-      if (Number(result.changedCount || 0) > 0) {
+      if (
+        force ||
+        Number(result.changedCount || 0) > 0 ||
+        Number(result.notificationAttemptCount || 0) > 0
+      ) {
         setActionMessage(
           result.message || "A shipment tracking status was updated."
         );
@@ -1417,6 +1435,24 @@ function CustomerManager({
           "The shipment tracking status could not be refreshed."
       );
       return order;
+    }
+  }
+
+  async function checkShipmentTrackingNow(order) {
+    const orderId = getOrderId(order);
+
+    if (!orderId || trackingBusyId) {
+      return;
+    }
+
+    setTrackingBusyId(orderId);
+    setActionError("");
+    setActionMessage("");
+
+    try {
+      await refreshShipmentTrackingStatuses(order, true);
+    } finally {
+      setTrackingBusyId("");
     }
   }
 
@@ -2839,6 +2875,9 @@ function CustomerManager({
                   const shipmentBusy =
                     workflowBusy === `${id}:shipment`;
 
+                  const trackingBusy =
+                    trackingBusyId === id;
+
                   const busy =
                     recordBusy || invoiceBusy || paymentBusy || shipmentBusy;
 
@@ -2868,6 +2907,26 @@ function CustomerManager({
                     );
 
                   const shipments = getShipments(order);
+                  const latestTrackingCheckedAt = shipments.reduce(
+                    (latest, shipment) => {
+                      const checkedAt = String(
+                        shipment?.trackingLastCheckedAt || ""
+                      ).trim();
+
+                      if (!checkedAt) return latest;
+                      if (!latest) return checkedAt;
+
+                      const checkedTime = Date.parse(checkedAt);
+                      const latestTime = Date.parse(latest);
+
+                      return Number.isFinite(checkedTime) &&
+                        (!Number.isFinite(latestTime) ||
+                          checkedTime > latestTime)
+                        ? checkedAt
+                        : latest;
+                    },
+                    ""
+                  );
                   const shipmentProgress = getShipmentProgress(order);
                   const shipmentItems = buildShipmentItemsPayload(
                     order,
@@ -3862,7 +3921,32 @@ function CustomerManager({
 
                               {shipments.length > 0 && (
                                 <div className="cm-shipment-history">
-                                  <strong>Shipment History</strong>
+                                  <div className="cm-shipment-history-header">
+                                    <div>
+                                      <strong>Shipment History</strong>
+
+                                      {latestTrackingCheckedAt && (
+                                        <small>
+                                          Last checked: {formatDate(
+                                            latestTrackingCheckedAt
+                                          )}
+                                        </small>
+                                      )}
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      className="cm-tracking-check-btn"
+                                      disabled={busy || trackingBusy}
+                                      onClick={() =>
+                                        checkShipmentTrackingNow(order)
+                                      }
+                                    >
+                                      {trackingBusy
+                                        ? "Checking Tracking..."
+                                        : "Check Tracking Now"}
+                                    </button>
+                                  </div>
 
                                   {[...shipments].reverse().map((shipment, shipmentIndex) => (
                                     <div
@@ -4993,9 +5077,52 @@ const css = `
   border-top: 1px solid rgba(255,255,255,.08);
 }
 
-.cm-shipment-history > strong {
+.cm-shipment-history-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cm-shipment-history-header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.cm-shipment-history-header strong {
   color: #fff;
   font-size: 13px;
+}
+
+.cm-shipment-history-header small {
+  color: #aeb8bf;
+  font-size: 10px;
+}
+
+.cm-tracking-check-btn {
+  width: auto;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid rgba(142,211,255,.35);
+  border-radius: 9px;
+  background: rgba(48,145,210,.12);
+  color: #bfe5ff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .3px;
+  cursor: pointer;
+}
+
+.cm-tracking-check-btn:hover:not(:disabled) {
+  border-color: rgba(142,211,255,.65);
+  background: rgba(48,145,210,.2);
+}
+
+.cm-tracking-check-btn:disabled {
+  cursor: not-allowed;
+  opacity: .55;
 }
 
 .cm-shipment-history-card {

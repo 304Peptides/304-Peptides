@@ -1737,6 +1737,7 @@ async function refreshShippingRefundStatuses(body, env) {
 async function refreshShipmentTrackingStatuses(body, env) {
   const orderId = normalizeOrderId(body.orderId);
   const order = await getOrderRecord(env, orderId);
+  const forceRefresh = body?.force === true;
 
   if (!order) {
     throw new ApiRequestError(`Order ${orderId} was not found.`, 404);
@@ -1776,6 +1777,7 @@ async function refreshShipmentTrackingStatuses(body, env) {
       cleanText(existingShipment?.trackingLastCheckedAt, 80)
     );
     const refreshDue =
+      forceRefresh ||
       !Number.isFinite(lastCheckedAt) ||
       Date.now() - lastCheckedAt >= 15 * 60 * 1000;
     const lastNotifiedStatus = cleanText(
