@@ -291,6 +291,68 @@ function formatTrackingStatus(value) {
     .join(" ");
 }
 
+function getTrackingNotificationState(shipment) {
+  const carrier = String(shipment?.carrier || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+  const trackingNumber = String(
+    shipment?.trackingNumber || ""
+  ).trim();
+  const supported =
+    ["usps", "ups", "fedex"].includes(carrier) &&
+    Boolean(trackingNumber);
+
+  if (!supported) {
+    return {
+      key: "not-applicable",
+      title: "Tracking Email Not Applicable",
+      detail:
+        "Automatic tracking emails apply to USPS, UPS, and FedEx shipments.",
+    };
+  }
+
+  if (shipment?.trackingNotificationError) {
+    return {
+      key: "retry",
+      title: "Tracking Email Pending Retry",
+      detail: String(shipment.trackingNotificationError),
+    };
+  }
+
+  if (shipment?.trackingNotificationSentAt) {
+    return {
+      key: "sent",
+      title: "Tracking Email Sent",
+      detail: `Customer notified for ${formatTrackingStatus(
+        shipment.trackingNotificationStatus ||
+          shipment.trackingStatus
+      )}.`,
+    };
+  }
+
+  if (
+    shipment?.trackingNotificationInitializedAt ||
+    shipment?.trackingNotificationStatus
+  ) {
+    return {
+      key: "waiting",
+      title: "Waiting for Status Change",
+      detail: `Current baseline: ${formatTrackingStatus(
+        shipment.trackingNotificationStatus ||
+          shipment.trackingStatus
+      )}.`,
+    };
+  }
+
+  return {
+    key: "pending",
+    title: "Tracking Email Pending",
+    detail:
+      "The next tracking refresh will establish the current carrier status.",
+  };
+}
+
 function getShippedQuantity(order, itemIndex) {
   return getShipments(order).reduce(
     (total, shipment) =>
@@ -3860,6 +3922,28 @@ function CustomerManager({
                                         </div>
                                       )}
 
+                                      {(() => {
+                                        const notification =
+                                          getTrackingNotificationState(shipment);
+
+                                        return (
+                                          <div
+                                            className={`cm-tracking-email-status cm-tracking-email-status--${notification.key}`}
+                                          >
+                                            <strong>{notification.title}</strong>
+                                            <span>{notification.detail}</span>
+
+                                            {shipment.trackingNotificationSentAt && (
+                                              <small>
+                                                Sent: {formatDate(
+                                                  shipment.trackingNotificationSentAt
+                                                )}
+                                              </small>
+                                            )}
+                                          </div>
+                                        );
+                                      })()}
+
                                       <div>
                                         {(shipment.items || []).map((item, index) => (
                                           <small key={`${shipment.shipmentId || shipmentIndex}-${item.index}-${index}`}>
@@ -4991,6 +5075,56 @@ const css = `
 .cm-tracking-status--returned > strong,
 .cm-tracking-status--error > strong {
   color: #ff9b9b;
+}
+
+.cm-tracking-email-status {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(142,211,255,.22);
+  border-radius: 10px;
+  background: rgba(48,145,210,.08);
+}
+
+.cm-tracking-email-status > strong {
+  color: #8ed3ff;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+}
+
+.cm-tracking-email-status > span {
+  color: #dce7ed;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.cm-tracking-email-status--sent {
+  border-color: rgba(79,211,138,.3);
+  background: rgba(34,139,85,.1);
+}
+
+.cm-tracking-email-status--sent > strong {
+  color: #78e5a8;
+}
+
+.cm-tracking-email-status--retry {
+  border-color: rgba(255,122,122,.32);
+  background: rgba(170,45,45,.11);
+}
+
+.cm-tracking-email-status--retry > strong {
+  color: #ff9b9b;
+}
+
+.cm-tracking-email-status--not-applicable {
+  border-color: rgba(174,184,191,.2);
+  background: rgba(174,184,191,.06);
+}
+
+.cm-tracking-email-status--not-applicable > strong {
+  color: #bfc8ce;
 }
 
 .cm-money-grid {
