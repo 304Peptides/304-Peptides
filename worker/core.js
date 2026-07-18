@@ -1750,6 +1750,8 @@ async function refreshShipmentTrackingStatuses(body, env) {
   const checkedAt = new Date().toISOString();
   let checkedCount = 0;
   let changedCount = 0;
+  let notificationAttemptCount = 0;
+  let notificationSentCount = 0;
 
   for (let index = 0; index < existingShipments.length; index += 1) {
     const existingShipment = existingShipments[index];
@@ -1776,12 +1778,27 @@ async function refreshShipmentTrackingStatuses(body, env) {
     const refreshDue =
       !Number.isFinite(lastCheckedAt) ||
       Date.now() - lastCheckedAt >= 15 * 60 * 1000;
+    const lastNotifiedStatus = cleanText(
+      existingShipment?.trackingNotificationStatus,
+      50
+    ).toUpperCase();
+    const notificationPending =
+      Boolean(currentStatus) &&
+      currentStatus !== "UNKNOWN" &&
+      currentStatus !== lastNotifiedStatus;
 
-    if (!carrierToken || !trackingNumber || !refreshDue) {
+    if (
+      !carrierToken ||
+      !trackingNumber ||
+      (!refreshDue && !notificationPending)
+    ) {
       continue;
     }
 
-    if (["DELIVERED", "RETURNED"].includes(currentStatus)) {
+    if (
+      ["DELIVERED", "RETURNED"].includes(currentStatus) &&
+      !notificationPending
+    ) {
       continue;
     }
 
@@ -1858,6 +1875,24 @@ async function refreshShipmentTrackingStatuses(body, env) {
       };
     }
 
+    const notificationResult =
+      await sendTrackingUpdateNotification(
+        env,
+        order,
+        updatedShipment,
+        currentStatus
+      );
+
+    updatedShipment = notificationResult.shipment;
+
+    if (notificationResult.attempted) {
+      notificationAttemptCount += 1;
+    }
+
+    if (notificationResult.sent) {
+      notificationSentCount += 1;
+    }
+
     const visibleFieldsChanged =
       cleanText(updatedShipment.trackingStatus, 50) !==
         cleanText(existingShipment?.trackingStatus, 50) ||
@@ -1887,6 +1922,8 @@ async function refreshShipmentTrackingStatuses(body, env) {
       shipments: [],
       checkedCount: 0,
       changedCount: 0,
+      notificationAttemptCount: 0,
+      notificationSentCount: 0,
       message: "No eligible shipments were found for tracking.",
     });
   }
@@ -1908,10 +1945,150 @@ async function refreshShipmentTrackingStatuses(body, env) {
     shipments: refreshedShipments,
     checkedCount,
     changedCount,
+    notificationAttemptCount,
+    notificationSentCount,
     message: changedCount
       ? `${changedCount} shipment tracking update(s) found.`
       : "Shipment tracking statuses are unchanged.",
   });
+}
+
+async function createTrackingUpdateEventId(orderId, shipment) {
+  const identity = [
+    normalizeOrderId(orderId),
+    cleanText(shipment?.shipmentId, 150),
+    cleanText(
+      shipment?.trackingNumber,
+      MAX_ORDER_SHIPMENT_TRACKING_LENGTH
+    ),
+    cleanText(shipment?.trackingStatus, 50).toUpperCase(),
+    cleanText(shipment?.trackingStatusDate, 80),
+    cleanMultilineText(
+      shipment?.trackingStatusDetails,
+      1000
+    ),
+    cleanText(shipment?.trackingStatusLocation, 200),
+  ].join("|");
+
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(identity)
+  );
+
+  const hash = Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+
+  return `tracking-${hash.slice(0, 48)}`;
+}
+
+async function sendTrackingUpdateNotification(
+  env,
+  order,
+  shipment,
+  previousStatus
+) {
+  const status = cleanText(
+    shipment?.trackingStatus,
+    50
+  ).toUpperCase();
+  const notificationStatus = cleanText(
+    shipment?.trackingNotificationStatus,
+    50
+  ).toUpperCase();
+  const priorStatus = cleanText(
+    previousStatus,
+    50
+  ).toUpperCase();
+
+  if (
+    !status ||
+    status === "UNKNOWN" ||
+    status === notificationStatus
+  ) {
+    return {
+      shipment,
+      attempted: false,
+      sent: false,
+    };
+  }
+
+  const notificationAttemptedBefore =
+    Boolean(
+      cleanText(
+        shipment?.trackingNotificationEventId,
+        150
+      )
+    ) ||
+    Boolean(
+      cleanMultilineText(
+        shipment?.trackingNotificationError,
+        1000
+      )
+    );
+
+  if (
+    !notificationStatus &&
+    !notificationAttemptedBefore &&
+    (!priorStatus || status === priorStatus)
+  ) {
+    return {
+      shipment: {
+        ...shipment,
+        trackingNotificationStatus: status,
+        trackingNotificationInitializedAt:
+          new Date().toISOString(),
+      },
+      attempted: false,
+      sent: false,
+    };
+  }
+
+  const eventId = await createTrackingUpdateEventId(
+    order.orderId || order.id,
+    shipment
+  );
+
+  try {
+    validateOrderWorkflowEnvironment(env);
+
+    await sendOrderWorkflowToWorkspace(env, {
+      action: "tracking_update",
+      eventId,
+      order,
+      shipment,
+    });
+
+    return {
+      shipment: {
+        ...shipment,
+        trackingNotificationStatus: status,
+        trackingNotificationSentAt: new Date().toISOString(),
+        trackingNotificationEventId: eventId,
+        trackingNotificationError: "",
+      },
+      attempted: true,
+      sent: true,
+    };
+  } catch (error) {
+    console.error(
+      `Tracking email failed for order ${order.orderId || order.id}:`,
+      error
+    );
+
+    return {
+      shipment: {
+        ...shipment,
+        trackingNotificationEventId: eventId,
+        trackingNotificationError: cleanMultilineText(
+          error?.message || "The tracking update email could not be sent.",
+          1000
+        ),
+      },
+      attempted: true,
+      sent: false,
+    };
+  }
 }
 
 async function refreshAllShipmentTrackingStatuses(env) {
@@ -1927,6 +2104,8 @@ async function refreshAllShipmentTrackingStatuses(env) {
     ordersChecked: 0,
     shipmentsChecked: 0,
     shipmentsChanged: 0,
+    notificationAttempts: 0,
+    notificationsSent: 0,
     failedOrders: 0,
   };
 
@@ -1950,11 +2129,22 @@ async function refreshAllShipmentTrackingStatuses(env) {
         shipment?.trackingStatus,
         50
       ).toUpperCase();
+      const lastNotifiedStatus = cleanText(
+        shipment?.trackingNotificationStatus,
+        50
+      ).toUpperCase();
+      const notificationPending =
+        Boolean(status) &&
+        status !== "UNKNOWN" &&
+        status !== lastNotifiedStatus;
 
       return (
         ["usps", "ups", "fedex"].includes(carrier) &&
         Boolean(trackingNumber) &&
-        !["DELIVERED", "RETURNED"].includes(status)
+        (
+          !["DELIVERED", "RETURNED"].includes(status) ||
+          notificationPending
+        )
       );
     });
 
@@ -1972,6 +2162,12 @@ async function refreshAllShipmentTrackingStatuses(env) {
       summary.ordersChecked += 1;
       summary.shipmentsChecked += Number(result.checkedCount || 0);
       summary.shipmentsChanged += Number(result.changedCount || 0);
+      summary.notificationAttempts += Number(
+        result.notificationAttemptCount || 0
+      );
+      summary.notificationsSent += Number(
+        result.notificationSentCount || 0
+      );
     } catch (error) {
       summary.failedOrders += 1;
 
