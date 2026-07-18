@@ -1627,6 +1627,97 @@ function CustomerManager({
     }
   }
 
+  async function cancelOrderAndRestore(order) {
+    const orderId = getOrderId(order);
+    const shipments = Array.isArray(order.shipments)
+      ? order.shipments
+      : [];
+
+    if (!ordersReady) {
+      return;
+    }
+
+    if (shipments.length > 0) {
+      setActionError(
+        "This order already has a recorded shipment and cannot be cancelled with automatic inventory restoration."
+      );
+      return;
+    }
+
+    const reason = window.prompt(
+      `Optional cancellation reason for order ${orderId}:`,
+      ""
+    );
+
+    if (reason === null) {
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Cancel order ${orderId} and restore its eligible inventory?\n\nThis does not refund the customer or void a shipping label.`
+      )
+    ) {
+      return;
+    }
+
+    setBusyId(orderId);
+    setActionError("");
+    setActionMessage("");
+
+    try {
+      const response = await fetch(
+        "/api/admin/order-actions/cancel",
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${adminSecret}`,
+          },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            orderId,
+            reason: reason.trim(),
+          }),
+        }
+      );
+
+      const result = await readJson(response);
+      const updated = result.order || result.record;
+
+      if (!updated) {
+        throw new Error(
+          "The cancellation response did not include the updated order."
+        );
+      }
+
+      setRecords((current) =>
+        current.map((item) =>
+          getOrderId(item) === orderId
+            ? updated
+            : item
+        )
+      );
+
+      if (editingId === orderId) {
+        setEditingId("");
+      }
+
+      setActionMessage(
+        result.message ||
+          `Order ${orderId} was cancelled and eligible inventory was restored.`
+      );
+    } catch (requestError) {
+      setActionError(
+        requestError.message ||
+          "The order could not be cancelled."
+      );
+    } finally {
+      setBusyId("");
+    }
+  }
+
   async function deleteOrder(order) {
     const orderId = getOrderId(order);
 
@@ -3075,6 +3166,25 @@ function CustomerManager({
                           }
                         >
                           Reset Password
+                        </button>
+
+                        <button
+                          type="button"
+                          className="cm-danger-btn"
+                          disabled={
+                            !ordersReady ||
+                            busy ||
+                            Boolean(
+                              order.cancellation?.cancelledAt
+                            )
+                          }
+                          onClick={() =>
+                            cancelOrderAndRestore(order)
+                          }
+                        >
+                          {order.cancellation?.cancelledAt
+                            ? "Cancelled"
+                            : "Cancel & Restore"}
                         </button>
 
                         <button

@@ -36,6 +36,7 @@ const DOCUMENT_KEY_PREFIX = "document:";
 const ORDER_KEY_PREFIX = "order:";
 const CATALOG_KEY_PREFIX = "catalog:variant:";
 const INVENTORY_EVENT_KEY_PREFIX = "inventory:event:";
+const INVENTORY_RESTORATION_KEY_PREFIX = "inventory:restoration:";
 const COUPON_KEY_PREFIX = "coupon:";
 const COUPON_REDEMPTION_KEY_PREFIX = "coupon:redemption:";
 const SHIPPING_SETTINGS_KEY = "settings:shipping";
@@ -172,7 +173,9 @@ export default {
       url.pathname ===
         "/api/admin/order-actions/payment-received" ||
       url.pathname ===
-        "/api/admin/order-actions/shipment-sent"
+        "/api/admin/order-actions/shipment-sent" ||
+      url.pathname ===
+        "/api/admin/order-actions/cancel"
     ) {
       return handleAdminOrderWorkflowAction(
         request,
@@ -581,6 +584,98 @@ async function commitInventoryForPaidOrder(env, order) {
 
   await env.DOCUMENTS_KV.put(eventKey, JSON.stringify(event));
   return event;
+}
+
+async function restoreInventoryForCancelledOrder(env, order, actor) {
+  const orderId = normalizeOrderId(order.orderId || order.id);
+  const restorationKey =
+    `${INVENTORY_RESTORATION_KEY_PREFIX}${orderId}`;
+  const existingRestoration = await env.DOCUMENTS_KV.get(
+    restorationKey,
+    "json"
+  );
+
+  if (existingRestoration) {
+    return existingRestoration;
+  }
+
+  const storedInventoryEvent = await env.DOCUMENTS_KV.get(
+    `${INVENTORY_EVENT_KEY_PREFIX}${orderId}`,
+    "json"
+  );
+  const inventoryEvent =
+    order.inventoryEvent &&
+    typeof order.inventoryEvent === "object"
+      ? order.inventoryEvent
+      : storedInventoryEvent;
+  const committedAdjustments = Array.isArray(
+    inventoryEvent?.adjustments
+  )
+    ? inventoryEvent.adjustments
+    : [];
+  const adjustments = [];
+
+  for (const committed of committedAdjustments) {
+    const codeName = normalizeCatalogCode(committed?.codeName);
+    const restoredQuantity = Math.max(
+      0,
+      Math.floor(Number(committed?.orderedQuantity || 0))
+    );
+
+    if (!codeName || restoredQuantity <= 0) {
+      continue;
+    }
+
+    const record = await getCatalogOverride(env, codeName);
+
+    if (!record || record.trackQuantity !== true) {
+      adjustments.push({
+        codeName,
+        restoredQuantity: 0,
+        skipped: true,
+        reason: "The tracked catalog record is no longer available.",
+      });
+      continue;
+    }
+
+    const previousQuantity = Math.max(
+      0,
+      Math.floor(Number(record.quantity || 0))
+    );
+    const nextQuantity = previousQuantity + restoredQuantity;
+    const updatedRecord = {
+      ...record,
+      quantity: nextQuantity,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await env.DOCUMENTS_KV.put(
+      getCatalogKey(codeName),
+      JSON.stringify(updatedRecord)
+    );
+
+    adjustments.push({
+      codeName,
+      previousQuantity,
+      restoredQuantity,
+      quantity: nextQuantity,
+    });
+  }
+
+  const restoration = {
+    orderId,
+    adjustments,
+    restoredAt: new Date().toISOString(),
+    restoredBy: cleanText(actor, 254) || "authorized administrator",
+    sourceCommittedAt: inventoryEvent?.committedAt || null,
+  };
+
+  await env.DOCUMENTS_KV.put(
+    restorationKey,
+    JSON.stringify(restoration)
+  );
+
+  return restoration;
 }
 
 /* -------------------------------------------------- */
@@ -2872,9 +2967,6 @@ async function handleAdminOrderWorkflowAction(
       env
     );
 
-    validateOrderWorkflowEnvironment(
-      env
-    );
 
     if (
       request.method !==
@@ -2923,6 +3015,15 @@ async function handleAdminOrderWorkflowAction(
       );
 
     if (
+      url.pathname !==
+      "/api/admin/order-actions/cancel"
+    ) {
+      validateOrderWorkflowEnvironment(
+        env
+      );
+    }
+
+    if (
       url.pathname ===
       "/api/admin/order-actions/invoice"
     ) {
@@ -2951,6 +3052,18 @@ async function handleAdminOrderWorkflowAction(
       "/api/admin/order-actions/shipment-sent"
     ) {
       return await processShipmentSentWorkflowAction(
+        env,
+        order,
+        body,
+        actor
+      );
+    }
+
+    if (
+      url.pathname ===
+      "/api/admin/order-actions/cancel"
+    ) {
+      return await processCancelOrderWorkflowAction(
         env,
         order,
         body,
@@ -3679,6 +3792,122 @@ async function processPaymentReceivedWorkflowAction(
   }
 }
 
+
+async function processCancelOrderWorkflowAction(
+  env,
+  order,
+  body,
+  actor
+) {
+  const orderId = normalizeOrderId(order.orderId || order.id);
+  const existingCancellation =
+    order.cancellation &&
+    typeof order.cancellation === "object"
+      ? order.cancellation
+      : {};
+
+  if (existingCancellation.cancelledAt) {
+    return jsonResponse({
+      success: true,
+      order,
+      record: order,
+      message: `Order ${orderId} is already cancelled.`,
+    });
+  }
+
+  const shipments = Array.isArray(order.shipments)
+    ? order.shipments
+    : [];
+
+  if (shipments.length > 0) {
+    throw new ApiRequestError(
+      "This order has a recorded shipment and cannot be cancelled with automatic inventory restoration.",
+      409
+    );
+  }
+
+  const now = new Date().toISOString();
+  const reason = cleanMultilineText(body?.reason, 1000);
+  const eventId = createOrderWorkflowEventId("cancel");
+  const event = {
+    eventId,
+    type: "order_cancelled",
+    state: "processing",
+    createdAt: now,
+    createdBy: actor,
+    previousStatus: cleanText(order.status, MAX_ORDER_STATUS_LENGTH),
+    reason,
+  };
+
+  const pendingOrder = {
+    ...order,
+    workflowPending: event,
+    updatedAt: now,
+  };
+
+  await putOrderRecord(env, pendingOrder);
+
+  try {
+    const inventoryRestoration =
+      await restoreInventoryForCancelledOrder(env, order, actor);
+    const completedAt = new Date().toISOString();
+    const completedEvent = {
+      ...event,
+      state: "completed",
+      completedAt,
+      restoredItemCount: Array.isArray(
+        inventoryRestoration?.adjustments
+      )
+        ? inventoryRestoration.adjustments.filter(
+            (adjustment) =>
+              Number(adjustment?.restoredQuantity || 0) > 0
+          ).length
+        : 0,
+    };
+
+    const updatedOrder = {
+      ...order,
+      status: "Cancelled",
+      cancellation: {
+        cancelledAt: completedAt,
+        cancelledBy: actor,
+        reason,
+        previousStatus: cleanText(
+          order.status,
+          MAX_ORDER_STATUS_LENGTH
+        ),
+      },
+      inventoryRestoration,
+      inventoryRestoredAt:
+        inventoryRestoration?.restoredAt || null,
+      workflowHistory: appendOrderWorkflowHistory(
+        order.workflowHistory,
+        completedEvent
+      ),
+      workflowPending: null,
+      updatedAt: completedAt,
+    };
+
+    await putOrderRecord(env, updatedOrder);
+
+    return jsonResponse({
+      success: true,
+      order: updatedOrder,
+      record: updatedOrder,
+      inventoryRestoration,
+      message: `Order ${orderId} was cancelled and eligible inventory was restored.`,
+    });
+  } catch (error) {
+    await recordFailedOrderWorkflowAction(
+      env,
+      order,
+      event,
+      error
+    );
+
+    throw error;
+  }
+}
 
 async function processShipmentSentWorkflowAction(
   env,
@@ -5253,6 +5482,28 @@ function prepareOrderAdminUpdate(
     throw new ApiRequestError(
       "An order status is required.",
       400
+    );
+  }
+
+  if (
+    status === "Cancelled" &&
+    existingRecord.status !== "Cancelled" &&
+    !existingRecord.cancellation?.cancelledAt
+  ) {
+    throw new ApiRequestError(
+      "Use Cancel & Restore to cancel this order so eligible inventory is restored safely.",
+      409
+    );
+  }
+
+  if (
+    (existingRecord.inventoryRestoredAt ||
+      existingRecord.cancellation?.cancelledAt) &&
+    status !== "Cancelled"
+  ) {
+    throw new ApiRequestError(
+      "This cancelled order has restored inventory and cannot be reopened through the normal status editor.",
+      409
     );
   }
 
