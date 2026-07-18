@@ -214,6 +214,12 @@ export default {
       request
     );
   },
+
+  async scheduled(controller, env, context) {
+    context.waitUntil(
+      refreshAllShipmentTrackingStatuses(env)
+    );
+  },
 };
 
 /* -------------------------------------------------- */
@@ -1906,6 +1912,82 @@ async function refreshShipmentTrackingStatuses(body, env) {
       ? `${changedCount} shipment tracking update(s) found.`
       : "Shipment tracking statuses are unchanged.",
   });
+}
+
+async function refreshAllShipmentTrackingStatuses(env) {
+  validateStorage(env);
+
+  const orders = await listRecordsByPrefix(
+    env.DOCUMENTS_KV,
+    ORDER_KEY_PREFIX
+  );
+
+  const summary = {
+    ordersScanned: orders.length,
+    ordersChecked: 0,
+    shipmentsChecked: 0,
+    shipmentsChanged: 0,
+    failedOrders: 0,
+  };
+
+  for (const order of orders) {
+    const orderId = order?.orderId || order?.id;
+    const shipments = Array.isArray(order?.shipments)
+      ? order.shipments
+      : [];
+
+    const hasTrackableShipment = shipments.some((shipment) => {
+      const carrier = cleanText(shipment?.carrier, 50)
+        .toLowerCase()
+        .replace(/[\s_-]+/g, "");
+
+      const trackingNumber = cleanText(
+        shipment?.trackingNumber,
+        MAX_ORDER_SHIPMENT_TRACKING_LENGTH
+      );
+
+      const status = cleanText(
+        shipment?.trackingStatus,
+        50
+      ).toUpperCase();
+
+      return (
+        ["usps", "ups", "fedex"].includes(carrier) &&
+        Boolean(trackingNumber) &&
+        !["DELIVERED", "RETURNED"].includes(status)
+      );
+    });
+
+    if (!orderId || !hasTrackableShipment) {
+      continue;
+    }
+
+    try {
+      const response = await refreshShipmentTrackingStatuses(
+        { orderId },
+        env
+      );
+      const result = await response.json();
+
+      summary.ordersChecked += 1;
+      summary.shipmentsChecked += Number(result.checkedCount || 0);
+      summary.shipmentsChanged += Number(result.changedCount || 0);
+    } catch (error) {
+      summary.failedOrders += 1;
+
+      console.error(
+        `Scheduled tracking refresh failed for order ${orderId}:`,
+        error
+      );
+    }
+  }
+
+  console.log(
+    "Scheduled shipment tracking refresh complete.",
+    summary
+  );
+
+  return summary;
 }
 
 function shippoMessage(result) {

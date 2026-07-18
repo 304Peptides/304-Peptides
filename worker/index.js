@@ -324,6 +324,10 @@ export default {
 
     return coreWorker.fetch(request, env, context);
   },
+
+  async scheduled(controller, env, context) {
+    return coreWorker.scheduled(controller, env, context);
+  },
 };
 
 async function handleReferralTrackingRedirect(request, env, url) {
