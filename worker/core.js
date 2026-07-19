@@ -109,6 +109,15 @@ export default {
     }
 
     if (
+      url.pathname === "/api/admin/accounting-sync"
+    ) {
+      return handleAdminAccountingSyncRequest(
+        request,
+        env
+      );
+    }
+
+    if (
       url.pathname === "/api/coupon/validate"
     ) {
       return handleCouponValidationRequest(
@@ -288,6 +297,10 @@ async function handleAdminCatalogRequest(
         "catalog update"
       );
       const record = prepareCatalogRecord(body.variant || body.record || body);
+      const previousRecord = await getCatalogOverride(
+        env,
+        record.codeName
+      );
 
       await env.DOCUMENTS_KV.put(
         getCatalogKey(record.codeName),
@@ -305,6 +318,29 @@ async function handleAdminCatalogRequest(
         }
       );
 
+      await syncInventoryAdjustmentToWorkspaceBestEffort(
+        env,
+        {
+          orderId: "",
+          adjustments: [
+            createWorkspaceInventoryAdjustment(
+              previousRecord,
+              record
+            ),
+          ],
+        },
+        {
+          eventId: createAccountingSyncEventId(
+            "catalog-save",
+            record.codeName
+          ),
+          adjustmentType: "Manual Catalog Update",
+          reason: "Product Manager inventory update.",
+          actor: "authorized administrator",
+          occurredAt: record.updatedAt,
+        }
+      );
+
       return jsonResponse({
         success: true,
         record,
@@ -316,7 +352,46 @@ async function handleAdminCatalogRequest(
       const codeName = normalizeCatalogCode(
         url.searchParams.get("codeName")
       );
+      const previousRecord = await getCatalogOverride(
+        env,
+        codeName
+      );
+
       await env.DOCUMENTS_KV.delete(getCatalogKey(codeName));
+
+      if (previousRecord) {
+        const removedRecord = {
+          ...previousRecord,
+          quantity: 0,
+          trackQuantity: false,
+          hidden: true,
+          productHidden: true,
+          updatedAt: new Date().toISOString(),
+        };
+
+        await syncInventoryAdjustmentToWorkspaceBestEffort(
+          env,
+          {
+            orderId: "",
+            adjustments: [
+              createWorkspaceInventoryAdjustment(
+                previousRecord,
+                removedRecord
+              ),
+            ],
+          },
+          {
+            eventId: createAccountingSyncEventId(
+              "catalog-delete",
+              codeName
+            ),
+            adjustmentType: "Catalog Item Removed",
+            reason: "Catalog override removed in Product Manager.",
+            actor: "authorized administrator",
+            occurredAt: removedRecord.updatedAt,
+          }
+        );
+      }
 
       return jsonResponse({
         success: true,
@@ -570,9 +645,15 @@ async function commitInventoryForPaidOrder(env, order) {
 
     adjustments.push({
       codeName,
+      name: updatedRecord.name,
+      strength: updatedRecord.strength,
       previousQuantity: quantity,
       orderedQuantity,
       quantity: nextQuantity,
+      unitCost: Number(updatedRecord.unitCost || 0),
+      trackQuantity: true,
+      reorderLevel: Number(updatedRecord.lowStockThreshold || 0),
+      active: !updatedRecord.hidden && !updatedRecord.productHidden,
     });
   }
 
@@ -583,6 +664,22 @@ async function commitInventoryForPaidOrder(env, order) {
   };
 
   await env.DOCUMENTS_KV.put(eventKey, JSON.stringify(event));
+
+  await syncInventoryAdjustmentToWorkspaceBestEffort(
+    env,
+    event,
+    {
+      eventId: createAccountingSyncEventId(
+        "inventory-sale",
+        orderId
+      ),
+      adjustmentType: "Sale",
+      reason: `Paid order ${orderId}`,
+      orderId,
+      actor: "authorized administrator",
+      occurredAt: event.committedAt,
+    }
+  );
   return event;
 }
 
@@ -656,9 +753,15 @@ async function restoreInventoryForCancelledOrder(env, order, actor) {
 
     adjustments.push({
       codeName,
+      name: updatedRecord.name,
+      strength: updatedRecord.strength,
       previousQuantity,
       restoredQuantity,
       quantity: nextQuantity,
+      unitCost: Number(updatedRecord.unitCost || 0),
+      trackQuantity: true,
+      reorderLevel: Number(updatedRecord.lowStockThreshold || 0),
+      active: !updatedRecord.hidden && !updatedRecord.productHidden,
     });
   }
 
@@ -676,6 +779,180 @@ async function restoreInventoryForCancelledOrder(env, order, actor) {
   );
 
   return restoration;
+}
+
+/* -------------------------------------------------- */
+/* GOOGLE SHEETS ACCOUNTING AND INVENTORY SYNC        */
+/* -------------------------------------------------- */
+
+function validateAccountingWorkspaceEnvironment(env) {
+  if (!cleanText(env.ORDER_WEB_APP_URL, 2048)) {
+    throw new ApiRequestError(
+      "The Google Workspace service URL is not configured.",
+      503
+    );
+  }
+
+  if (!cleanText(env.ORDER_API_SECRET, 500)) {
+    throw new ApiRequestError(
+      "The Google Workspace API secret is not configured.",
+      503
+    );
+  }
+}
+
+function createAccountingSyncEventId(prefix, value) {
+  return cleanText(
+    `${prefix}-${value || "event"}-${Date.now()}`,
+    100
+  );
+}
+
+function toWorkspaceInventoryRecord(record) {
+  const source = record || {};
+
+  return {
+    codeName: cleanText(source.codeName, 100),
+    name: cleanText(source.name, 200),
+    strength: cleanText(source.strength, 100),
+    trackQuantity: source.trackQuantity === true,
+    quantity: Math.max(0, Math.floor(Number(source.quantity || 0))),
+    reorderLevel: Math.max(
+      0,
+      Math.floor(Number(source.lowStockThreshold || 0))
+    ),
+    unitCost: Math.max(0, Number(source.unitCost || 0)),
+    active: source.hidden !== true && source.productHidden !== true,
+    updatedAt: cleanText(source.updatedAt, 100) || new Date().toISOString(),
+    notes: cleanMultilineText(source.notes, 1000),
+  };
+}
+
+function createWorkspaceInventoryAdjustment(previousRecord, nextRecord) {
+  const previous = previousRecord || {};
+  const next = nextRecord || {};
+
+  return {
+    ...toWorkspaceInventoryRecord(next),
+    previousQuantity: Math.max(
+      0,
+      Math.floor(Number(previous.quantity || 0))
+    ),
+    quantity: Math.max(
+      0,
+      Math.floor(Number(next.quantity || 0))
+    ),
+  };
+}
+
+async function syncInventoryAdjustmentToWorkspaceBestEffort(
+  env,
+  inventoryEvent,
+  details = {}
+) {
+  try {
+    validateAccountingWorkspaceEnvironment(env);
+
+    await sendOrderWorkflowToWorkspace(env, {
+      action: "inventory_adjustment",
+      eventId:
+        cleanText(details.eventId, 100) ||
+        createAccountingSyncEventId("inventory", "adjustment"),
+      inventoryEvent,
+      adjustmentType: cleanText(details.adjustmentType, 100),
+      reason: cleanMultilineText(details.reason, 1000),
+      orderId: cleanText(
+        details.orderId || inventoryEvent?.orderId,
+        50
+      ),
+      actor: cleanText(details.actor, 254),
+      occurredAt: cleanText(details.occurredAt, 100),
+    });
+  } catch (error) {
+    console.error(
+      "Google Sheets inventory sync failed:",
+      error
+    );
+  }
+}
+
+async function syncOrderCancellationToWorkspaceBestEffort(
+  env,
+  order,
+  eventId
+) {
+  try {
+    validateAccountingWorkspaceEnvironment(env);
+
+    await sendOrderWorkflowToWorkspace(env, {
+      action: "order_cancelled",
+      eventId: cleanText(eventId, 100),
+      order,
+      cancellation: order.cancellation || null,
+      inventoryRestoration: order.inventoryRestoration || null,
+    });
+  } catch (error) {
+    console.error(
+      `Google Sheets cancellation sync failed for order ${
+        order.orderId || order.id
+      }:`,
+      error
+    );
+  }
+}
+
+async function handleAdminAccountingSyncRequest(request, env) {
+  try {
+    validateStorage(env);
+    await requireAdmin(request, env);
+
+    if (request.method !== "POST") {
+      throw new ApiRequestError("Method not allowed.", 405);
+    }
+
+    validateAccountingWorkspaceEnvironment(env);
+
+    const [catalogRecords, orders] = await Promise.all([
+      listRecordsByPrefix(
+        env.DOCUMENTS_KV,
+        CATALOG_KEY_PREFIX
+      ),
+      listRecordsByPrefix(
+        env.DOCUMENTS_KV,
+        ORDER_KEY_PREFIX
+      ),
+    ]);
+
+    const inventory = catalogRecords
+      .map(toWorkspaceInventoryRecord)
+      .filter((record) => record.codeName);
+    const eventId = createAccountingSyncEventId(
+      "accounting-full-sync",
+      orders.length
+    );
+
+    const workspaceResult = await sendOrderWorkflowToWorkspace(
+      env,
+      {
+        action: "accounting_full_sync",
+        eventId,
+        inventory,
+        orders,
+      }
+    );
+
+    return jsonResponse({
+      success: true,
+      eventId,
+      inventoryCount: inventory.length,
+      orderCount: orders.length,
+      workspaceResult,
+      message: `Copied ${inventory.length} inventory records and ${orders.length} orders to Google Sheets.`,
+    });
+  } catch (error) {
+    console.error("Accounting full sync error:", error);
+    return handleApiError(error);
+  }
 }
 
 /* -------------------------------------------------- */
@@ -3890,6 +4167,12 @@ async function processCancelOrderWorkflowAction(
 
     await putOrderRecord(env, updatedOrder);
 
+    await syncOrderCancellationToWorkspaceBestEffort(
+      env,
+      updatedOrder,
+      eventId
+    );
+
     return jsonResponse({
       success: true,
       order: updatedOrder,
@@ -4206,7 +4489,7 @@ async function sendOrderWorkflowToWorkspace(
   ) {
     throw new ApiRequestError(
       result.error ||
-      "The Google Workspace email could not be sent.",
+      "The Google Workspace service could not process the request.",
       502
     );
   }
