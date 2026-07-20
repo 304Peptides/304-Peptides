@@ -411,8 +411,8 @@ function Home({
         <section className="home-inner">
           <div className="home-hero">
             <p className="eyebrow">
-              PRECISION •
-              TRANSPARENCY • QUALITY
+              PRECISION â€¢
+              TRANSPARENCY â€¢ QUALITY
             </p>
 
             <h1 className="home-title">
@@ -494,25 +494,34 @@ function Home({
             </div>
           </div>
 
-          <div className="home-trust-grid">
+          <section
+            className="home-trust-grid"
+            aria-labelledby="home-trust-heading"
+          >
+            <h2
+              id="home-trust-heading"
+              className="home-visually-hidden"
+            >
+              Why Choose 304 Peptides
+            </h2>
             <TrustCard
-              icon="✓"
+              icon="âœ“"
               title="Quality Focused"
               description="Products are organized with clear names, strengths, product codes, research categories, and documentation status."
             />
 
             <TrustCard
-              icon="⚡"
+              icon="âš¡"
               title="Professional Service"
               description="A brand experience focused on clear communication, responsive support, and organized order handling."
             />
 
             <TrustCard
-              icon="🔒"
+              icon="ðŸ”’"
               title="Transparent Experience"
               description="Published batch documentation and COAs remain available through the dedicated Quality section."
             />
-          </div>
+          </section>
 
           {settings.catalogEnabled &&
             bestSellers.length >
@@ -661,7 +670,7 @@ function Home({
                           <span
                             aria-hidden="true"
                           >
-                            →
+                            â†’
                           </span>
                         </button>
                       )
@@ -819,7 +828,7 @@ function Home({
               </p>
 
               <h2 className="home-cta-title">
-                Trust Is Earned—Not
+                Trust Is Earnedâ€”Not
                 Claimed.
               </h2>
 
@@ -962,7 +971,7 @@ function BestSellerCard({
       </h3>
 
       <p className="home-product-code">
-        {product.codeName} ·{" "}
+        {product.codeName} Â·{" "}
         {product.strength}
       </p>
 
@@ -1119,6 +1128,19 @@ const homeCss = `
     gap: 16px;
     flex-wrap: wrap;
     margin-top: 28px;
+  }
+
+  .home-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 
   .home-trust-grid {
