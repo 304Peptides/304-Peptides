@@ -22,3 +22,18 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local development files and backup copies
+.backups/
+backups/
+.wrangler/
+performance-reports/
+src/App-*-before-*.jsx
+src/index-*-before-*.css
+src/pages/*-before-*.jsx
+src/pages/*.backup.jsx
+src/pages/*.bak
+.dev.vars
+.env
+.env.*
+!.env.example
