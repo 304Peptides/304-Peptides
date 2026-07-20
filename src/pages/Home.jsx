@@ -9,6 +9,105 @@ import {
   mergeCatalogRecords,
 } from "../data/catalogRuntime";
 
+const catalogProductImageModules =
+  import.meta.glob(
+    "../assets/images/products/**/*.webp",
+    {
+      eager: true,
+      query: "?url",
+      import: "default",
+    }
+  );
+
+const homeProductImageModules =
+  import.meta.glob(
+    "../assets/images/home-products/**/*.webp",
+    {
+      eager: true,
+      query: "?url",
+      import: "default",
+    }
+  );
+
+const homeProductImageSets =
+  Object.fromEntries(
+    Object.entries(
+      catalogProductImageModules
+    )
+      .map(
+        (
+          [
+            sourcePath,
+            sourceUrl,
+          ]
+        ) => {
+          const relativePath =
+            sourcePath
+              .replace(
+                "../assets/images/products/",
+                ""
+              )
+              .replace(
+                /\.webp$/i,
+                ""
+              );
+
+          const smallPath =
+            `../assets/images/home-products/${relativePath}-480.webp`;
+
+          const largePath =
+            `../assets/images/home-products/${relativePath}-640.webp`;
+
+          const small =
+            homeProductImageModules[
+              smallPath
+            ];
+
+          const large =
+            homeProductImageModules[
+              largePath
+            ];
+
+          return [
+            sourceUrl,
+
+            small && large
+              ? {
+                  small,
+                  large,
+                }
+              : null,
+          ];
+        }
+      )
+      .filter(
+        (
+          [
+            ,
+            imageSet,
+          ]
+        ) =>
+          Boolean(
+            imageSet
+          )
+      )
+  );
+
+function getHomeProductImageSet(
+  image
+) {
+  if (!image) {
+    return null;
+  }
+
+  return (
+    homeProductImageSets[
+      image
+    ] || null
+  );
+}
+
+
 const storageKey =
   "304-site-settings";
 
@@ -781,6 +880,15 @@ function BestSellerCard({
     product.variants?.length ||
     0;
 
+  const homeImageSet =
+    getHomeProductImageSet(
+      product.image
+    );
+
+  const homeImageSource =
+    homeImageSet?.small ||
+    product.image;
+
   return (
     <article className="home-best-seller-card">
       <div className="home-best-seller-badges">
@@ -806,8 +914,20 @@ function BestSellerCard({
         {product.image ? (
           <div className="home-product-image">
             <img
-              src={product.image}
+              src={
+                homeImageSource
+              }
+              srcSet={
+                homeImageSet
+                  ? `${homeImageSet.small} 480w, ${homeImageSet.large} 640w`
+                  : undefined
+              }
+              sizes="(max-width: 650px) calc(100vw - 68px), (max-width: 1100px) 44vw, 260px"
               alt={`${product.name} ${product.strength} research product`}
+              width={640}
+              height={800}
+              loading="lazy"
+              decoding="async"
             />
 
             <div className="home-product-glow" />

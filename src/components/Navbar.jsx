@@ -3,7 +3,7 @@ import {
   useState,
 } from "react";
 
-import logo from "../assets/images/logo.jpeg";
+import logo from "../assets/images/logo-nav.webp";
 
 const storageKey =
   "304-site-settings";
@@ -279,6 +279,9 @@ function Navbar({
             <img
               src={logo}
               alt="304 Peptides"
+              width={58}
+              height={58}
+              decoding="async"
               style={{
                 width: "58px",
                 height: "58px",

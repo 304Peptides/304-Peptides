@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/optimize-product-images.mjs && node scripts/generate-seo-files.mjs && vite build && node scripts/prerender-seo.mjs",
+    "build": "node scripts/optimize-product-images.mjs && node scripts/optimize-home-product-images.mjs && node scripts/generate-seo-files.mjs && vite build && node scripts/prerender-seo.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "seo:generate": "node scripts/generate-seo-files.mjs",
     "seo:prerender": "node scripts/prerender-seo.mjs",
-    "images:optimize": "node scripts/optimize-product-images.mjs"
+    "images:optimize": "node scripts/optimize-product-images.mjs",
+    "images:home": "node scripts/optimize-home-product-images.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
