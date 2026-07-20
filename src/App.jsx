@@ -1,4 +1,6 @@
 import {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useMemo,
@@ -11,36 +13,44 @@ import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import AgeGate from "./components/AgeGate";
 import SiteAlert from "./components/SiteAlert";
+import AdminLayout from "./components/AdminLayout";
 
-import Home from "./pages/Home";
-import Products from "./pages/Products";
-import Quality from "./pages/Quality";
-import ResearchPartners from "./pages/ResearchPartners";
-import FAQ from "./pages/FAQ";
-import Contact from "./pages/Contact";
-import Login from "./pages/Login";
-import CreateAccount from "./pages/CreateAccount";
-import ProductDetails from "./pages/ProductDetails";
-import CustomerDashboard from "./pages/CustomerDashboard";
-import ChangePassword from "./pages/ChangePassword";
-import Cart from "./pages/Cart";
-import Checkout from "./pages/Checkout";
-import OrderConfirmation from "./pages/OrderConfirmation";
-import PartnerApplication from "./pages/PartnerApplication";
-import PartnerHQ from "./pages/PartnerHQ";
-import MarketingCenter from "./pages/MarketingCenter";
-import MissionControl from "./pages/MissionControl";
-import ProductManager from "./pages/ProductManager";
-import CouponManager from "./pages/CouponManager";
-import VialLabelGenerator from "./pages/VialLabelGenerator";
-import ShippingCenter from "./pages/ShippingCenter";
-import COAManager from "./pages/COAManager";
-import CustomerManager from "./pages/CustomerManager";
-import SiteSettings from "./pages/SiteSettings";
-import LaunchChecklist from "./pages/LaunchChecklist";
-import ResearchAgreement from "./pages/ResearchAgreement";
-import QRManager from "./pages/QRManager";
-import VerificationRecord from "./pages/VerificationRecord";
+const Home = lazy(() => import("./pages/Home"));
+const Products = lazy(() => import("./pages/Products"));
+const Quality = lazy(() => import("./pages/Quality"));
+const ResearchPartners = lazy(() => import("./pages/ResearchPartners"));
+const FAQ = lazy(() => import("./pages/FAQ"));
+const Contact = lazy(() => import("./pages/Contact"));
+const Login = lazy(() => import("./pages/Login"));
+const CreateAccount = lazy(() => import("./pages/CreateAccount"));
+const ProductDetails = lazy(() => import("./pages/ProductDetails"));
+const CustomerDashboard = lazy(() => import("./pages/CustomerDashboard"));
+const ChangePassword = lazy(() => import("./pages/ChangePassword"));
+const Cart = lazy(() => import("./pages/Cart"));
+const Checkout = lazy(() => import("./pages/Checkout"));
+const OrderConfirmation = lazy(() => import("./pages/OrderConfirmation"));
+const PartnerApplication = lazy(() => import("./pages/PartnerApplication"));
+const PartnerHQ = lazy(() => import("./pages/PartnerHQ"));
+const MarketingCenter = lazy(() => import("./pages/MarketingCenter"));
+const MissionControl = lazy(() => import("./pages/MissionControl"));
+const ProductManager = lazy(() => import("./pages/ProductManager"));
+const CouponManager = lazy(() => import("./pages/CouponManager"));
+const VialLabelGenerator = lazy(() => import("./pages/VialLabelGenerator"));
+const ShippingCenter = lazy(() => import("./pages/ShippingCenter"));
+const COAManager = lazy(() => import("./pages/COAManager"));
+const CustomerManager = lazy(() => import("./pages/CustomerManager"));
+const SiteSettings = lazy(() => import("./pages/SiteSettings"));
+const LaunchChecklist = lazy(() => import("./pages/LaunchChecklist"));
+const ResearchAgreement = lazy(() => import("./pages/ResearchAgreement"));
+const QRManager = lazy(() => import("./pages/QRManager"));
+const VerificationRecord = lazy(() => import("./pages/VerificationRecord"));
+import { fetchCatalogOverrides } from "./data/catalogRuntime";
+import { applyPageSeo } from "./utils/seo";
+import {
+  getProductFromPathname,
+  getProductPath,
+  readProductRoute,
+} from "./utils/catalogRoutes";
 
 const storageKeys = {
   ageGateAccepted: "ageGateAccepted",
@@ -65,7 +75,7 @@ const pagePaths = {
   home: "/",
   products: "/products",
   quality: "/quality",
-  partners: "/partners",
+  partners: "/affiliate",
   faq: "/faq",
   contact: "/contact",
   researchAgreement: "/research-agreement",
@@ -77,6 +87,10 @@ const pagePaths = {
   partnerHQ: "/admin/partner-hq",
   marketingCenter: "/admin/marketing",
   missionControl: "/admin",
+  orderManager: "/admin/orders",
+  affiliateManager: "/admin/affiliates",
+  inventoryManager: "/admin/inventory",
+  accountingManager: "/admin/accounting",
   productManager: "/admin/products",
   couponManager: "/admin/coupons",
   vialLabelGenerator: "/admin/vial-labels",
@@ -91,6 +105,25 @@ const pagePaths = {
   orderConfirmation: "/order-confirmation",
   productDetails: "/product-details",
 };
+
+const ADMIN_PAGES = new Set([
+  "missionControl",
+  "orderManager",
+  "customerManager",
+  "affiliateManager",
+  "productManager",
+  "inventoryManager",
+  "couponManager",
+  "vialLabelGenerator",
+  "shippingCenter",
+  "coaManager",
+  "qrManager",
+  "accountingManager",
+  "siteSettings",
+  "launchChecklist",
+  "partnerHQ",
+  "marketingCenter",
+]);
 
 function readStorage(key, fallbackValue) {
   try {
@@ -243,12 +276,51 @@ function getRouteFromLocation() {
   const pathname =
     window.location.pathname.replace(/\/+$/, "") || "/";
 
+  if (pathname === "/partners") {
+    window.history.replaceState(
+      {
+        page: "partners",
+      },
+      "",
+      pagePaths.partners
+    );
+
+    return {
+      page: "partners",
+      verificationCode: "",
+      product: null,
+    };
+  }
+
+  if (pathname === "/product-details") {
+    window.history.replaceState(
+      {
+        page: "products",
+      },
+      "",
+      pagePaths.products
+    );
+
+    return {
+      page: "products",
+      verificationCode: "",
+      product: null,
+    };
+  }
+
   if (pathname.startsWith("/verify/")) {
-    const encodedCode = pathname.slice("/verify/".length);
+    const encodedCode =
+      pathname.slice(
+        "/verify/".length
+      );
+
     let code = encodedCode;
 
     try {
-      code = decodeURIComponent(encodedCode);
+      code =
+        decodeURIComponent(
+          encodedCode
+        );
     } catch {
       code = encodedCode;
     }
@@ -256,34 +328,80 @@ function getRouteFromLocation() {
     return {
       page: "verification",
       verificationCode: code,
+      product: null,
     };
   }
 
-  const matchingEntry = Object.entries(pagePaths).find(
-    ([, path]) => path === pathname
-  );
+  if (
+    pathname.startsWith(
+      "/products/"
+    )
+  ) {
+    const product =
+      getProductFromPathname(
+        pathname
+      );
+
+    return {
+      page: product
+        ? "productDetails"
+        : "notFound",
+
+      verificationCode: "",
+      product,
+    };
+  }
+
+  const matchingEntry =
+    Object.entries(
+      pagePaths
+    ).find(
+      ([, path]) =>
+        path === pathname
+    );
 
   if (matchingEntry) {
     return {
       page: matchingEntry[0],
       verificationCode: "",
+      product: null,
     };
   }
 
   return {
-    page: "home",
+    page: "notFound",
     verificationCode: "",
+    product: null,
   };
 }
 
-function getPagePath(page, verificationCode = "") {
+function getPagePath(
+  page,
+  verificationCode = "",
+  product = null
+) {
   if (page === "verification") {
     return verificationCode
-      ? `/verify/${encodeURIComponent(verificationCode)}`
+      ? `/verify/${encodeURIComponent(
+          verificationCode
+        )}`
       : "/";
   }
 
-  return pagePaths[page] || "/";
+  if (
+    page === "productDetails" &&
+    product
+  ) {
+    return getProductPath(
+      product
+    );
+  }
+
+  return (
+    pagePaths[page] ||
+    window.location.pathname ||
+    "/"
+  );
 }
 
 function calculateTotalQuantity(items) {
@@ -333,7 +451,11 @@ function App() {
     selectedProduct,
     setSelectedProduct,
   ] = useState(() =>
-    readStorage(storageKeys.selectedProduct, null)
+    initialRoute.product ||
+    readStorage(
+      storageKeys.selectedProduct,
+      null
+    )
   );
 
   const [
@@ -396,11 +518,9 @@ function App() {
     setPartnerApplication,
   ] = useState(null);
 
-  const isAuthChecking =
-    authenticationStatus === "checking";
+  const isAuthChecking = authenticationStatus === "checking" && !import.meta.env.DEV;
 
-  const isLoggedIn =
-    authenticationStatus === "authenticated";
+  const isLoggedIn = authenticationStatus === "authenticated" || import.meta.env.DEV;
 
   const cartCount = useMemo(
     () => calculateTotalQuantity(cartItems),
@@ -425,6 +545,11 @@ function App() {
         ? options
         : options.code || "";
 
+    const suppliedProduct =
+      typeof options === "object"
+        ? options.product || null
+        : null;
+
     const replaceHistory =
       typeof options === "object" &&
       Boolean(options.replace);
@@ -435,11 +560,26 @@ function App() {
       setVerificationCode("");
     }
 
+    if (
+      page === "productDetails" &&
+      suppliedProduct
+    ) {
+      setSelectedProduct(
+        suppliedProduct
+      );
+
+      writeStorage(
+        storageKeys.selectedProduct,
+        suppliedProduct
+      );
+    }
+
     setCurrentPage(page);
 
     const path = getPagePath(
       page,
-      suppliedCode
+      suppliedCode,
+      suppliedProduct
     );
 
     const currentPath = window.location.pathname;
@@ -585,7 +725,7 @@ function App() {
 
       refreshPartnerApplication().catch((error) => {
         console.error(
-          "Partner application refresh failed after login:",
+          "Affiliate application refresh failed after login:",
           error
         );
 
@@ -759,7 +899,7 @@ function App() {
             await refreshPartnerApplication();
           } catch (error) {
             console.error(
-              "Partner application refresh failed while restoring the session:",
+              "Affiliate application refresh failed while restoring the session:",
               error
             );
 
@@ -784,7 +924,6 @@ function App() {
 
         removeStorage(storageKeys.orders);
         removeStorage(storageKeys.latestOrder);
-
       } catch (error) {
         if (!isMounted) {
           return;
@@ -808,7 +947,6 @@ function App() {
 
         removeStorage(storageKeys.orders);
         removeStorage(storageKeys.latestOrder);
-
       }
     }
 
@@ -832,6 +970,24 @@ function App() {
         route.verificationCode
       );
 
+      if (route.product) {
+        setSelectedProduct(
+          route.product
+        );
+
+        writeStorage(
+          storageKeys.selectedProduct,
+          route.product
+        );
+      } else if (
+        route.page ===
+        "notFound"
+      ) {
+        setSelectedProduct(
+          null
+        );
+      }
+
       window.scrollTo({
         top: 0,
         behavior: "smooth",
@@ -850,6 +1006,91 @@ function App() {
       );
     };
   }, []);
+
+  useEffect(() => {
+    const productRoute =
+      readProductRoute(
+        window.location.pathname
+      );
+
+    if (!productRoute) {
+      return undefined;
+    }
+
+    const controller =
+      new AbortController();
+
+    fetchCatalogOverrides({
+      signal:
+        controller.signal,
+    })
+      .then((records) => {
+        const product =
+          getProductFromPathname(
+            window.location.pathname,
+            records
+          );
+
+        if (!product) {
+          setCurrentPage(
+            "notFound"
+          );
+
+          setSelectedProduct(
+            null
+          );
+
+          return;
+        }
+
+        setSelectedProduct(
+          product
+        );
+
+        setCurrentPage(
+          "productDetails"
+        );
+
+        writeStorage(
+          storageKeys.selectedProduct,
+          product
+        );
+      })
+      .catch((error) => {
+        if (
+          error?.name !==
+          "AbortError"
+        ) {
+          console.info(
+            "Using the static catalog for this product route."
+          );
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    applyPageSeo({
+      page:
+        currentPage,
+
+      product:
+        currentPage ===
+        "productDetails"
+          ? selectedProduct
+          : null,
+
+      pathname:
+        window.location.pathname,
+    });
+  }, [
+    currentPage,
+    selectedProduct,
+    verificationCode,
+  ]);
 
   useEffect(() => {
     window.scrollTo({
@@ -1003,7 +1244,12 @@ function App() {
       product
     );
 
-    goToPage("productDetails");
+    goToPage(
+      "productDetails",
+      {
+        product,
+      }
+    );
   }
 
   function handleAddToCart(product) {
@@ -1527,6 +1773,42 @@ function App() {
           />
         );
 
+      case "orderManager":
+        return (
+          <AdminPlaceholder
+            eyebrow="ORDER OPERATIONS"
+            title="Orders"
+            description="The dedicated order-management page is being separated from Customer Manager next. Your existing invoice, payment, partial-shipment, tracking, and email automation remains unchanged."
+          />
+        );
+
+      case "affiliateManager":
+        return (
+          <AdminPlaceholder
+            eyebrow="AFFILIATE PROGRAM"
+            title="Affiliate Accounts"
+            description="Affiliate applications, active accounts, referral codes, commissions, payouts, and rewards will be managed here."
+          />
+        );
+
+      case "inventoryManager":
+        return (
+          <AdminPlaceholder
+            eyebrow="STORE OPERATIONS"
+            title="Inventory"
+            description="Inventory quantities, preorder availability, incoming stock, and low-stock alerts will be managed here."
+          />
+        );
+
+      case "accountingManager":
+        return (
+          <AdminPlaceholder
+            eyebrow="BUSINESS OPERATIONS"
+            title="Accounting"
+            description="Sales totals, payments, expenses, affiliate commissions, and reporting will be organized here."
+          />
+        );
+
       case "productManager":
         return (
           <ProductManager
@@ -1664,55 +1946,365 @@ function App() {
           />
         );
 
+      case "notFound":
+        return (
+          <NotFoundPage
+            onNavigate={
+              goToPage
+            }
+          />
+        );
+
       default:
         return (
-          <Home
-            onNavigate={goToPage}
-            onProductSelect={
-              handleProductSelect
+          <NotFoundPage
+            onNavigate={
+              goToPage
             }
-            isLoggedIn={isLoggedIn}
-            onAddToCart={handleAddToCart}
           />
         );
     }
   }
 
+  const isAdminPage = ADMIN_PAGES.has(currentPage);
+  const pageContent = (
+    <Suspense
+      fallback={
+        <PageLoading />
+      }
+    >
+      {renderPage()}
+    </Suspense>
+  );
+
   return (
     <>
-      {!ageGateAccepted && (
+      {!isAdminPage && !ageGateAccepted && (
         <AgeGate
           onAccept={handleAcceptAgeGate}
         />
       )}
 
-      <Navbar
-        currentPage={currentPage}
-        onNavigate={goToPage}
-        isLoggedIn={isLoggedIn}
-        onLogout={handleLogout}
-        cartCount={cartCount}
-      />
+      {!isAdminPage && (
+        <>
+          <SiteAlert />
 
-      <SiteAlert />
+          <Navbar
+            currentPage={currentPage}
+            onNavigate={goToPage}
+            isLoggedIn={isLoggedIn}
+            onLogout={handleLogout}
+            cartCount={cartCount}
+          />
 
-      {cartNotice && (
-        <CartNotice
-          notice={cartNotice}
-          onClose={() => setCartNotice(null)}
-          onViewCart={() => {
-            setCartNotice(null);
-            goToPage("cart");
-          }}
-        />
+          {cartNotice && (
+            <CartNotice
+              notice={cartNotice}
+              onClose={() => setCartNotice(null)}
+              onViewCart={() => {
+                setCartNotice(null);
+                goToPage("cart");
+              }}
+            />
+          )}
+        </>
       )}
 
-      {renderPage()}
+      {isAdminPage ? (
+        <AdminLayout
+          activePage={currentPage}
+          onNavigate={goToPage}
+          showHeading={false}
+        >
+          {pageContent}
+        </AdminLayout>
+      ) : (
+        pageContent
+      )}
 
-      <Footer
-        onNavigate={goToPage}
-      />
+      {!isAdminPage && (
+        <Footer
+          onNavigate={goToPage}
+        />
+      )}
     </>
+  );
+}
+
+function PageLoading() {
+  return (
+    <main
+      aria-live="polite"
+      aria-busy="true"
+      style={{
+        minHeight:
+          "58vh",
+
+        display:
+          "grid",
+
+        placeItems:
+          "center",
+
+        padding:
+          "100px 24px",
+      }}
+    >
+      <div
+        style={{
+          display:
+            "grid",
+
+          justifyItems:
+            "center",
+
+          gap:
+            "16px",
+
+          padding:
+            "30px 36px",
+
+          border:
+            "1px solid rgba(255,255,255,0.09)",
+
+          borderRadius:
+            "24px",
+
+          background:
+            "radial-gradient(circle at top, rgba(61,165,255,0.16), transparent 48%), rgba(255,255,255,0.035)",
+
+          boxShadow:
+            "0 24px 70px rgba(0,0,0,0.4)",
+        }}
+      >
+        <div
+          style={{
+            width:
+              "42px",
+
+            height:
+              "42px",
+
+            border:
+              "4px solid rgba(255,255,255,0.14)",
+
+            borderTopColor:
+              "#3da5ff",
+
+            borderRadius:
+              "50%",
+
+            animation:
+              "page-loading-spin 0.8s linear infinite",
+          }}
+        />
+
+        <strong
+          style={{
+            color:
+              "#ffffff",
+
+            fontSize:
+              "15px",
+
+            letterSpacing:
+              "0.08em",
+
+            textTransform:
+              "uppercase",
+          }}
+        >
+          Loading 304 Peptides
+        </strong>
+
+        <style>
+          {`
+            @keyframes page-loading-spin {
+              to {
+                transform: rotate(360deg);
+              }
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+              div[aria-busy="true"] div {
+                animation-duration: 1.8s !important;
+              }
+            }
+          `}
+        </style>
+      </div>
+    </main>
+  );
+}
+
+function NotFoundPage({
+  onNavigate = () => {},
+}) {
+  return (
+    <main
+      style={{
+        minHeight: "65vh",
+        display: "grid",
+        placeItems: "center",
+        padding: "110px 24px",
+      }}
+    >
+      <section
+        style={{
+          width: "100%",
+          maxWidth: "720px",
+          padding: "44px",
+
+          border:
+            "1px solid rgba(255,255,255,0.09)",
+
+          borderRadius:
+            "28px",
+
+          background:
+            "radial-gradient(circle at top, rgba(61,165,255,0.16), transparent 42%), rgba(255,255,255,0.035)",
+
+          boxShadow:
+            "0 30px 80px rgba(0,0,0,0.45)",
+
+          textAlign:
+            "center",
+        }}
+      >
+        <p className="eyebrow">
+          ERROR 404
+        </p>
+
+        <h1
+          style={{
+            margin:
+              "8px 0 16px",
+
+            color:
+              "#ffffff",
+
+            fontSize:
+              "clamp(38px, 7vw, 58px)",
+
+            lineHeight:
+              1.05,
+          }}
+        >
+          Page Not Found
+        </h1>
+
+        <p
+          style={{
+            margin:
+              "0 auto",
+
+            maxWidth:
+              "560px",
+
+            color:
+              "#c8c8c8",
+
+            lineHeight:
+              1.75,
+          }}
+        >
+          The page or product you requested
+          could not be found. It may have moved,
+          changed, or no longer be available.
+        </p>
+
+        <div
+          style={{
+            display:
+              "flex",
+
+            justifyContent:
+              "center",
+
+            flexWrap:
+              "wrap",
+
+            gap:
+              "12px",
+
+            marginTop:
+              "26px",
+          }}
+        >
+          <button
+            type="button"
+            className="primary-btn"
+
+            onClick={() =>
+              onNavigate(
+                "products"
+              )
+            }
+          >
+            Browse Products
+          </button>
+
+          <button
+            type="button"
+            className="secondary-btn"
+
+            onClick={() =>
+              onNavigate(
+                "home"
+              )
+            }
+          >
+            Return Home
+          </button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function AdminPlaceholder({
+  eyebrow,
+  title,
+  description,
+}) {
+  return (
+    <section
+      style={{
+        width: "min(1100px, 100%)",
+        margin: "0 auto",
+        padding: "38px",
+        border: "1px solid rgba(255,255,255,0.09)",
+        borderRadius: "26px",
+        background:
+          "radial-gradient(circle at top right, rgba(61,165,255,0.14), transparent 35%), rgba(255,255,255,0.035)",
+        boxShadow: "0 28px 80px rgba(0,0,0,0.34)",
+      }}
+    >
+      <p className="eyebrow">{eyebrow}</p>
+
+      <h1
+        style={{
+          margin: "8px 0 14px",
+          color: "#ffffff",
+          fontSize: "clamp(34px, 6vw, 56px)",
+          lineHeight: 1.05,
+        }}
+      >
+        {title}
+      </h1>
+
+      <p
+        style={{
+          maxWidth: "760px",
+          margin: 0,
+          color: "#b9c4ce",
+          lineHeight: 1.75,
+          fontSize: "1rem",
+        }}
+      >
+        {description}
+      </p>
+    </section>
   );
 }
 
@@ -1756,6 +2348,7 @@ function CartNotice({
           <strong style={{ fontSize: "18px", display: "block" }}>
             {notice.title}
           </strong>
+
           <span
             style={{
               display: "block",
@@ -1767,6 +2360,7 @@ function CartNotice({
             {notice.message}
           </span>
         </div>
+
         <button
           type="button"
           onClick={onClose}
@@ -1795,10 +2389,19 @@ function CartNotice({
             marginTop: "15px",
           }}
         >
-          <button type="button" className="secondary-btn" onClick={onClose}>
+          <button
+            type="button"
+            className="secondary-btn"
+            onClick={onClose}
+          >
             Continue Shopping
           </button>
-          <button type="button" className="primary-btn" onClick={onViewCart}>
+
+          <button
+            type="button"
+            className="primary-btn"
+            onClick={onViewCart}
+          >
             View Cart
           </button>
         </div>
@@ -1824,18 +2427,13 @@ function AccountSessionLoading({
           width: "100%",
           maxWidth: "680px",
           padding: "42px",
-
           border:
             "1px solid rgba(255,255,255,0.09)",
-
           borderRadius: "28px",
-
           background:
             "radial-gradient(circle at top, rgba(61,165,255,0.18), transparent 42%), rgba(255,255,255,0.035)",
-
           boxShadow:
             "0 30px 80px rgba(0,0,0,0.45)",
-
           textAlign: "center",
         }}
       >
@@ -1847,7 +2445,6 @@ function AccountSessionLoading({
           style={{
             marginBottom: "16px",
             color: "#ffffff",
-
             fontSize:
               "clamp(34px, 6vw, 48px)",
           }}

@@ -15,6 +15,8 @@ import {
   getFreeShippingRemaining,
 } from "../utils/shipping";
 
+// 304 CHECKOUT EXPERIENCE UPGRADE
+
 const storageKey = "304-site-settings";
 const customerAccountSessionKey = "304-customer-account";
 const couponStorageKey = "304-coupon-code";
@@ -335,7 +337,7 @@ function getReferralCodeError(code) {
   }
 
   if (code.length < 4 || code.length > 20) {
-    return "Referral codes must contain 4â€“20 characters.";
+    return "Referral codes must contain 4–20 characters.";
   }
 
   if (!/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(code)) {
@@ -497,6 +499,8 @@ function Checkout({
     []
   );
 
+  const isDevelopmentPreview = import.meta.env.DEV;
+
   const [settings, setSettings] = useState(loadSettings);
   const [account, setAccount] = useState(
     initialCachedAccount
@@ -618,6 +622,34 @@ function Checkout({
     let isMounted = true;
 
     async function verifySecureAccount() {
+      // LOCAL CHECKOUT PREVIEW START
+      if (import.meta.env.DEV) {
+        const developmentAccount = {
+          id: "local-development-account",
+          firstName: "Daniel",
+          lastName: "Developer",
+          email: "developer@304peptides.local",
+        };
+
+        setAccount(developmentAccount);
+
+        setFormData((currentData) => ({
+          ...currentData,
+          firstName:
+            currentData.firstName.trim() ||
+            developmentAccount.firstName,
+          lastName:
+            currentData.lastName.trim() ||
+            developmentAccount.lastName,
+          email: developmentAccount.email,
+        }));
+
+        setAccountStatus("verified");
+        setAccountError("");
+        return;
+      }
+      // LOCAL CHECKOUT PREVIEW END
+
       setAccountStatus("checking");
       setAccountError("");
 
@@ -757,6 +789,27 @@ function Checkout({
     [couponResult, discountedSubtotal]
   );
 
+  const freeShippingProgress = useMemo(() => {
+    if (freeShippingRemaining <= 0) {
+      return 100;
+    }
+
+    const shippingGoal =
+      discountedSubtotal + freeShippingRemaining;
+
+    if (shippingGoal <= 0) {
+      return 0;
+    }
+
+    return Math.min(
+      100,
+      Math.max(
+        0,
+        (discountedSubtotal / shippingGoal) * 100
+      )
+    );
+  }, [discountedSubtotal, freeShippingRemaining]);
+
   const invalidPriceItems = useMemo(
     () =>
       cartItems.filter(
@@ -812,7 +865,7 @@ function Checkout({
     Boolean(paymentMethod) &&
     researchAgreement &&
     ageAgreement &&
-    Boolean(turnstileToken) &&
+    (isDevelopmentPreview || Boolean(turnstileToken)) &&
     accountEmailMatches &&
     referralReady &&
     couponReady &&
@@ -1142,6 +1195,42 @@ function Checkout({
       })),
     };
 
+    // 304 LOCAL ORDER SIMULATION START
+    if (import.meta.env.DEV) {
+      const createdAt = new Date().toISOString();
+      const localOrderId = `DEV-${Date.now()}`;
+
+      try {
+        window.localStorage.removeItem(couponStorageKey);
+      } catch {
+        // Storage may be unavailable.
+      }
+
+      submissionLockRef.current = false;
+      setIsSubmitting(false);
+
+      onPlaceOrder({
+        ...orderPayload,
+        id: localOrderId,
+        orderId: localOrderId,
+        createdAt,
+        submittedAt: createdAt,
+        status: "Order Request Received",
+        totalQuantity,
+        merchandiseSubtotal: subtotal,
+        discount,
+        couponCode: validatedCouponCode || "",
+        subtotal: discountedSubtotal,
+        shippingFee,
+        total: orderTotal,
+        referralCode: validatedReferralCode || "",
+        referralTracking: null,
+      });
+
+      return;
+    }
+    // 304 LOCAL ORDER SIMULATION END
+
     const controller = new AbortController();
     const timeoutId = window.setTimeout(
       () => controller.abort(),
@@ -1362,7 +1451,7 @@ function Checkout({
                 >
                   <strong>{item.name}</strong>
                   <span>
-                    {item.codeName} Â· {item.strength}
+                    {item.codeName} · {item.strength}
                   </span>
                 </div>
               ))}
@@ -1388,19 +1477,20 @@ function Checkout({
       <main className="checkout-page">
         <section className="checkout-inner">
           <header className="checkout-hero">
-            <div className="checkout-hero-status">
-              <p className="eyebrow">CHECKOUT</p>
-              <span>{storeStatusLabel}</span>
-            </div>
-
-            <h1>Order Request Checkout</h1>
+            <p className="eyebrow">SECURE ORDER REQUEST</p>
+            <h1>Checkout</h1>
 
             <p>
-              Enter your shipping details, select your
-              preferred invoice payment method, and
-              complete the required confirmations
-              before submitting your order request.
+              Confirm shipping details, choose an invoice
+              payment preference, and complete the required
+              research-use agreements.
             </p>
+
+            <div className="checkout-hero-steps" aria-label="Checkout steps">
+              <span><b>1</b> Shipping</span>
+              <span><b>2</b> Payment</span>
+              <span><b>3</b> Confirm</span>
+            </div>
           </header>
 
           <form
@@ -1409,28 +1499,42 @@ function Checkout({
             noValidate
           >
             <section className="checkout-main-panel">
-              <p className="eyebrow">
-                CUSTOMER INFORMATION
-              </p>
-              <h2>Shipping Details</h2>
+              <div className="checkout-section-heading">
+                <div>
+                  <p className="eyebrow">CUSTOMER INFORMATION</p>
+                  <h2>Shipping Details</h2>
+                </div>
 
-              <div className="checkout-country-note">
-                Shipping address must be within the
-                United States. Shipping availability
-                and the final shipping charge are
-                confirmed during order review.
+                <span className="checkout-verified-badge">
+                  Account Verified
+                </span>
+              </div>
+
+              <div className="checkout-shipping-card">
+                <div className="checkout-shipping-icon" aria-hidden="true">
+                  ↗
+                </div>
+
+                <div className="checkout-shipping-copy">
+                  <strong>United States Shipping</strong>
+                  <span>
+                    Final shipping availability is confirmed during order review.
+                  </span>
+                </div>
+
+                <div className="checkout-shipping-points">
+                  <span>$15 below $100</span>
+                  <span>Free at $100+</span>
+                </div>
               </div>
 
               <div className="checkout-account-note">
                 <div>
-                  <strong>Secure Account Order</strong>
-                  <span>
-                    This order will be linked to{" "}
-                    {accountEmail}.
-                  </span>
+                  <span className="checkout-account-dot" aria-hidden="true" />
+                  <strong>Secure account order</strong>
                 </div>
 
-                <span>Account Verified</span>
+                <span>{accountEmail}</span>
               </div>
 
               <div className="checkout-form-grid">
@@ -1503,70 +1607,70 @@ function Checkout({
                   fullWidth
                 />
 
-                <InputField
-                  name="city"
-                  label="City"
-                  placeholder="City"
-                  value={formData.city}
-                  onChange={handleChange}
-                  onBlur={handleBlur}
-                  autoComplete="address-level2"
-                  disabled={isSubmitting}
-                  error={
-                    touched.city
-                      ? formErrors.city
-                      : ""
-                  }
-                />
+                <div className="checkout-location-grid checkout-field-full">
+                  <InputField
+                    name="city"
+                    label="City"
+                    placeholder="City"
+                    value={formData.city}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    autoComplete="address-level2"
+                    disabled={isSubmitting}
+                    error={
+                      touched.city
+                        ? formErrors.city
+                        : ""
+                    }
+                  />
 
-                <SelectField
-                  name="state"
-                  label="State"
-                  value={formData.state}
-                  onChange={handleChange}
-                  onBlur={handleBlur}
-                  autoComplete="address-level1"
-                  disabled={isSubmitting}
-                  error={
-                    touched.state
-                      ? formErrors.state
-                      : ""
-                  }
-                />
+                  <SelectField
+                    name="state"
+                    label="State"
+                    value={formData.state}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    autoComplete="address-level1"
+                    disabled={isSubmitting}
+                    error={
+                      touched.state
+                        ? formErrors.state
+                        : ""
+                    }
+                  />
 
-                <InputField
-                  name="zip"
-                  label="ZIP Code"
-                  placeholder="##### or #####-####"
-                  value={formData.zip}
-                  onChange={handleChange}
-                  onBlur={handleBlur}
-                  autoComplete="postal-code"
-                  inputMode="numeric"
-                  disabled={isSubmitting}
-                  error={
-                    touched.zip
-                      ? formErrors.zip
-                      : ""
-                  }
-                  fullWidth
-                />
+                  <InputField
+                    name="zip"
+                    label="ZIP Code"
+                    placeholder="##### or #####-####"
+                    value={formData.zip}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    autoComplete="postal-code"
+                    inputMode="numeric"
+                    disabled={isSubmitting}
+                    error={
+                      touched.zip
+                        ? formErrors.zip
+                        : ""
+                    }
+                  />
+                </div>
               </div>
 
               <section className="checkout-section-card">
-                <p className="eyebrow">
-                  PAYMENT PREFERENCE
-                </p>
-                <h2>
-                  Choose An Invoice Payment Method
-                </h2>
+                <div className="checkout-section-heading checkout-section-heading-compact">
+                  <div>
+                    <p className="eyebrow">PAYMENT PREFERENCE</p>
+                    <h2>Choose An Invoice Method</h2>
+                  </div>
+
+                  <span className="checkout-optional-badge">No payment now</span>
+                </div>
 
                 <p className="checkout-section-copy">
-                  This selection records your preference
-                  only. No payment is collected on this
-                  page. Payment instructions are sent
-                  only after the order request has been
-                  reviewed.
+                  This records your preference only. Payment instructions are
+                  sent after the order request is reviewed.
                 </p>
 
                 <div className="checkout-payment-grid">
@@ -1598,7 +1702,7 @@ function Checkout({
                         />
 
                         <span className="checkout-payment-check">
-                          âœ“
+                          ✓
                         </span>
 
                         <img
@@ -1613,186 +1717,179 @@ function Checkout({
                 </div>
 
                 <div className="checkout-invoice-notice">
-                  Selecting a payment preference does
-                  not guarantee availability. Final
-                  payment instructions and the complete
-                  invoice amount will be confirmed by
-                  email.
+                  Final availability, instructions, and the complete invoice
+                  amount are confirmed by email.
                 </div>
               </section>
 
-              <section className="checkout-section-card">
-                <p className="eyebrow">
-                  PARTNER REFERRAL
-                </p>
-                <h2>Referral Code</h2>
+              <div className="checkout-code-grid">
+                <section className="checkout-section-card checkout-code-card">
+                  <p className="eyebrow">PARTNER REFERRAL</p>
+                  <h2>Referral Code</h2>
 
-                <p className="checkout-section-copy">
-                  Enter an approved partner code to
-                  credit the partner for this order. A
-                  referral code does not discount or
-                  otherwise change your order subtotal.
-                </p>
+                  <p className="checkout-section-copy">
+                    Credit an approved partner without changing your subtotal.
+                  </p>
 
-                <div className="checkout-referral-row">
-                  <input
-                    type="text"
-                    value={referralCode}
-                    onChange={handleReferralCodeChange}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        validateReferralCode();
-                      }
-                    }}
-                    placeholder="Enter referral code"
-                    autoComplete="off"
-                    maxLength="20"
-                    disabled={
-                      isSubmitting ||
-                      isValidatingReferral
-                    }
-                    aria-label="Referral code"
-                  />
-
-                  <button
-                    type="button"
-                    className="secondary-btn checkout-referral-apply"
-                    onClick={validateReferralCode}
-                    disabled={
-                      !referralCode ||
-                      isSubmitting ||
-                      isValidatingReferral
-                    }
-                  >
-                    {isValidatingReferral
-                      ? "Checking..."
-                      : referralStatus === "valid"
-                      ? "Applied"
-                      : "Apply Code"}
-                  </button>
-
-                  {referralCode && (
-                    <button
-                      type="button"
-                      className="checkout-referral-remove"
-                      onClick={removeReferralCode}
+                  <div className="checkout-referral-row">
+                    <input
+                      type="text"
+                      value={referralCode}
+                      onChange={handleReferralCodeChange}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          validateReferralCode();
+                        }
+                      }}
+                      placeholder="Enter referral code"
+                      autoComplete="off"
+                      maxLength="20"
                       disabled={
                         isSubmitting ||
                         isValidatingReferral
                       }
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
+                      aria-label="Referral code"
+                    />
 
-                {referralMessage && (
-                  <div
-                    className={`checkout-referral-message checkout-referral-${referralStatus}`}
-                    aria-live="polite"
-                  >
-                    {referralMessage}
-                  </div>
-                )}
-
-                <div className="checkout-referral-note">
-                  <strong>Partner own-code orders</strong>
-                  <span>
-                    Partners may use their own code for tier progression. Own-code orders earn no commission, discount, payout credit, leaderboard credit, or reward credit.
-                  </span>
-                </div>
-              </section>
-
-              <section className="checkout-section-card">
-                <p className="eyebrow">
-                  PROMOTION
-                </p>
-                <h2>Coupon Code — Optional</h2>
-
-                <p className="checkout-section-copy">
-                  Enter a current coupon code. Scheduled codes only work during
-                  their active dates and all discounts are verified by the server.
-                </p>
-
-                <div className="checkout-referral-row">
-                  <input
-                    type="text"
-                    value={couponCode}
-                    onChange={handleCouponCodeChange}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        validateCouponCode();
-                      }
-                    }}
-                    placeholder="Enter coupon code"
-                    autoComplete="off"
-                    maxLength="50"
-                    disabled={isSubmitting || isValidatingCoupon}
-                    aria-label="Coupon code"
-                  />
-
-                  <button
-                    type="button"
-                    className="secondary-btn checkout-referral-apply"
-                    onClick={validateCouponCode}
-                    disabled={!couponCode || isSubmitting || isValidatingCoupon}
-                  >
-                    {isValidatingCoupon
-                      ? "Checking..."
-                      : couponStatus === "valid"
-                      ? "Applied"
-                      : "Apply Coupon"}
-                  </button>
-
-                  {couponCode && (
                     <button
                       type="button"
-                      className="checkout-referral-remove"
-                      onClick={removeCouponCode}
-                      disabled={isSubmitting || isValidatingCoupon}
+                      className="secondary-btn checkout-referral-apply"
+                      onClick={validateReferralCode}
+                      disabled={
+                        !referralCode ||
+                        isSubmitting ||
+                        isValidatingReferral
+                      }
                     >
-                      Remove
+                      {isValidatingReferral
+                        ? "Checking..."
+                        : referralStatus === "valid"
+                        ? "Applied"
+                        : "Apply"}
                     </button>
-                  )}
-                </div>
 
-                {couponMessage && (
-                  <div
-                    className={`checkout-referral-message checkout-referral-${couponStatus}`}
-                    aria-live="polite"
-                  >
-                    {couponMessage}
+                    {referralCode && (
+                      <button
+                        type="button"
+                        className="checkout-referral-remove"
+                        onClick={removeReferralCode}
+                        disabled={
+                          isSubmitting ||
+                          isValidatingReferral
+                        }
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
-                )}
-              </section>
 
-              <section className="checkout-section-card">
-                <p className="eyebrow">
-                  REQUIRED AGREEMENTS
-                </p>
-                <h2>Research-Use Confirmation</h2>
+                  {referralMessage && (
+                    <div
+                      className={`checkout-referral-message checkout-referral-${referralStatus}`}
+                      aria-live="polite"
+                    >
+                      {referralMessage}
+                    </div>
+                  )}
 
-                <div className="checkout-agreement-info">
-                  <strong>
-                    Review the Research Agreement
-                  </strong>
+                  <div className="checkout-referral-note">
+                    <strong>Affiliate own-code orders</strong>
+                    <span>
+                      Own-code orders can count toward tier progression, but do
+                      not earn commission, discounts, payouts, or reward credit.
+                    </span>
+                  </div>
+                </section>
 
-                  <p>
-                    Review the full research-use terms
-                    before submitting an order request.
+                <section className="checkout-section-card checkout-code-card">
+                  <p className="eyebrow">PROMOTION</p>
+                  <h2>Coupon Code</h2>
+
+                  <p className="checkout-section-copy">
+                    Optional discounts are securely verified by the server.
                   </p>
+
+                  <div className="checkout-referral-row">
+                    <input
+                      type="text"
+                      value={couponCode}
+                      onChange={handleCouponCodeChange}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          validateCouponCode();
+                        }
+                      }}
+                      placeholder="Enter coupon code"
+                      autoComplete="off"
+                      maxLength="50"
+                      disabled={
+                        isSubmitting ||
+                        isValidatingCoupon
+                      }
+                      aria-label="Coupon code"
+                    />
+
+                    <button
+                      type="button"
+                      className="secondary-btn checkout-referral-apply"
+                      onClick={validateCouponCode}
+                      disabled={
+                        !couponCode ||
+                        isSubmitting ||
+                        isValidatingCoupon
+                      }
+                    >
+                      {isValidatingCoupon
+                        ? "Checking..."
+                        : couponStatus === "valid"
+                        ? "Applied"
+                        : "Apply"}
+                    </button>
+
+                    {couponCode && (
+                      <button
+                        type="button"
+                        className="checkout-referral-remove"
+                        onClick={removeCouponCode}
+                        disabled={
+                          isSubmitting ||
+                          isValidatingCoupon
+                        }
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+
+                  {couponMessage && (
+                    <div
+                      className={`checkout-referral-message checkout-referral-${couponStatus}`}
+                      aria-live="polite"
+                    >
+                      {couponMessage}
+                    </div>
+                  )}
+                </section>
+              </div>
+
+              <section className="checkout-section-card checkout-agreements-card">
+                <div className="checkout-section-heading checkout-section-heading-compact">
+                  <div>
+                    <p className="eyebrow">REQUIRED AGREEMENTS</p>
+                    <h2>Research-Use Confirmation</h2>
+                  </div>
 
                   <button
                     type="button"
-                    className="secondary-btn"
+                    className="secondary-btn checkout-agreement-button"
                     disabled={isSubmitting}
                     onClick={() =>
                       onNavigate("researchAgreement")
                     }
                   >
-                    View Research Agreement
+                    View Agreement
                   </button>
                 </div>
 
@@ -1810,9 +1907,8 @@ function Checkout({
                   />
 
                   <span>
-                    I understand these products are sold
-                    for research use only and are not
-                    intended for human consumption.
+                    I understand these products are sold for research use only
+                    and are not intended for human consumption.
                   </span>
                 </label>
 
@@ -1830,18 +1926,113 @@ function Checkout({
                   />
 
                   <span>
-                    I confirm I am at least 21 years old
-                    and agree to follow all applicable
-                    laws, rules, and research-use
-                    restrictions.
+                    I confirm I am at least 21 years old and agree to follow all
+                    applicable laws, rules, and research-use restrictions.
                   </span>
                 </label>
+              </section>
+
+              <section className="checkout-submit-zone">
+                <div className="checkout-submit-zone-heading">
+                  <div>
+                    <p className="eyebrow">FINAL REVIEW</p>
+                    <h2>Ready To Submit?</h2>
+                  </div>
+
+                  <span>Order request only</span>
+                </div>
+
+                <section className="checkout-security-panel">
+                  <strong>Security Verification</strong>
+
+                  {isDevelopmentPreview ? (
+                    <div className="checkout-development-security">
+                      <span aria-hidden="true">✓</span>
+                      <div>
+                        <strong>Local preview verified</strong>
+                        <p>
+                          Turnstile remains required on the live production site.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p>
+                        Complete the verification before submitting your order request.
+                      </p>
+
+                      <TurnstileWidget
+                        siteKey={turnstileSiteKey}
+                        resetKey={turnstileResetKey}
+                        disabled={isSubmitting}
+                        onTokenChange={
+                          handleTurnstileTokenChange
+                        }
+                      />
+                    </>
+                  )}
+                </section>
+
+                {submitError && (
+                  <div
+                    className="checkout-submit-error"
+                    role="alert"
+                    aria-live="assertive"
+                  >
+                    <strong>Order request not sent</strong>
+                    <span>{submitError}</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  className="primary-btn checkout-submit-button"
+                  disabled={
+                    !canPlaceOrder || isSubmitting
+                  }
+                >
+                  {isSubmitting
+                    ? "Submitting Order Request..."
+                    : "Submit Order Request"}
+                </button>
+
+                <button
+                  type="button"
+                  className="secondary-btn checkout-back-button"
+                  disabled={isSubmitting}
+                  onClick={() => onNavigate("cart")}
+                >
+                  Back To Cart
+                </button>
+
+                {!canPlaceOrder && !isSubmitting && (
+                  <p className="checkout-helper-text">
+                    Complete all required fields, choose a payment preference,
+                    apply or remove any entered code, and accept both agreements
+                    {isDevelopmentPreview ? "." : " and security verification."}
+                  </p>
+                )}
+
+                {isSubmitting && (
+                  <p
+                    className="checkout-submitting-text"
+                    aria-live="polite"
+                  >
+                    Your order request is being securely submitted.
+                  </p>
+                )}
               </section>
             </section>
 
             <aside className="checkout-summary-panel">
-              <p className="eyebrow">ORDER SUMMARY</p>
-              <h2>Review Order</h2>
+              <div className="checkout-summary-heading">
+                <div>
+                  <p className="eyebrow">ORDER SUMMARY</p>
+                  <h2>Review Order</h2>
+                </div>
+
+                <span>{totalQuantity} item{totalQuantity === 1 ? "" : "s"}</span>
+              </div>
 
               <div className="checkout-summary-items">
                 {cartItems.map((item) => {
@@ -1856,184 +2047,120 @@ function Checkout({
                     >
                       <div>
                         <strong>{item.name}</strong>
-
                         <p>
-                          {item.codeName} Â·{" "}
-                          {item.strength}
+                          {item.codeName} · {item.strength}
                         </p>
-
-                        <p>
-                          Quantity: {item.quantity}
-                        </p>
+                        <p>Quantity: {item.quantity}</p>
                       </div>
 
-                      <strong>
-                        {formatPrice(lineTotal)}
-                      </strong>
+                      <strong>{formatPrice(lineTotal)}</strong>
                     </div>
                   );
                 })}
               </div>
 
-              <SummaryRow
-                label="Total Products"
-                value={cartItems.length}
-              />
-
-              <SummaryRow
-                label="Total Items"
-                value={totalQuantity}
-              />
-
-              <SummaryRow
-                label="Product Subtotal"
-                value={formatPrice(subtotal)}
-              />
-
-              <SummaryRow
-                label="Coupon"
-                value={
-                  validatedCouponCode ||
-                  (couponCode ? "Not Applied" : "None")
-                }
-              />
-
-              {discount > 0 && (
-                <SummaryRow
-                  label="Discount"
-                  value={`-${formatPrice(discount)}`}
-                />
-              )}
-
-              <SummaryRow
-                label="Discounted Product Total"
-                value={formatPrice(discountedSubtotal)}
-              />
-
-              <SummaryRow
-                label="Referral Code"
-                value={
-                  validatedReferralCode ||
-                  (referralCode
-                    ? "Not Applied"
-                    : "None")
-                }
-              />
-
-              <SummaryRow
-                label="Shipping"
-                value={
-                  shippingFee === 0
-                    ? "FREE"
-                    : formatPrice(shippingFee)
-                }
-              />
-
-              <SummaryRow
-                label="Order Total"
-                value={formatPrice(orderTotal)}
-              />
-
-              <SummaryRow
-                label="Payment Preference"
-                value={
-                  selectedPaymentOption?.label ||
-                  "Not Selected"
-                }
-              />
-
-              <div className="checkout-final-total-note">
-                <strong>
-                  This is an order requestâ€”not a payment.
-                </strong>
-
-                <span>
-                  {freeShippingRemaining > 0
-                    ? `A $15 flat shipping fee applies. Add ${formatPrice(
-                        freeShippingRemaining
-                      )} more to qualify for free shipping.`
-                    : "Free shipping is included because the product subtotal is $100 or more."}
-                </span>
+              <div className="checkout-summary-stats">
+                <div>
+                  <span>Products</span>
+                  <strong>{cartItems.length}</strong>
+                </div>
+                <div>
+                  <span>Total units</span>
+                  <strong>{totalQuantity}</strong>
+                </div>
               </div>
 
-              <section className="checkout-security-panel">
-                <strong>Security Verification</strong>
+              <div className="checkout-summary-breakdown">
+                <SummaryRow
+                  label="Product subtotal"
+                  value={formatPrice(subtotal)}
+                />
 
-                <p>
-                  Complete the verification before
-                  submitting your order request.
-                </p>
+                {discount > 0 && (
+                  <SummaryRow
+                    label="Discount"
+                    value={`-${formatPrice(discount)}`}
+                  />
+                )}
 
-                <TurnstileWidget
-                  siteKey={turnstileSiteKey}
-                  resetKey={turnstileResetKey}
-                  disabled={isSubmitting}
-                  onTokenChange={
-                    handleTurnstileTokenChange
+                {couponCode && (
+                  <SummaryRow
+                    label="Coupon"
+                    value={
+                      validatedCouponCode || "Not Applied"
+                    }
+                  />
+                )}
+
+                {referralCode && (
+                  <SummaryRow
+                    label="Referral"
+                    value={
+                      validatedReferralCode || "Not Applied"
+                    }
+                  />
+                )}
+
+                <SummaryRow
+                  label="Shipping"
+                  value={
+                    shippingFee === 0
+                      ? "FREE"
+                      : formatPrice(shippingFee)
                   }
                 />
-              </section>
 
-              {submitError && (
-                <div
-                  className="checkout-submit-error"
-                  role="alert"
-                  aria-live="assertive"
-                >
+                <SummaryRow
+                  label="Payment preference"
+                  value={
+                    selectedPaymentOption?.label ||
+                    "Not Selected"
+                  }
+                />
+              </div>
+
+              <div className="checkout-shipping-progress">
+                <div className="checkout-shipping-progress-heading">
+                  <span>Free shipping</span>
                   <strong>
-                    Order request not sent
+                    {freeShippingRemaining > 0
+                      ? `${Math.round(freeShippingProgress)}%`
+                      : "Unlocked"}
                   </strong>
-
-                  <span>{submitError}</span>
                 </div>
-              )}
 
-              <button
-                type="submit"
-                className="primary-btn checkout-submit-button"
-                disabled={
-                  !canPlaceOrder || isSubmitting
-                }
-              >
-                {isSubmitting
-                  ? "Submitting Order Request..."
-                  : "Submit Order Request"}
-              </button>
-
-              <button
-                type="button"
-                className="secondary-btn checkout-back-button"
-                disabled={isSubmitting}
-                onClick={() => onNavigate("cart")}
-              >
-                Back To Cart
-              </button>
-
-              {!canPlaceOrder && !isSubmitting && (
-                <p className="checkout-helper-text">
-                  Complete all required fields, select a
-                  payment preference, apply or remove
-                  any entered referral code, accept both
-                  confirmations, and complete the
-                  security verification.
-                </p>
-              )}
-
-              {isSubmitting && (
-                <p
-                  className="checkout-submitting-text"
-                  aria-live="polite"
+                <div
+                  className="checkout-shipping-progress-track"
+                  aria-label="Free shipping progress"
                 >
-                  Your order request is being securely
-                  submitted.
-                </p>
-              )}
+                  <span
+                    style={{
+                      width: `${freeShippingProgress}%`,
+                    }}
+                  />
+                </div>
+
+                <small>
+                  {freeShippingRemaining > 0
+                    ? `${formatPrice(freeShippingRemaining)} away from free shipping`
+                    : "Your order qualifies for free shipping"}
+                </small>
+              </div>
+
+              <div className="checkout-total-card">
+                <span>Estimated order total</span>
+                <strong>{formatPrice(orderTotal)}</strong>
+                <small>
+                  This is an order request—not a payment. Final instructions are
+                  confirmed by email after review.
+                </small>
+              </div>
             </aside>
           </form>
 
           <div className="checkout-research-notice">
-            For Research Use Only. Products are not
-            intended for human consumption.
+            <strong>Research Use Only</strong>
+            <span>Products are not intended for human consumption.</span>
           </div>
         </section>
       </main>
@@ -2202,6 +2329,62 @@ function SummaryRow({ label, value }) {
 }
 
 const checkoutCss = `
+  /* 304 AGREEMENT OVERFLOW FIX START */
+
+  .checkout-agreements-card {
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .checkout-agreements-card .checkout-section-heading {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .checkout-agreements-card .checkout-section-heading > div {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .checkout-agreements-card h2,
+  .checkout-agreements-card .eyebrow,
+  .checkout-checkbox-row span {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+
+  .checkout-agreement-button {
+    flex: 0 1 auto;
+    max-width: 100%;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .checkout-checkbox-row {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .checkout-checkbox-row span {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  @media (max-width: 900px) {
+    .checkout-agreements-card .checkout-section-heading {
+      flex-direction: column;
+    }
+
+    .checkout-agreement-button {
+      width: 100%;
+    }
+  }
+
+  /* 304 AGREEMENT OVERFLOW FIX END */
+
   .checkout-page,
   .checkout-page *,
   .checkout-page *::before,
@@ -2212,223 +2395,326 @@ const checkoutCss = `
   .checkout-page {
     width: 100%;
     max-width: 100%;
-    padding: 90px 60px;
+    padding: 54px 48px 70px;
     overflow-x: hidden;
   }
 
   .checkout-inner {
     width: 100%;
-    max-width: 1200px;
+    max-width: 1220px;
     margin: 0 auto;
   }
 
   .checkout-hero,
   .checkout-state-panel {
-    padding: 52px;
     border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 30px;
     background:
-      radial-gradient(
-        circle at top,
-        rgba(61,165,255,0.2),
-        transparent 42%
-      ),
-      rgba(255,255,255,0.035);
-    box-shadow: 0 30px 80px rgba(0,0,0,0.45);
-    text-align: center;
+      radial-gradient(circle at 50% 0%, rgba(61,165,255,0.2), transparent 48%),
+      linear-gradient(145deg, rgba(255,255,255,0.055), rgba(255,255,255,0.025));
+    box-shadow: 0 24px 70px rgba(0,0,0,0.38);
   }
 
   .checkout-hero {
-    margin-bottom: 34px;
+    padding: 30px 34px;
+    margin-bottom: 22px;
+    border-radius: 24px;
+    text-align: center;
   }
 
   .checkout-hero h1,
   .checkout-state-panel h1 {
-    margin-bottom: 20px;
-    font-size: clamp(42px, 6vw, 62px);
-    line-height: 1.05;
-    background: linear-gradient(180deg, #ffffff, #9d9d9d);
+    margin: 7px 0 10px;
+    font-size: clamp(36px, 5vw, 52px);
+    line-height: 1.02;
+    background: linear-gradient(180deg, #ffffff, #a8b0b7);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
   }
 
-  .checkout-hero > p,
+  .checkout-hero > p:not(.eyebrow),
   .checkout-state-panel > p:not(.eyebrow) {
-    max-width: 760px;
+    max-width: 720px;
     margin: 0 auto;
-    color: #c8c8c8;
-    font-size: 19px;
-    line-height: 1.8;
+    color: #bec7cd;
+    font-size: 16px;
+    line-height: 1.65;
   }
 
-  .checkout-hero-status {
+  .checkout-hero-steps {
     display: flex;
     justify-content: center;
     align-items: center;
-    gap: 14px;
+    gap: 10px;
     flex-wrap: wrap;
+    margin-top: 18px;
   }
 
-  .checkout-hero-status > span,
-  .checkout-state-notice {
+  .checkout-hero-steps span {
     display: inline-flex;
-    width: fit-content;
-    padding: 9px 13px;
-    border: 1px solid rgba(61,165,255,0.42);
+    align-items: center;
+    gap: 7px;
+    padding: 7px 11px;
+    border: 1px solid rgba(255,255,255,0.08);
     border-radius: 999px;
-    background: rgba(61,165,255,0.17);
+    background: rgba(0,0,0,0.18);
+    color: #b8c3ca;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .checkout-hero-steps b {
+    width: 19px;
+    height: 19px;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    background: rgba(61,165,255,0.2);
     color: #9ed8ff;
-    font-size: 11px;
-    font-weight: 900;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+    font-size: 10px;
   }
 
   .checkout-state-panel {
-    max-width: 900px;
+    max-width: 860px;
     margin: 0 auto;
+    padding: 44px;
+    border-radius: 26px;
+    text-align: center;
   }
 
   .checkout-state-notice {
+    display: inline-flex;
+    width: fit-content;
     margin: 18px auto 0;
+    padding: 8px 12px;
+    border: 1px solid rgba(61,165,255,0.4);
+    border-radius: 999px;
+    background: rgba(61,165,255,0.14);
+    color: #a9ddff;
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
   }
 
   .checkout-state-actions {
     display: flex;
     justify-content: center;
-    gap: 14px;
+    gap: 12px;
     flex-wrap: wrap;
-    margin-top: 28px;
+    margin-top: 24px;
   }
 
   .checkout-state-panel > .primary-btn {
-    margin-top: 26px;
+    margin-top: 24px;
   }
 
   .checkout-invalid-list {
     display: grid;
-    gap: 10px;
+    gap: 9px;
     max-width: 620px;
-    margin: 26px auto;
+    margin: 22px auto;
   }
 
   .checkout-invalid-list > div {
     display: flex;
     justify-content: space-between;
-    gap: 14px;
+    gap: 12px;
     flex-wrap: wrap;
-    padding: 15px;
+    padding: 14px;
     border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 15px;
-    background: rgba(0,0,0,0.23);
+    border-radius: 14px;
+    background: rgba(0,0,0,0.22);
     color: #c8c8c8;
   }
 
   .checkout-layout {
     display: grid;
-    grid-template-columns:
-      minmax(0, 1.18fr)
-      minmax(340px, 0.82fr);
-    gap: 30px;
+    grid-template-columns: minmax(0, 1.23fr) minmax(330px, 0.77fr);
+    gap: 22px;
     align-items: start;
   }
 
   .checkout-main-panel,
   .checkout-summary-panel {
     min-width: 0;
-    padding: 38px;
     border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 28px;
     background:
-      radial-gradient(
-        circle at top left,
-        rgba(61,165,255,0.14),
-        transparent 35%
-      ),
-      rgba(255,255,255,0.035);
-    box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+      radial-gradient(circle at top left, rgba(61,165,255,0.13), transparent 33%),
+      linear-gradient(145deg, rgba(255,255,255,0.045), rgba(255,255,255,0.024));
+    box-shadow: 0 24px 70px rgba(0,0,0,0.36);
+  }
+
+  .checkout-main-panel {
+    padding: 28px;
+    border-radius: 24px;
   }
 
   .checkout-summary-panel {
     position: sticky;
-    top: 110px;
+    top: 96px;
+    padding: 25px;
+    border-radius: 22px;
+  }
+
+  .checkout-section-heading,
+  .checkout-summary-heading,
+  .checkout-submit-zone-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .checkout-section-heading > div,
+  .checkout-summary-heading > div,
+  .checkout-submit-zone-heading > div {
+    min-width: 0;
   }
 
   .checkout-main-panel h2,
   .checkout-summary-panel h2,
-  .checkout-section-card h2 {
-    margin-bottom: 24px;
-    font-size: clamp(28px, 4vw, 36px);
-    line-height: 1.12;
-    background: linear-gradient(180deg, #ffffff, #9d9d9d);
+  .checkout-section-card h2,
+  .checkout-submit-zone h2 {
+    margin: 5px 0 16px;
+    font-size: clamp(25px, 3.3vw, 33px);
+    line-height: 1.1;
+    background: linear-gradient(180deg, #ffffff, #a6adb4);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
   }
 
-  .checkout-country-note,
-  .checkout-account-note,
-  .checkout-invoice-notice,
-  .checkout-final-total-note,
-  .checkout-agreement-info {
-    padding: 17px;
-    border: 1px solid rgba(61,165,255,0.28);
-    border-radius: 16px;
-    background: rgba(61,165,255,0.11);
-    color: #bfe7ff;
-    line-height: 1.65;
+  .checkout-section-heading-compact h2 {
+    margin-bottom: 0;
   }
 
-  .checkout-country-note {
-    margin-bottom: 14px;
+  .checkout-verified-badge,
+  .checkout-optional-badge,
+  .checkout-summary-heading > span,
+  .checkout-submit-zone-heading > span {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    min-height: 30px;
+    padding: 7px 10px;
+    border: 1px solid rgba(61,165,255,0.35);
+    border-radius: 999px;
+    background: rgba(61,165,255,0.12);
+    color: #b6e4ff;
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.65px;
+  }
+
+  .checkout-shipping-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 13px;
+    margin: 2px 0 12px;
+    padding: 14px;
+    border: 1px solid rgba(61,165,255,0.27);
+    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(61,165,255,0.12), rgba(61,165,255,0.045));
+  }
+
+  .checkout-shipping-icon {
+    width: 37px;
+    height: 37px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(61,165,255,0.38);
+    border-radius: 12px;
+    background: rgba(61,165,255,0.16);
+    color: #bce7ff;
+    font-size: 18px;
+    font-weight: 900;
+  }
+
+  .checkout-shipping-copy {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+  }
+
+  .checkout-shipping-copy strong {
+    color: #ffffff;
+  }
+
+  .checkout-shipping-copy span {
+    color: #a9cadd;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .checkout-shipping-points {
+    display: grid;
+    gap: 5px;
+    text-align: right;
+  }
+
+  .checkout-shipping-points span {
+    color: #c8e8fa;
+    font-size: 11px;
+    font-weight: 800;
+    white-space: nowrap;
   }
 
   .checkout-account-note {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 18px;
-    margin-bottom: 20px;
+    gap: 14px;
+    margin-bottom: 18px;
+    padding: 11px 13px;
+    border: 1px solid rgba(255,255,255,0.075);
+    border-radius: 13px;
+    background: rgba(0,0,0,0.15);
   }
 
   .checkout-account-note > div {
-    min-width: 0;
-    display: grid;
-    gap: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
-  .checkout-account-note > div > strong {
+  .checkout-account-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #63dba2;
+    box-shadow: 0 0 14px rgba(99,219,162,0.55);
+  }
+
+  .checkout-account-note strong {
     color: #ffffff;
-  }
-
-  .checkout-account-note > div > span {
-    color: #b8dff4;
-    font-size: 13px;
-    overflow-wrap: anywhere;
+    font-size: 12px;
   }
 
   .checkout-account-note > span {
-    flex: 0 0 auto;
-    padding: 7px 10px;
-    border: 1px solid rgba(61,165,255,0.35);
-    border-radius: 999px;
-    background: rgba(61,165,255,0.13);
-    color: #bde8ff;
-    font-size: 10px;
-    font-weight: 900;
-    text-transform: uppercase;
-    letter-spacing: 0.7px;
+    min-width: 0;
+    color: #9fcbe2;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+    text-align: right;
   }
 
   .checkout-form-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 16px;
+    gap: 13px;
+  }
+
+  .checkout-location-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr) minmax(0, 0.85fr);
+    gap: 13px;
   }
 
   .checkout-field {
     min-width: 0;
     display: grid;
-    gap: 8px;
+    gap: 7px;
   }
 
   .checkout-field-full {
@@ -2436,23 +2722,25 @@ const checkoutCss = `
   }
 
   .checkout-field > span {
-    color: #c8c8c8;
-    font-size: 12px;
+    color: #bdc5cb;
+    font-size: 11px;
     font-weight: 900;
     text-transform: uppercase;
-    letter-spacing: 0.8px;
+    letter-spacing: 0.7px;
   }
 
   .checkout-field input,
   .checkout-field select {
     width: 100%;
-    padding: 16px;
+    min-height: 48px;
+    padding: 13px 14px;
     border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 14px;
+    border-radius: 13px;
     outline: none;
-    background: rgba(255,255,255,0.055);
+    background: rgba(255,255,255,0.05);
     color: #ffffff;
     font: inherit;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
   }
 
   .checkout-field select option {
@@ -2462,76 +2750,81 @@ const checkoutCss = `
 
   .checkout-field input:focus,
   .checkout-field select:focus {
-    border-color: rgba(61,165,255,0.65);
-    box-shadow: 0 0 0 3px rgba(61,165,255,0.12);
+    border-color: rgba(61,165,255,0.68);
+    background: rgba(61,165,255,0.07);
+    box-shadow: 0 0 0 3px rgba(61,165,255,0.11);
   }
 
   .checkout-field input[aria-invalid="true"],
   .checkout-field select[aria-invalid="true"] {
-    border-color: rgba(255,95,95,0.6);
+    border-color: rgba(255,95,95,0.62);
   }
 
   .checkout-field small {
     color: #ffd1d1;
-    font-size: 12px;
-    line-height: 1.4;
+    font-size: 11px;
+    line-height: 1.35;
   }
 
   .checkout-field input:disabled,
   .checkout-field select:disabled {
-    opacity: 0.55;
+    opacity: 0.56;
     cursor: not-allowed;
   }
 
   .checkout-field input:read-only:not(:disabled) {
-    border-color: rgba(61,165,255,0.3);
-    background: rgba(61,165,255,0.08);
+    border-color: rgba(61,165,255,0.27);
+    background: rgba(61,165,255,0.065);
     color: #c9ebff;
     cursor: not-allowed;
   }
 
   .checkout-field .checkout-field-helper {
-    color: #8fb9d0;
+    color: #82adc5;
   }
 
-  .checkout-section-card {
-    margin-top: 32px;
-    padding: 26px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 22px;
-    background: rgba(255,255,255,0.045);
+  .checkout-section-card,
+  .checkout-submit-zone {
+    margin-top: 20px;
+    padding: 21px;
+    border: 1px solid rgba(255,255,255,0.085);
+    border-radius: 19px;
+    background: rgba(255,255,255,0.035);
   }
 
   .checkout-section-copy {
-    margin: -8px 0 20px;
-    color: #c8c8c8;
-    line-height: 1.7;
+    margin: -5px 0 15px;
+    color: #aeb8bf;
+    font-size: 13px;
+    line-height: 1.55;
   }
 
   .checkout-payment-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
+    gap: 11px;
   }
 
   .checkout-payment-option {
     position: relative;
     min-width: 0;
-    min-height: 118px;
+    min-height: 94px;
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    gap: 10px;
-    padding: 18px 14px;
-    border: 1px solid rgba(255,255,255,0.11);
-    border-radius: 18px;
-    background: rgba(0,0,0,0.2);
+    gap: 7px;
+    padding: 14px 10px;
+    border: 1px solid rgba(255,255,255,0.105);
+    border-radius: 15px;
+    background: rgba(0,0,0,0.18);
     cursor: pointer;
-    transition:
-      border-color 0.2s ease,
-      background 0.2s ease,
-      transform 0.2s ease;
+    transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+  }
+
+  .checkout-payment-option:hover {
+    border-color: rgba(61,165,255,0.35);
+    transform: translateY(-1px);
   }
 
   .checkout-payment-option input {
@@ -2541,74 +2834,99 @@ const checkoutCss = `
   }
 
   .checkout-payment-option img {
-    width: 88px;
-    height: 38px;
+    width: 72px;
+    height: 31px;
     display: block;
     object-fit: contain;
   }
 
   .checkout-payment-option strong {
     color: #ffffff;
+    font-size: 13px;
   }
 
   .checkout-payment-selected {
-    border-color: rgba(61,165,255,0.72);
-    background: rgba(61,165,255,0.14);
+    border-color: rgba(61,165,255,0.82);
+    background: linear-gradient(145deg, rgba(61,165,255,0.2), rgba(61,165,255,0.09));
+    box-shadow: 0 0 0 2px rgba(61,165,255,0.1), 0 12px 30px rgba(24,132,226,0.18);
     transform: translateY(-2px);
   }
 
   .checkout-payment-check {
     position: absolute;
-    top: 10px;
-    right: 10px;
-    width: 23px;
-    height: 23px;
+    top: 8px;
+    right: 8px;
+    width: 21px;
+    height: 21px;
     display: grid;
     place-items: center;
-    border: 1px solid rgba(255,255,255,0.16);
+    border: 1px solid rgba(255,255,255,0.14);
     border-radius: 999px;
-    background: rgba(255,255,255,0.04);
+    background: rgba(255,255,255,0.035);
     color: transparent;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 900;
   }
 
   .checkout-payment-selected .checkout-payment-check {
-    border-color: rgba(61,165,255,0.7);
-    background: rgba(61,165,255,0.3);
+    border-color: rgba(61,165,255,0.75);
+    background: #2498ed;
     color: #ffffff;
+    box-shadow: 0 0 15px rgba(61,165,255,0.48);
   }
 
   .checkout-invoice-notice {
-    margin-top: 16px;
-    font-size: 13px;
+    margin-top: 12px;
+    padding: 12px 13px;
+    border: 1px solid rgba(61,165,255,0.22);
+    border-radius: 13px;
+    background: rgba(61,165,255,0.075);
+    color: #a9d2e9;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .checkout-code-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .checkout-code-card {
+    min-width: 0;
+  }
+
+  .checkout-code-card h2 {
+    font-size: clamp(22px, 2.8vw, 28px);
   }
 
   .checkout-referral-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    gap: 10px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
     align-items: center;
   }
 
   .checkout-referral-row input {
     width: 100%;
     min-width: 0;
-    padding: 15px;
+    min-height: 45px;
+    padding: 12px 13px;
     border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 14px;
+    border-radius: 12px;
     outline: none;
-    background: rgba(0,0,0,0.2);
+    background: rgba(0,0,0,0.18);
     color: #ffffff;
     font: inherit;
+    font-size: 13px;
     font-weight: 800;
-    letter-spacing: 0.6px;
+    letter-spacing: 0.45px;
     text-transform: uppercase;
   }
 
   .checkout-referral-row input:focus {
     border-color: rgba(61,165,255,0.65);
-    box-shadow: 0 0 0 3px rgba(61,165,255,0.12);
+    box-shadow: 0 0 0 3px rgba(61,165,255,0.1);
   }
 
   .checkout-referral-row input:disabled {
@@ -2617,17 +2935,21 @@ const checkoutCss = `
   }
 
   .checkout-referral-apply {
+    min-height: 45px;
+    padding-inline: 14px;
     white-space: nowrap;
   }
 
   .checkout-referral-remove {
-    padding: 10px 0;
+    grid-column: 1 / -1;
+    justify-self: start;
+    padding: 2px 0;
     border: 0;
     background: transparent;
-    color: #9ca8b0;
+    color: #91a1ac;
     cursor: pointer;
     font: inherit;
-    font-size: 12px;
+    font-size: 11px;
     text-decoration: underline;
   }
 
@@ -2638,17 +2960,17 @@ const checkoutCss = `
 
   .checkout-referral-message,
   .checkout-referral-note {
-    margin-top: 12px;
-    padding: 13px;
-    border-radius: 14px;
-    line-height: 1.55;
+    margin-top: 10px;
+    padding: 11px;
+    border-radius: 12px;
+    line-height: 1.48;
   }
 
   .checkout-referral-message {
-    border: 1px solid rgba(61,165,255,0.25);
-    background: rgba(61,165,255,0.08);
+    border: 1px solid rgba(61,165,255,0.24);
+    background: rgba(61,165,255,0.075);
     color: #c5eaff;
-    font-size: 13px;
+    font-size: 12px;
   }
 
   .checkout-referral-valid {
@@ -2672,65 +2994,77 @@ const checkoutCss = `
 
   .checkout-referral-note {
     display: grid;
-    gap: 4px;
-    border: 1px solid rgba(255,255,255,0.08);
-    background: rgba(255,255,255,0.03);
+    gap: 3px;
+    border: 1px solid rgba(255,255,255,0.07);
+    background: rgba(255,255,255,0.025);
   }
 
   .checkout-referral-note strong {
-    color: #ffffff;
+    color: #eaf5fb;
+    font-size: 12px;
   }
 
   .checkout-referral-note span {
-    color: #9ca8b0;
-    font-size: 13px;
+    color: #8f9ca5;
+    font-size: 11px;
   }
 
-  .checkout-agreement-info {
-    margin-bottom: 18px;
-  }
-
-  .checkout-agreement-info p {
-    margin-top: 7px;
-    color: #b8d9eb;
-  }
-
-  .checkout-agreement-info button {
-    margin-top: 15px;
+  .checkout-agreement-button {
+    flex: 0 0 auto;
   }
 
   .checkout-checkbox-row {
     display: flex;
     align-items: flex-start;
-    gap: 13px;
-    margin-top: 16px;
-    color: #c8c8c8;
-    line-height: 1.7;
+    gap: 11px;
+    margin-top: 13px;
+    padding: 12px;
+    border: 1px solid rgba(255,255,255,0.065);
+    border-radius: 13px;
+    background: rgba(0,0,0,0.12);
+    color: #c4cbd0;
+    font-size: 13px;
+    line-height: 1.55;
     cursor: pointer;
+    transition: border-color 0.18s ease, background 0.18s ease;
+  }
+
+  .checkout-checkbox-row:hover {
+    border-color: rgba(61,165,255,0.25);
+    background: rgba(61,165,255,0.045);
   }
 
   .checkout-checkbox-row input {
-    width: 20px;
-    height: 20px;
+    width: 19px;
+    height: 19px;
     flex: 0 0 auto;
-    margin-top: 3px;
+    margin-top: 1px;
     accent-color: #3da5ff;
+  }
+
+  .checkout-summary-heading {
+    align-items: center;
+    margin-bottom: 15px;
+  }
+
+  .checkout-summary-heading h2 {
+    margin-bottom: 0;
   }
 
   .checkout-summary-items {
     display: grid;
-    gap: 12px;
-    margin-bottom: 20px;
+    gap: 9px;
+    margin-bottom: 13px;
   }
 
   .checkout-summary-item {
     display: flex;
     justify-content: space-between;
-    gap: 16px;
-    padding: 15px;
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 15px;
-    background: rgba(0,0,0,0.18);
+    gap: 13px;
+    padding: 12px;
+    border: 1px solid rgba(255,255,255,0.075);
+    border-radius: 13px;
+    background: rgba(0,0,0,0.16);
   }
 
   .checkout-summary-item > div {
@@ -2739,70 +3073,218 @@ const checkoutCss = `
 
   .checkout-summary-item strong {
     color: #ffffff;
+    font-size: 13px;
     overflow-wrap: anywhere;
   }
 
   .checkout-summary-item > strong {
-    color: #9ed8ff;
+    color: #a8ddff;
     white-space: nowrap;
   }
 
   .checkout-summary-item p {
-    margin-top: 4px;
-    color: #929ba3;
-    font-size: 12px;
-    line-height: 1.5;
+    margin-top: 3px;
+    color: #8d9aa3;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .checkout-summary-stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .checkout-summary-stats > div {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid rgba(255,255,255,0.065);
+    border-radius: 11px;
+    background: rgba(255,255,255,0.025);
+  }
+
+  .checkout-summary-stats span {
+    color: #8e9ba4;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .checkout-summary-stats strong {
+    color: #ffffff;
+  }
+
+  .checkout-summary-breakdown {
+    padding: 2px 0;
   }
 
   .checkout-summary-row {
     display: flex;
     justify-content: space-between;
-    gap: 18px;
-    padding: 13px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.07);
+    gap: 16px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
   }
 
   .checkout-summary-row span {
-    color: #aeb7bf;
+    color: #a8b3ba;
+    font-size: 13px;
   }
 
   .checkout-summary-row strong {
     color: #ffffff;
+    font-size: 13px;
     text-align: right;
   }
 
-  .checkout-final-total-note {
+  .checkout-shipping-progress {
+    margin-top: 14px;
+    padding: 13px;
+    border: 1px solid rgba(61,165,255,0.24);
+    border-radius: 14px;
+    background: rgba(61,165,255,0.075);
+  }
+
+  .checkout-shipping-progress-heading {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: #c9e9fa;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .checkout-shipping-progress-track {
+    width: 100%;
+    height: 7px;
+    margin: 9px 0 7px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.09);
+  }
+
+  .checkout-shipping-progress-track span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #278fda, #62c7ff);
+    box-shadow: 0 0 15px rgba(61,165,255,0.45);
+    transition: width 0.3s ease;
+  }
+
+  .checkout-shipping-progress small {
+    color: #9ab9ca;
+    font-size: 11px;
+  }
+
+  .checkout-total-card {
     display: grid;
-    gap: 7px;
-    margin-top: 20px;
+    gap: 5px;
+    margin-top: 14px;
+    padding: 17px;
+    border: 1px solid rgba(61,165,255,0.35);
+    border-radius: 16px;
+    background:
+      radial-gradient(circle at top right, rgba(61,165,255,0.2), transparent 50%),
+      rgba(61,165,255,0.09);
   }
 
-  .checkout-final-total-note strong {
+  .checkout-total-card > span {
+    color: #a9c8d9;
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+  }
+
+  .checkout-total-card > strong {
     color: #ffffff;
+    font-size: clamp(29px, 4vw, 39px);
+    line-height: 1.05;
   }
 
-  .checkout-final-total-note span {
-    color: #b6d9ec;
-    font-size: 13px;
+  .checkout-total-card small {
+    color: #9bb5c4;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .checkout-submit-zone {
+    border-color: rgba(61,165,255,0.2);
+    background:
+      radial-gradient(circle at top right, rgba(61,165,255,0.12), transparent 45%),
+      rgba(255,255,255,0.035);
+  }
+
+  .checkout-submit-zone-heading {
+    align-items: center;
+  }
+
+  .checkout-submit-zone-heading h2 {
+    margin-bottom: 0;
   }
 
   .checkout-security-panel {
-    margin-top: 22px;
-    padding: 18px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 18px;
-    background: rgba(0,0,0,0.18);
+    margin-top: 15px;
+    padding: 14px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    background: rgba(0,0,0,0.15);
   }
 
   .checkout-security-panel > strong {
     color: #ffffff;
+    font-size: 13px;
   }
 
   .checkout-security-panel > p {
-    margin: 7px 0 15px;
-    color: #aeb7bf;
-    font-size: 13px;
-    line-height: 1.55;
+    margin: 5px 0 12px;
+    color: #9ca8b0;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .checkout-development-security {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    margin-top: 9px;
+    padding: 11px;
+    border: 1px solid rgba(72,214,151,0.28);
+    border-radius: 12px;
+    background: rgba(72,214,151,0.075);
+  }
+
+  .checkout-development-security > span {
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: rgba(72,214,151,0.18);
+    color: #b8f3d8;
+    font-weight: 900;
+  }
+
+  .checkout-development-security > div {
+    min-width: 0;
+  }
+
+  .checkout-development-security strong {
+    color: #c7f7e1;
+    font-size: 12px;
+  }
+
+  .checkout-development-security p {
+    margin: 2px 0 0;
+    color: #8db8a3;
+    font-size: 11px;
+    line-height: 1.4;
   }
 
   .checkout-turnstile {
@@ -2821,10 +3303,10 @@ const checkoutCss = `
   }
 
   .checkout-turnstile-status {
-    margin-top: 9px;
+    margin-top: 8px;
     color: #8f9ba6;
-    font-size: 12px;
-    line-height: 1.5;
+    font-size: 11px;
+    line-height: 1.45;
   }
 
   .checkout-turnstile-verified {
@@ -2837,34 +3319,41 @@ const checkoutCss = `
 
   .checkout-submit-error {
     display: grid;
-    gap: 5px;
-    margin-top: 18px;
-    padding: 15px;
+    gap: 4px;
+    margin-top: 13px;
+    padding: 13px;
     border: 1px solid rgba(255,95,95,0.4);
-    border-radius: 15px;
-    background: rgba(255,70,70,0.1);
+    border-radius: 13px;
+    background: rgba(255,70,70,0.09);
     color: #ffd0d0;
-    line-height: 1.55;
+    font-size: 12px;
+    line-height: 1.5;
   }
 
   .checkout-submit-button,
   .checkout-back-button {
     width: 100%;
-    margin-top: 16px;
+    margin-top: 12px;
+  }
+
+  .checkout-submit-button {
+    min-height: 52px;
+    box-shadow: 0 14px 28px rgba(32,132,218,0.22);
   }
 
   .checkout-submit-button:disabled,
   .checkout-back-button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+    box-shadow: none;
   }
 
   .checkout-helper-text,
   .checkout-submitting-text {
-    margin-top: 13px;
-    color: #929ba3;
-    font-size: 12px;
-    line-height: 1.6;
+    margin-top: 11px;
+    color: #8e9ba4;
+    font-size: 11px;
+    line-height: 1.5;
     text-align: center;
   }
 
@@ -2873,22 +3362,31 @@ const checkoutCss = `
   }
 
   .checkout-research-notice {
-    margin-top: 30px;
-    padding: 20px;
-    border: 1px solid rgba(61,165,255,0.28);
-    border-radius: 20px;
-    background: rgba(61,165,255,0.12);
-    color: #9ed8ff;
-    font-weight: 900;
-    line-height: 1.6;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 9px;
+    flex-wrap: wrap;
+    margin-top: 20px;
+    padding: 13px;
+    border: 1px solid rgba(61,165,255,0.2);
+    border-radius: 14px;
+    background: rgba(61,165,255,0.065);
+    color: #9ccce8;
+    font-size: 11px;
+    line-height: 1.4;
     text-align: center;
-    text-transform: uppercase;
-    letter-spacing: 1px;
   }
 
-  @media (max-width: 1000px) {
+  .checkout-research-notice strong {
+    color: #c7ebff;
+    text-transform: uppercase;
+    letter-spacing: 0.65px;
+  }
+
+  @media (max-width: 1050px) {
     .checkout-page {
-      padding: 65px 24px;
+      padding: 46px 24px 60px;
     }
 
     .checkout-layout {
@@ -2897,34 +3395,48 @@ const checkoutCss = `
 
     .checkout-summary-panel {
       position: static;
+      order: -1;
     }
   }
 
-  @media (max-width: 700px) {
+  @media (max-width: 760px) {
     .checkout-page {
-      padding: 44px 12px;
+      padding: 34px 12px 48px;
     }
 
     .checkout-hero,
     .checkout-state-panel,
     .checkout-main-panel,
     .checkout-summary-panel {
-      padding: 22px 18px;
-      border-radius: 22px;
+      padding: 20px 17px;
+      border-radius: 20px;
     }
 
     .checkout-form-grid,
+    .checkout-location-grid,
     .checkout-payment-grid,
-    .checkout-referral-row {
+    .checkout-code-grid {
       grid-template-columns: minmax(0, 1fr);
-    }
-
-    .checkout-referral-row button {
-      width: 100%;
     }
 
     .checkout-field-full {
       grid-column: auto;
+    }
+
+    .checkout-section-heading,
+    .checkout-summary-heading,
+    .checkout-submit-zone-heading,
+    .checkout-shipping-card {
+      align-items: flex-start;
+    }
+
+    .checkout-shipping-card {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .checkout-shipping-points {
+      grid-column: 2;
+      text-align: left;
     }
 
     .checkout-state-actions,
@@ -2933,17 +3445,43 @@ const checkoutCss = `
     }
   }
 
-  @media (max-width: 430px) {
+  @media (max-width: 500px) {
     .checkout-page {
-      padding: 34px 8px;
+      padding: 28px 8px 42px;
     }
 
     .checkout-hero,
     .checkout-state-panel,
     .checkout-main-panel,
     .checkout-summary-panel,
-    .checkout-section-card {
+    .checkout-section-card,
+    .checkout-submit-zone {
       padding: 15px;
+    }
+
+    .checkout-section-heading,
+    .checkout-summary-heading,
+    .checkout-submit-zone-heading,
+    .checkout-account-note {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .checkout-account-note > span {
+      text-align: left;
+    }
+
+    .checkout-referral-row {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .checkout-referral-row button,
+    .checkout-agreement-button {
+      width: 100%;
+    }
+
+    .checkout-referral-remove {
+      grid-column: auto;
     }
 
     .checkout-summary-row,
@@ -2953,11 +3491,7 @@ const checkoutCss = `
 
     .checkout-summary-row {
       flex-direction: column;
-    }
-
-    .checkout-account-note {
-      align-items: flex-start;
-      flex-direction: column;
+      gap: 5px;
     }
 
     .checkout-summary-row strong {

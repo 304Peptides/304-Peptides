@@ -1,108 +1,108 @@
-import r3r10 from "../assets/images/products/304-3r/304-3r-10mg.png";
-import r3r20 from "../assets/images/products/304-3r/304-3r-20mg.png";
-import r3r30 from "../assets/images/products/304-3r/304-3r-30mg.png";
-import r3r60 from "../assets/images/products/304-3r/304-3r-60mg.png";
+import r3r10 from "../assets/images/products/304-3r/304-3r-10mg.webp";
+import r3r20 from "../assets/images/products/304-3r/304-3r-20mg.webp";
+import r3r30 from "../assets/images/products/304-3r/304-3r-30mg.webp";
+import r3r60 from "../assets/images/products/304-3r/304-3r-60mg.webp";
 
-import tz10 from "../assets/images/products/304-tz/304-tz-10mg.png";
-import tz15 from "../assets/images/products/304-tz/304-tz-15mg.png";
-import tz20 from "../assets/images/products/304-tz/304-tz-20mg.png";
-import tz30 from "../assets/images/products/304-tz/304-tz-30mg.png";
-import tz40 from "../assets/images/products/304-tz/304-tz-40mg.png";
-import tz60 from "../assets/images/products/304-tz/304-tz-60mg.png";
+import tz10 from "../assets/images/products/304-tz/304-tz-10mg.webp";
+import tz15 from "../assets/images/products/304-tz/304-tz-15mg.webp";
+import tz20 from "../assets/images/products/304-tz/304-tz-20mg.webp";
+import tz30 from "../assets/images/products/304-tz/304-tz-30mg.webp";
+import tz40 from "../assets/images/products/304-tz/304-tz-40mg.webp";
+import tz60 from "../assets/images/products/304-tz/304-tz-60mg.webp";
 
-import sg5 from "../assets/images/products/304-sg/304-sg-5mg.png";
-import sg10 from "../assets/images/products/304-sg/304-sg-10mg.png";
-import sg15 from "../assets/images/products/304-sg/304-sg-15mg.png";
+import sg5 from "../assets/images/products/304-sg/304-sg-5mg.webp";
+import sg10 from "../assets/images/products/304-sg/304-sg-10mg.webp";
+import sg15 from "../assets/images/products/304-sg/304-sg-15mg.webp";
 
-import amino1mq5 from "../assets/images/products/5-amino-1mq/5-amino-1mq-5mg.png";
-import amino1mq10 from "../assets/images/products/5-amino-1mq/5-amino-1mq-10mg.png";
-import amino1mq50 from "../assets/images/products/5-amino-1mq/5-amino-1mq-50mg.png";
+import amino1mq5 from "../assets/images/products/5-amino-1mq/5-amino-1mq-5mg.webp";
+import amino1mq10 from "../assets/images/products/5-amino-1mq/5-amino-1mq-10mg.webp";
+import amino1mq50 from "../assets/images/products/5-amino-1mq/5-amino-1mq-50mg.webp";
 
-import ahk50 from "../assets/images/products/ahk-cu/ahk-cu-50mg.png";
-import ahk100 from "../assets/images/products/ahk-cu/ahk-cu-100mg.png";
-import aod5 from "../assets/images/products/aod-9604/aod-9604-5mg.png";
-import ara29010 from "../assets/images/products/ara-290/ara-290-10mg.png";
+import ahk50 from "../assets/images/products/ahk-cu/ahk-cu-50mg.webp";
+import ahk100 from "../assets/images/products/ahk-cu/ahk-cu-100mg.webp";
+import aod5 from "../assets/images/products/aod-9604/aod-9604-5mg.webp";
+import ara29010 from "../assets/images/products/ara-290/ara-290-10mg.webp";
 
-import bac3 from "../assets/images/products/bac-water/bac-water-3ml.png";
-import bac10 from "../assets/images/products/bac-water/bac-water-10ml.png";
+import bac3 from "../assets/images/products/bac-water/bac-water-3ml.webp";
+import bac10 from "../assets/images/products/bac-water/bac-water-10ml.webp";
 
-import bpc5 from "../assets/images/products/bpc-157/bpc-157-5mg.png";
-import bpc10 from "../assets/images/products/bpc-157/bpc-157-10mg.png";
+import bpc5 from "../assets/images/products/bpc-157/bpc-157-5mg.webp";
+import bpc10 from "../assets/images/products/bpc-157/bpc-157-10mg.webp";
 
-import cagri5 from "../assets/images/products/cagrilintide/cagrilintide-5mg.png";
-import cagri10 from "../assets/images/products/cagrilintide/cagrilintide-10mg.png";
-import cagri20 from "../assets/images/products/cagrilintide/cagrilintide-20mg.png";
+import cagri5 from "../assets/images/products/cagrilintide/cagrilintide-5mg.webp";
+import cagri10 from "../assets/images/products/cagrilintide/cagrilintide-10mg.webp";
+import cagri20 from "../assets/images/products/cagrilintide/cagrilintide-20mg.webp";
 
-import cjcNoDac5 from "../assets/images/products/cjc-1295-no-dac/cjc-1295-no-dac-5mg.png";
-import cjcNoDac10 from "../assets/images/products/cjc-1295-no-dac/cjc-1295-no-dac-10mg.png";
-import cjcIpa10 from "../assets/images/products/cjc-1295-no-dac-ipamorelin/cjc-1295-no-dac-ipamorelin-10mg.png";
-import cjcIpa20 from "../assets/images/products/cjc-1295-no-dac-ipamorelin/cjc-1295-no-dac-ipamorelin-20mg.png";
+import cjcNoDac5 from "../assets/images/products/cjc-1295-no-dac/cjc-1295-no-dac-5mg.webp";
+import cjcNoDac10 from "../assets/images/products/cjc-1295-no-dac/cjc-1295-no-dac-10mg.webp";
+import cjcIpa10 from "../assets/images/products/cjc-1295-no-dac-ipamorelin/cjc-1295-no-dac-ipamorelin-10mg.webp";
+import cjcIpa20 from "../assets/images/products/cjc-1295-no-dac-ipamorelin/cjc-1295-no-dac-ipamorelin-20mg.webp";
 
-import dsip5 from "../assets/images/products/dsip/dsip-5mg.png";
-import dsip10 from "../assets/images/products/dsip/dsip-10mg.png";
+import dsip5 from "../assets/images/products/dsip/dsip-5mg.webp";
+import dsip10 from "../assets/images/products/dsip/dsip-10mg.webp";
 
-import epithalon10 from "../assets/images/products/epithalon/epithalon-10mg.png";
-import epithalon50 from "../assets/images/products/epithalon/epithalon-50mg.png";
+import epithalon10 from "../assets/images/products/epithalon/epithalon-10mg.webp";
+import epithalon50 from "../assets/images/products/epithalon/epithalon-50mg.webp";
 
-import ghk50 from "../assets/images/products/ghk-cu/ghk-cu-50mg.png";
-import ghk100 from "../assets/images/products/ghk-cu/ghk-cu-100mg.png";
-import glow70 from "../assets/images/products/glow/glow-70mg.png";
+import ghk50 from "../assets/images/products/ghk-cu/ghk-cu-50mg.webp";
+import ghk100 from "../assets/images/products/ghk-cu/ghk-cu-100mg.webp";
+import glow70 from "../assets/images/products/glow/glow-70mg.webp";
 
-import glutathione600 from "../assets/images/products/glutathione/glutathione-600mg.png";
-import glutathione1500 from "../assets/images/products/glutathione/glutathione-1500mg.png";
+import glutathione600 from "../assets/images/products/glutathione/glutathione-600mg.webp";
+import glutathione1500 from "../assets/images/products/glutathione/glutathione-1500mg.webp";
 
-import igf01 from "../assets/images/products/igf-1lr3/igf-1lr3-0-1mg.png";
-import igf1 from "../assets/images/products/igf-1lr3/igf-1lr3-1mg.png";
+import igf01 from "../assets/images/products/igf-1lr3/igf-1lr3-0-1mg.webp";
+import igf1 from "../assets/images/products/igf-1lr3/igf-1lr3-1mg.webp";
 
-import ipamorelin5 from "../assets/images/products/ipamorelin/ipamorelin-5mg.png";
-import ipamorelin10 from "../assets/images/products/ipamorelin/ipamorelin-10mg.png";
+import ipamorelin5 from "../assets/images/products/ipamorelin/ipamorelin-5mg.webp";
+import ipamorelin10 from "../assets/images/products/ipamorelin/ipamorelin-10mg.webp";
 
-import kisspeptin5 from "../assets/images/products/kisspeptin/kisspeptin-5mg.png";
-import kisspeptin10 from "../assets/images/products/kisspeptin/kisspeptin-10mg.png";
-import klow80 from "../assets/images/products/klow/klow-80mg.png";
-import kpv10 from "../assets/images/products/kpv/kpv-10mg.png";
-import lemon10 from "../assets/images/products/lemon/lemon-10mg.png";
+import kisspeptin5 from "../assets/images/products/kisspeptin/kisspeptin-5mg.webp";
+import kisspeptin10 from "../assets/images/products/kisspeptin/kisspeptin-10mg.webp";
+import klow80 from "../assets/images/products/klow/klow-80mg.webp";
+import kpv10 from "../assets/images/products/kpv/kpv-10mg.webp";
+import lemon10 from "../assets/images/products/lemon/lemon-10mg.webp";
 
-import melanotan1 from "../assets/images/products/melanotan-1/melanotan-1-10mg.png";
-import melanotan2 from "../assets/images/products/melanotan-2/melanotan-2-10mg.png";
+import melanotan1 from "../assets/images/products/melanotan-1/melanotan-1-10mg.webp";
+import melanotan2 from "../assets/images/products/melanotan-2/melanotan-2-10mg.webp";
 
-import mots10 from "../assets/images/products/mots-c/mots-c-10mg.png";
-import mots40 from "../assets/images/products/mots-c/mots-c-40mg.png";
+import mots10 from "../assets/images/products/mots-c/mots-c-10mg.webp";
+import mots40 from "../assets/images/products/mots-c/mots-c-40mg.webp";
 
-import nad500 from "../assets/images/products/nad-plus/nad-plus-500mg.png";
-import nad1000 from "../assets/images/products/nad-plus/nap-plus-1000mg.png";
+import nad500 from "../assets/images/products/nad-plus/nad-plus-500mg.webp";
+import nad1000 from "../assets/images/products/nad-plus/nap-plus-1000mg.webp";
 
-import oxytocin5 from "../assets/images/products/oxytocin/oxytocin-5mg.png";
-import oxytocin10 from "../assets/images/products/oxytocin/oxytocin-10mg.png";
-import pt14110 from "../assets/images/products/pt-141/pt-141-10mg.png";
+import oxytocin5 from "../assets/images/products/oxytocin/oxytocin-5mg.webp";
+import oxytocin10 from "../assets/images/products/oxytocin/oxytocin-10mg.webp";
+import pt14110 from "../assets/images/products/pt-141/pt-141-10mg.webp";
 
-import selank5 from "../assets/images/products/selank/selank-5mg.png";
-import selank10 from "../assets/images/products/selank/selank-10mg.png";
-import semax5 from "../assets/images/products/semax/semax-5mg.png";
-import semax10 from "../assets/images/products/semax/semax-10mg.png";
-import sermorelin5 from "../assets/images/products/sermorelin/sermorelin-5mg.png";
-import sermorelin10 from "../assets/images/products/sermorelin/sermorelin-10mg.png";
-import snap8 from "../assets/images/products/snap-8/snap-8-10mg.png";
+import selank5 from "../assets/images/products/selank/selank-5mg.webp";
+import selank10 from "../assets/images/products/selank/selank-10mg.webp";
+import semax5 from "../assets/images/products/semax/semax-5mg.webp";
+import semax10 from "../assets/images/products/semax/semax-10mg.webp";
+import sermorelin5 from "../assets/images/products/sermorelin/sermorelin-5mg.webp";
+import sermorelin10 from "../assets/images/products/sermorelin/sermorelin-10mg.webp";
+import snap8 from "../assets/images/products/snap-8/snap-8-10mg.webp";
 
-import ss3110 from "../assets/images/products/ss-31/ss-31-10mg.png";
-import ss3150 from "../assets/images/products/ss-31/ss-31-50mg.png";
+import ss3110 from "../assets/images/products/ss-31/ss-31-10mg.webp";
+import ss3150 from "../assets/images/products/ss-31/ss-31-50mg.webp";
 
-import tb5005 from "../assets/images/products/tb-500/tb-500-5mg.png";
-import tb50010 from "../assets/images/products/tb-500/tb-500-10mg.png";
+import tb5005 from "../assets/images/products/tb-500/tb-500-5mg.webp";
+import tb50010 from "../assets/images/products/tb-500/tb-500-10mg.webp";
 
-import tesamorelin5 from "../assets/images/products/tesamorelin/tesamorelin-5mg.png";
-import tesamorelin10 from "../assets/images/products/tesamorelin/tesamorelin-10mg.png";
-import tesamorelin20 from "../assets/images/products/tesamorelin/tesamorelin-20mg.png";
+import tesamorelin5 from "../assets/images/products/tesamorelin/tesamorelin-5mg.webp";
+import tesamorelin10 from "../assets/images/products/tesamorelin/tesamorelin-10mg.webp";
+import tesamorelin20 from "../assets/images/products/tesamorelin/tesamorelin-20mg.webp";
 
-import thymalin10 from "../assets/images/products/thymalin/thymalin-10mg.png";
-import thymosinAlpha5 from "../assets/images/products/thymosin-alpha-1/thymosin-alpha-1-5mg.png";
-import thymosinAlpha10 from "../assets/images/products/thymosin-alpha-1/thymosin-alpha-1-10mg.png";
+import thymalin10 from "../assets/images/products/thymalin/thymalin-10mg.webp";
+import thymosinAlpha5 from "../assets/images/products/thymosin-alpha-1/thymosin-alpha-1-5mg.webp";
+import thymosinAlpha10 from "../assets/images/products/thymosin-alpha-1/thymosin-alpha-1-10mg.webp";
 
-import vip5 from "../assets/images/products/vip/vip-5mg.png";
-import vip10 from "../assets/images/products/vip/vip-10mg.png";
+import vip5 from "../assets/images/products/vip/vip-5mg.webp";
+import vip10 from "../assets/images/products/vip/vip-10mg.webp";
 
-import wolverine10 from "../assets/images/products/wolverine/wolverine-10mg.png";
-import wolverine20 from "../assets/images/products/wolverine/wolverine-20mg.png";
+import wolverine10 from "../assets/images/products/wolverine/wolverine-10mg.webp";
+import wolverine20 from "../assets/images/products/wolverine/wolverine-20mg.webp";
 
 const pendingStatus = {
   coaStatus: "COA Pending",

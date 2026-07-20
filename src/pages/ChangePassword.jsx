@@ -432,7 +432,7 @@ function ChangePassword({
                   )
                 }
               >
-                Return To Research Hub
+                Return To Account
               </button>
 
               {!formComplete &&

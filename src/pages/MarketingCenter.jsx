@@ -31,14 +31,14 @@ function MarketingCenter({ onNavigate, partnerApplication }) {
           style={{ marginBottom: "30px" }}
           onClick={() => onNavigate("partnerHQ")}
         >
-          ← Back to Partner HQ
+          ← Back to Affiliate Dashboard
         </button>
 
         <div style={heroPanelStyle}>
           <p className="eyebrow">MARKETING CENTER</p>
 
           <h1 style={titleStyle}>
-            Partner Assets
+            Affiliate Assets
           </h1>
 
           <p style={subtitleStyle}>
@@ -57,7 +57,7 @@ function MarketingCenter({ onNavigate, partnerApplication }) {
             <p className="eyebrow">TRACKING LINK</p>
 
             <h2 style={sectionTitleStyle}>
-              Your Partner Link
+              Your Affiliate Link
             </h2>
 
             <div style={trackingBoxStyle}>
@@ -82,7 +82,7 @@ function MarketingCenter({ onNavigate, partnerApplication }) {
             <p className="eyebrow">QR PREVIEW</p>
 
             <h2 style={sideTitleStyle}>
-              Partner QR
+              Affiliate QR
             </h2>
 
             <div style={qrBoxStyle}>
@@ -171,7 +171,7 @@ function MarketingCenter({ onNavigate, partnerApplication }) {
               <h3>QR Graphics</h3>
 
               <p>
-                Partner QR cards and printable inserts can be generated later.
+                Affiliate QR cards and printable inserts can be generated later.
               </p>
             </div>
           </div>
@@ -212,7 +212,7 @@ function MarketingCenter({ onNavigate, partnerApplication }) {
         </div>
 
         <div style={researchNoticeStyle}>
-          Partner materials must remain research-use focused. Not intended for human consumption.
+          Affiliate materials must remain research-use focused. Not intended for human consumption.
         </div>
 
       </section>

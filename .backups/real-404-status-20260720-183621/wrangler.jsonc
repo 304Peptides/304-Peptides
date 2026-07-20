@@ -1,0 +1,58 @@
+﻿{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "304-peptides",
+  "main": "./worker/index.js",
+  "compatibility_date": "2026-07-11",
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "triggers": {
+    "crons": [
+      "*/30 * * * *"
+    ]
+  },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+
+    "html_handling": "drop-trailing-slash",
+    "run_worker_first": [
+      "/api/*",
+      "/r"
+    ]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "DOCUMENTS_KV",
+      "id": "0552e91770584dfe8a8efd274be183a6"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PARTNER_REGISTRY",
+        "class_name": "PartnerRegistry"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "partner-registry-v1",
+      "new_sqlite_classes": [
+        "PartnerRegistry"
+      ]
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "ORDER_RATE_LIMITER",
+      "namespace_id": "304001",
+      "simple": {
+        "limit": 3,
+        "period": 60
+      }
+    }
+  ]
+}

@@ -1985,6 +1985,133 @@ const productDetailsCss = `
       justify-content: center;
     }
   }
+  /* 304 PRODUCT DETAIL FLOW START */
+
+  /*
+    Keep the purchase decision near the product
+    description instead of below the entire COA section.
+  */
+  .product-details-content-panel {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .product-details-content-panel >
+  .product-details-heading-status {
+    order: 1;
+  }
+
+  .product-details-content-panel >
+  .product-details-title {
+    order: 2;
+  }
+
+  .product-details-content-panel >
+  .product-details-code {
+    order: 3;
+  }
+
+  .product-details-content-panel >
+  .product-details-variant-panel {
+    order: 4;
+  }
+
+  .product-details-content-panel >
+  .product-details-description {
+    order: 5;
+  }
+
+  .product-details-content-panel >
+  .product-details-research-notice {
+    order: 6;
+  }
+
+  .product-details-content-panel >
+  .product-details-store-notice {
+    order: 7;
+  }
+
+  .product-details-content-panel >
+  .product-details-purchase-panel {
+    order: 8;
+  }
+
+  .product-details-content-panel >
+  .product-details-agreement-button {
+    order: 9;
+  }
+
+  .product-details-content-panel >
+  .product-details-information-grid {
+    order: 10;
+  }
+
+  .product-details-content-panel >
+  .product-details-verification-panel {
+    order: 11;
+  }
+
+  /*
+    Give the primary purchase area slightly
+    stronger emphasis.
+  */
+  .product-details-purchase-panel {
+    border-color: rgba(61,165,255,0.46);
+    background:
+      radial-gradient(
+        circle at top right,
+        rgba(158,216,255,0.13),
+        transparent 42%
+      ),
+      linear-gradient(
+        135deg,
+        rgba(61,165,255,0.17),
+        rgba(61,165,255,0.08)
+      );
+
+    box-shadow:
+      0 20px 48px rgba(0,0,0,0.28),
+      0 0 30px rgba(61,165,255,0.08);
+  }
+
+  .product-details-purchase-panel .primary-btn {
+    min-width: 190px;
+  }
+
+  /*
+    Separate technical information from
+    the purchase portion of the page.
+  */
+  .product-details-information-grid {
+    padding-top: 24px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .product-details-verification-panel {
+    margin-top: 18px;
+  }
+
+  @media (max-width: 650px) {
+    .product-details-purchase-panel {
+      gap: 16px;
+      padding: 18px;
+    }
+
+    .product-details-purchase-panel > div {
+      width: 100%;
+      text-align: center;
+    }
+
+    .product-details-purchase-panel .primary-btn,
+    .product-details-purchase-panel
+    .product-details-disabled-button {
+      width: 100%;
+      min-width: 0;
+    }
+  }
+
+  /* 304 PRODUCT DETAIL FLOW END */
+
 `;
 
 export default ProductDetails;

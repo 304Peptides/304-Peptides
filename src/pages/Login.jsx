@@ -403,8 +403,8 @@ function Login({
 
             <p>
               Access available pricing, cart features,
-              checkout, order history, the Research Hub,
-              and eligible Partner Program tools.
+              checkout, order history, your Account,
+              and eligible Affiliate Program tools.
             </p>
 
             <div className="login-research-notice">
@@ -426,7 +426,7 @@ function Login({
               </p>
 
               <h2>
-                Research Account
+                Account
               </h2>
 
               <label className="login-field">
@@ -609,7 +609,7 @@ function Login({
                 />
 
                 <BenefitBox
-                  title="Research Hub"
+                  title="Account"
                   description="Review secure account-linked order history and status updates."
                 />
 

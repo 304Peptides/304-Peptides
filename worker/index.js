@@ -105,6 +105,76 @@ export default {
   async fetch(request, env, context) {
     const url = new URL(request.url);
 
+    if (
+      url.pathname.startsWith(
+        "/verify/"
+      )
+    ) {
+      if (
+        !["GET", "HEAD"].includes(
+          request.method
+        )
+      ) {
+        return new Response(
+          null,
+          {
+            status: 405,
+
+            headers: {
+              Allow:
+                "GET, HEAD",
+
+              "Cache-Control":
+                "no-store",
+            },
+          }
+        );
+      }
+
+      const shellUrl =
+        new URL(
+          "/verify",
+          request.url
+        );
+
+      const shellRequest =
+        new Request(
+          shellUrl,
+          request
+        );
+
+      const shellResponse =
+        await env.ASSETS.fetch(
+          shellRequest
+        );
+
+      const headers =
+        new Headers(
+          shellResponse.headers
+        );
+
+      headers.set(
+        "Cache-Control",
+        "no-store"
+      );
+
+      return new Response(
+        request.method === "HEAD"
+          ? null
+          : shellResponse.body,
+
+        {
+          status:
+            shellResponse.status,
+
+          statusText:
+            shellResponse.statusText,
+
+          headers,
+        }
+      );
+    }
+
     if (url.pathname === "/r") {
       return handleReferralTrackingRedirect(request, env, url);
     }

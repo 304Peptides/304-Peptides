@@ -11,6 +11,10 @@ import {
   mergeCatalogRecords,
 } from "../data/catalogRuntime";
 
+import {
+  getProductPath,
+} from "../utils/catalogRoutes";
+
 const storageKey =
   "304-site-settings";
 
@@ -453,6 +457,28 @@ function Products({
     });
   }
 
+  function handleProductLinkClick(
+    event,
+    resolvedProduct
+  ) {
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+
+    openProductDetails(
+      resolvedProduct
+    );
+  }
+
   const filteredProducts =
     useMemo(() => {
       const normalizedSearch =
@@ -617,148 +643,110 @@ function Products({
               published.
             </p>
 
-            <div className="products-status-row">
-              <div className="products-research-pill">
-                For Research Use Only.
-                Not intended for human
-                consumption.
-              </div>
 
-              <div
-                className={
-                  purchasingEnabled
-                    ? "products-store-pill products-store-pill-open"
-                    : "products-store-pill"
-                }
-              >
-                {storeStatusLabel}
-              </div>
-
-              <div className="products-document-pill">
-                {documentsLoading
-                  ? "Checking Documentation"
-                  : documentsError
-                  ? "Documentation Unavailable"
-                  : `${publishedDocumentCount} Published Record${
-                      publishedDocumentCount ===
-                      1
-                        ? ""
-                        : "s"
-                    }`}
-              </div>
-
-              <div className="products-document-pill">
-                {catalogLoading
-                  ? "Checking Inventory"
-                  : catalogError
-                  ? "Inventory Status Unavailable"
-                  : "Live Inventory"}
-              </div>
-            </div>
-
-            {!purchasingEnabled && (
-              <div className="products-store-notice">
-                Product browsing
-                remains available, but
-                purchasing is currently
-                disabled while the
-                store status is{" "}
-                <strong>
-                  {storeStatusLabel}
-                </strong>
-                .
-              </div>
-            )}
-
-            {documentsError && (
-              <div className="products-document-error">
-                Product browsing is
-                available, but live
-                documentation status
-                could not be loaded.
-              </div>
-            )}
           </div>
 
-          <div className="products-filters">
-            <div>
-              <p className="eyebrow">
-                FILTER PRODUCTS
-              </p>
+          <details className="products-filter-drawer">
+            <summary className="products-filter-summary">
+              <span className="products-filter-summary-main">
+                <span className="products-filter-icon">
+                  ☰
+                </span>
 
-              <h2 className="products-section-title">
-                Find Products
-              </h2>
+                <span>
+                  Filters & Search
+                </span>
+              </span>
 
-              <p className="products-category-description">
-                {categoryDescriptions[
-                  activeCategory
-                ] ||
-                  categoryDescriptions[
-                    "All Products"
-                  ]}
-              </p>
-            </div>
-
-            <input
-              type="search"
-              className="products-search"
-              placeholder="Search by product, code, strength, category, batch, or laboratory..."
-              value={searchTerm}
-              onChange={(event) =>
-                setSearchTerm(
-                  event.target.value
-                )
-              }
-            />
-
-            <div className="products-category-row">
-              {categoryOptions.map(
-                (category) => (
-                  <button
-                    key={category}
-                    type="button"
-                    className={
-                      activeCategory ===
-                      category
-                        ? "primary-btn"
-                        : "secondary-btn"
-                    }
-                    onClick={() =>
-                      setActiveCategory(
-                        category
-                      )
-                    }
-                  >
-                    {category}
-                  </button>
-                )
-              )}
-            </div>
-
-            <div className="products-results">
-              <span>
-                Showing{" "}
-                <strong>
-                  {
-                    filteredProducts.length
-                  }
-                </strong>{" "}
-                product
-                {filteredProducts.length ===
-                1
+              <span className="products-filter-summary-meta">
+                {activeCategory} ·{" "}
+                {filteredProducts.length} product
+                {filteredProducts.length === 1
                   ? ""
                   : "s"}
               </span>
+            </summary>
 
-              <span>
-                Active Filter:{" "}
-                <strong>
-                  {activeCategory}
-                </strong>
-              </span>
+            <div className="products-filters">
+              <div>
+                <p className="eyebrow">
+                  FILTER PRODUCTS
+                </p>
+
+                <h2 className="products-section-title">
+                  Find Products
+                </h2>
+
+                <p className="products-category-description">
+                  {categoryDescriptions[
+                    activeCategory
+                  ] ||
+                    categoryDescriptions[
+                      "All Products"
+                    ]}
+                </p>
+              </div>
+
+              <input
+                type="search"
+                className="products-search"
+                placeholder="Search by product, code, strength, category, batch, or laboratory..."
+                value={searchTerm}
+                onChange={(event) =>
+                  setSearchTerm(
+                    event.target.value
+                  )
+                }
+              />
+
+              <div className="products-category-row">
+                {categoryOptions.map(
+                  (category) => (
+                    <button
+                      key={category}
+                      type="button"
+                      className={
+                        activeCategory ===
+                        category
+                          ? "primary-btn"
+                          : "secondary-btn"
+                      }
+                      onClick={() =>
+                        setActiveCategory(
+                          category
+                        )
+                      }
+                    >
+                      {category}
+                    </button>
+                  )
+                )}
+              </div>
+
+              <div className="products-results">
+                <span>
+                  Showing{" "}
+                  <strong>
+                    {
+                      filteredProducts.length
+                    }
+                  </strong>{" "}
+                  product
+                  {filteredProducts.length ===
+                  1
+                    ? ""
+                    : "s"}
+                </span>
+
+                <span>
+                  Active Filter:{" "}
+                  <strong>
+                    {activeCategory}
+                  </strong>
+                </span>
+              </div>
             </div>
-          </div>
+          </details>
 
           {filteredProducts.length ===
           0 ? (
@@ -904,14 +892,22 @@ function Products({
                         </div>
                       </div>
 
-                      <button
-                        type="button"
+                      <a
                         className="products-image-button"
-                        onClick={() =>
-                          openProductDetails(
+
+                        href={
+                          getProductPath(
                             resolvedProduct
                           )
                         }
+
+                        onClick={(event) =>
+                          handleProductLinkClick(
+                            event,
+                            resolvedProduct
+                          )
+                        }
+
                         aria-label={`View ${product.name} ${resolvedProduct.strength}`}
                       >
                         {resolvedProduct.image ? (
@@ -921,6 +917,10 @@ function Products({
                                 resolvedProduct.image
                               }
                               alt={`${product.name} ${resolvedProduct.strength} research product`}
+
+                              loading="lazy"
+
+                              decoding="async"
                             />
 
                             <div className="products-image-glow" />
@@ -955,7 +955,7 @@ function Products({
                             </div>
                           </div>
                         )}
-                      </button>
+                      </a>
 
                       <h2 className="products-product-title">
                         {product.name}
@@ -1209,17 +1209,24 @@ function Products({
                       </div>
 
                       <div className="products-button-stack">
-                        <button
-                          type="button"
+                        <a
                           className="secondary-btn"
-                          onClick={() =>
-                            openProductDetails(
+
+                          href={
+                            getProductPath(
+                              resolvedProduct
+                            )
+                          }
+
+                          onClick={(event) =>
+                            handleProductLinkClick(
+                              event,
                               resolvedProduct
                             )
                           }
                         >
                           View Details
-                        </button>
+                        </a>
 
                         {!hasPrice ? (
                           <button
@@ -1265,17 +1272,24 @@ function Products({
                               : " To Cart"}
                           </button>
                         ) : (
-                          <button
-                            type="button"
+                          <a
                             className="primary-btn"
-                            onClick={() =>
-                              openProductDetails(
+
+                            href={
+                              getProductPath(
+                                resolvedProduct
+                              )
+                            }
+
+                            onClick={(event) =>
+                              handleProductLinkClick(
+                                event,
                                 resolvedProduct
                               )
                             }
                           >
                             View Product
-                          </button>
+                          </a>
                         )}
                       </div>
 
@@ -1325,7 +1339,7 @@ const productsCss = `
   .products-page {
     width: 100%;
     max-width: 100%;
-    padding: 90px 60px;
+    padding: 38px 24px 64px;
     overflow-x: hidden;
   }
 
@@ -1337,9 +1351,9 @@ const productsCss = `
 
   .products-hero,
   .products-unavailable {
-    padding: 64px 56px;
+    padding: 28px 30px;
     border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 34px;
+    border-radius: 22px;
     background:
       radial-gradient(
         circle at top,
@@ -1353,7 +1367,7 @@ const productsCss = `
   }
 
   .products-hero {
-    margin-bottom: 30px;
+    margin-bottom: 18px;
   }
 
   .products-unavailable {
@@ -1362,8 +1376,8 @@ const productsCss = `
   }
 
   .products-title {
-    margin-bottom: 24px;
-    font-size: clamp(46px, 7vw, 72px);
+    margin-bottom: 10px;
+    font-size: clamp(38px, 6vw, 54px);
     line-height: 1.02;
     background:
       linear-gradient(
@@ -1376,11 +1390,11 @@ const productsCss = `
   }
 
   .products-subtitle {
-    max-width: 850px;
+    max-width: 760px;
     margin: 0 auto;
     color: #c8c8c8;
-    font-size: 20px;
-    line-height: 1.85;
+    font-size: 16px;
+    line-height: 1.6;
   }
 
   .products-status-row {
@@ -1444,11 +1458,110 @@ const productsCss = `
     color: #ffd1d1;
   }
 
+  .products-filter-drawer {
+    width: 100%;
+    margin-bottom: 22px;
+  }
+
+  .products-filter-summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 18px;
+    padding: 15px 18px;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    background:
+      radial-gradient(
+        circle at top left,
+        rgba(61,165,255,0.14),
+        transparent 45%
+      ),
+      rgba(255,255,255,0.04);
+    box-shadow:
+      0 18px 45px rgba(0,0,0,0.32);
+    color: #ffffff;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+  }
+
+  .products-filter-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .products-filter-summary::marker {
+    content: "";
+  }
+
+  .products-filter-summary-main {
+    display: inline-flex;
+    align-items: center;
+    gap: 11px;
+    font-size: 14px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+
+  .products-filter-icon {
+    width: 34px;
+    height: 34px;
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 auto;
+    border: 1px solid rgba(61,165,255,0.3);
+    border-radius: 10px;
+    background: rgba(61,165,255,0.13);
+    color: #9ed8ff;
+    font-size: 17px;
+    line-height: 1;
+  }
+
+  .products-filter-summary-meta {
+    color: #9ed8ff;
+    font-size: 12px;
+    font-weight: 800;
+    text-align: right;
+  }
+
+  .products-filter-drawer[open]
+    .products-filter-summary {
+    border-color: rgba(61,165,255,0.32);
+    border-radius: 16px 16px 10px 10px;
+    background:
+      radial-gradient(
+        circle at top left,
+        rgba(61,165,255,0.2),
+        transparent 48%
+      ),
+      rgba(255,255,255,0.055);
+  }
+
+  .products-filter-drawer
+    .products-filters {
+    margin-top: 10px;
+    margin-bottom: 0;
+  }
+
+  @media (max-width: 650px) {
+    .products-filter-summary {
+      align-items: flex-start;
+      flex-wrap: wrap;
+      padding: 13px 14px;
+    }
+
+    .products-filter-summary-meta {
+      width: 100%;
+      padding-left: 45px;
+      text-align: left;
+    }
+  }
   .products-filters {
-    padding: 34px;
-    margin-bottom: 30px;
+    padding: 22px;
+    margin-bottom: 22px;
     border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 30px;
+    border-radius: 22px;
     background:
       radial-gradient(
         circle at top left,
@@ -1461,8 +1574,8 @@ const productsCss = `
   }
 
   .products-section-title {
-    margin-bottom: 14px;
-    font-size: clamp(31px, 5vw, 38px);
+    margin-bottom: 8px;
+    font-size: clamp(28px, 4vw, 34px);
     line-height: 1.12;
     background:
       linear-gradient(
@@ -1476,15 +1589,15 @@ const productsCss = `
 
   .products-category-description {
     max-width: 850px;
-    margin-bottom: 24px;
+    margin-bottom: 14px;
     color: #c8c8c8;
-    line-height: 1.8;
+    line-height: 1.6;
   }
 
   .products-search {
     width: 100%;
-    padding: 17px;
-    margin-bottom: 22px;
+    padding: 13px 15px;
+    margin-bottom: 14px;
     border: 1px solid rgba(255,255,255,0.12);
     border-radius: 16px;
     outline: none;
@@ -1496,16 +1609,16 @@ const productsCss = `
   .products-category-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: 8px;
   }
 
   .products-results {
     display: flex;
     justify-content: space-between;
-    gap: 16px;
+    gap: 12px;
     flex-wrap: wrap;
-    margin-top: 24px;
-    padding: 16px;
+    margin-top: 15px;
+    padding: 12px 14px;
     border: 1px solid rgba(255,255,255,0.09);
     border-radius: 16px;
     background: rgba(255,255,255,0.045);
@@ -1592,6 +1705,8 @@ const productsCss = `
     margin: 0 0 22px;
     border: none;
     background: transparent;
+    color: inherit;
+    text-decoration: none;
     cursor: pointer;
   }
 
@@ -1949,6 +2064,11 @@ const productsCss = `
     margin-top: 18px;
   }
 
+  .products-button-stack > a {
+    width: 100%;
+    text-decoration: none;
+  }
+
   .products-disabled-button {
     width: 100%;
     padding: 14px 18px;
@@ -1986,19 +2106,19 @@ const productsCss = `
 
   @media (max-width: 900px) {
     .products-page {
-      padding: 65px 24px;
+      padding: 32px 18px 56px;
     }
   }
 
   @media (max-width: 650px) {
     .products-page {
-      padding: 44px 12px;
+      padding: 24px 10px 46px;
     }
 
     .products-hero,
     .products-unavailable {
-      padding: 34px 20px;
-      border-radius: 25px;
+      padding: 22px 16px;
+      border-radius: 20px;
     }
 
     .products-filters,
@@ -2029,7 +2149,7 @@ const productsCss = `
 
   @media (max-width: 430px) {
     .products-page {
-      padding: 34px 8px;
+      padding: 18px 8px 40px;
     }
 
     .products-hero,
@@ -2065,7 +2185,7 @@ const productsCss = `
     }
 
     .products-link-button,
-    .products-button-stack button {
+    .products-button-stack > * {
       width: 100%;
     }
   }

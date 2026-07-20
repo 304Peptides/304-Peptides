@@ -362,7 +362,7 @@ function Navbar({
 
           {navButton(
             "partners",
-            "Partners"
+            "Affiliates"
           )}
 
           {navButton(
@@ -379,7 +379,7 @@ function Navbar({
             <>
               {navButton(
                 "dashboard",
-                "Research Hub"
+                "Account"
               )}
 
               {settings.catalogEnabled && (

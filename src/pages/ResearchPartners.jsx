@@ -1,46 +1,60 @@
+// 304 AFFILIATE PROGRAM PAGE UPGRADE
 function ResearchPartners({ onNavigate }) {
   const partnerSteps = [
     {
       title: "Create Account",
-      text: "Start with a research account so activity can be connected to your profile.",
+      text: "Create your customer account to begin your research journey.",
     },
     {
-      title: "Place First Order",
-      text: "Partner application access unlocks after the first completed test order.",
+      title: "Complete Your First Order",
+      text: "After your first completed order, you will become eligible to apply for the Affiliate Program.",
     },
     {
-      title: "Apply For Code",
-      text: "Request a custom partner code that fits your brand or audience.",
+      title: "Apply",
+      text: "Submit your affiliate application and choose your preferred referral code.",
     },
     {
-      title: "Use Approved Assets",
-      text: "Share research-use focused captions, tracking links, and approved language.",
+      title: "Start Sharing",
+      text: "Access approved marketing resources, share responsibly, and begin earning rewards on qualifying referrals.",
     },
   ];
 
   const levels = [
-    "Research Associate",
-    "Senior Research Associate",
-    "Lead Research Associate",
-    "Principal Research Associate",
-    "Research Director",
+    "🥉 Bronze Affiliate",
+    "🥈 Silver Affiliate",
+    "🥇 Gold Affiliate",
+    "💎 Platinum Affiliate",
+    "👑 Elite Affiliate",
+  ];
+
+  const affiliateBenefits = [
+    "Custom Affiliate Code",
+    "Real-Time Performance Tracking",
+    "Monthly Promotions",
+    "Store Credit Bonuses",
+    "Cash Commission Options",
+    "Marketing Resources",
+    "Leaderboards",
+    "Future VIP Benefits",
   ];
 
   return (
     <main style={{ padding: "90px 60px" }}>
       <section style={{ maxWidth: "1200px", margin: "0 auto" }}>
-
         <div style={heroPanelStyle}>
-          <p className="eyebrow">RESEARCH PARTNERS</p>
+          <p className="eyebrow">AFFILIATE PROGRAM</p>
 
           <h1 style={titleStyle}>
-            Built For Trusted Referrals
+            Grow Your Reach.
+            <br />
+            Earn Rewards.
           </h1>
 
           <p style={subtitleStyle}>
-            The 304 Research Partner program is designed around clean tracking,
-            approved language, research-use standards, and rewards without making
-            it feel like a gimmick.
+            The 304 Peptides Affiliate Program is designed for trusted members of
+            the research community who want to share quality products responsibly.
+            Earn rewards for qualifying referrals while promoting transparency,
+            education, and research-use standards.
           </p>
 
           <div style={buttonRowStyle}>
@@ -55,7 +69,7 @@ function ResearchPartners({ onNavigate }) {
               className="secondary-btn"
               onClick={() => onNavigate("partnerApplication")}
             >
-              Apply For Partner Code
+              Apply For Affiliate Code
             </button>
 
             <button
@@ -68,74 +82,97 @@ function ResearchPartners({ onNavigate }) {
         </div>
 
         <div style={overviewGridStyle}>
-
           <div style={panelStyle}>
             <p className="eyebrow">PROGRAM OVERVIEW</p>
 
             <h2 style={sectionTitleStyle}>
-              Simple Partner Flow
+              How the Affiliate Program Works
             </h2>
 
             <p style={textStyle}>
-              Customers can apply after their first completed order. Approved
-              partners receive a code, a tracking link, access to approved
-              captions, and future reward options.
+              Once you have completed your first qualifying order, you can apply
+              for an affiliate account. Approved affiliates receive a unique
+              referral code, access to marketing resources, performance tracking,
+              and ongoing reward opportunities.
             </p>
 
             <div style={noticeBoxStyle}>
-              Self-purchases do not earn commission or discount, but they can count
-              toward activity metrics in the prototype.
+              Orders placed using your own affiliate code do not earn commissions
+              or discounts, but they may count toward activity metrics and
+              affiliate milestones.
             </div>
           </div>
 
           <aside style={sidePanelStyle}>
             <p className="eyebrow">REWARD OPTIONS</p>
 
-            <h2 style={sideTitleStyle}>
-              Cash Or Credit
-            </h2>
+            <h2 style={sideTitleStyle}>Choose Your Rewards</h2>
 
             <div style={rewardStackStyle}>
               <div style={rewardBoxStyle}>
-                <strong>$100 Cash</strong>
-                <span>Example partner payout option.</span>
+                <strong>Cash Payouts</strong>
+                <span>
+                  Receive commission payouts once minimum payout requirements are
+                  met.
+                </span>
               </div>
 
               <div style={rewardBoxStyle}>
-                <strong>$125 Store Credit</strong>
-                <span>Boosted credit option for store use.</span>
+                <strong>Store Credit</strong>
+                <span>
+                  Choose enhanced store credit for even greater value on future
+                  research purchases.
+                </span>
               </div>
 
               <div style={rewardBoxStyle}>
-                <strong>Leaderboard Rewards</strong>
-                <span>Monthly and quarterly reward ideas.</span>
+                <strong>Exclusive Rewards</strong>
+                <span>
+                  Top-performing affiliates may qualify for monthly promotions,
+                  limited-edition merchandise, and special recognition.
+                </span>
               </div>
             </div>
           </aside>
+        </div>
 
+        <div style={benefitsPanelStyle}>
+          <div style={benefitsIntroStyle}>
+            <p className="eyebrow">WHY JOIN?</p>
+
+            <h2 style={sectionTitleStyle}>
+              Built To Reward Responsible Growth
+            </h2>
+
+            <p style={textStyle}>
+              Get the tools, tracking, and reward options you need to share the
+              304 Peptides brand professionally and responsibly.
+            </p>
+          </div>
+
+          <div style={benefitsGridStyle}>
+            {affiliateBenefits.map((benefit) => (
+              <div key={benefit} style={benefitCardStyle}>
+                <span style={benefitCheckStyle}>✓</span>
+                <span>{benefit}</span>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div style={stepsPanelStyle}>
           <p className="eyebrow">HOW IT WORKS</p>
 
-          <h2 style={sectionTitleStyle}>
-            Partner Path
-          </h2>
+          <h2 style={sectionTitleStyle}>Affiliate Journey</h2>
 
           <div style={stepsGridStyle}>
             {partnerSteps.map((step, index) => (
               <div key={step.title} style={stepCardStyle}>
-                <div style={stepNumberStyle}>
-                  {index + 1}
-                </div>
+                <div style={stepNumberStyle}>{index + 1}</div>
 
-                <h3 style={stepTitleStyle}>
-                  {step.title}
-                </h3>
+                <h3 style={stepTitleStyle}>{step.title}</h3>
 
-                <p style={stepTextStyle}>
-                  {step.text}
-                </p>
+                <p style={stepTextStyle}>{step.text}</p>
               </div>
             ))}
           </div>
@@ -143,16 +180,16 @@ function ResearchPartners({ onNavigate }) {
 
         <div style={levelsPanelStyle}>
           <div>
-            <p className="eyebrow">PARTNER LEVELS</p>
+            <p className="eyebrow">AFFILIATE LEVELS</p>
 
             <h2 style={sectionTitleStyle}>
-              Growth Without The MLM Feel
+              Progress That Rewards Consistency
             </h2>
 
             <p style={textStyle}>
-              Partner levels can make the program feel rewarding without turning it
-              into a confusing multi-level structure. Keep it simple: activity,
-              trust, clean promotion, and consistent standards.
+              Affiliate levels reward consistency, professionalism, and long-term
+              participation. Progress is based on activity and program engagement,
+              not recruitment.
             </p>
           </div>
 
@@ -166,11 +203,9 @@ function ResearchPartners({ onNavigate }) {
         </div>
 
         <div style={languagePanelStyle}>
-          <p className="eyebrow">PARTNER RULES</p>
+          <p className="eyebrow">AFFILIATE GUIDELINES</p>
 
-          <h2 style={sectionTitleStyle}>
-            Approved Promotion Only
-          </h2>
+          <h2 style={sectionTitleStyle}>Approved Promotion Only</h2>
 
           <div style={languageGridStyle}>
             <div style={approvedBoxStyle}>
@@ -200,15 +235,14 @@ function ResearchPartners({ onNavigate }) {
         </div>
 
         <div style={ctaPanelStyle}>
-          <p className="eyebrow">READY TO BUILD IT OUT?</p>
+          <p className="eyebrow">READY TO JOIN?</p>
 
-          <h2 style={ctaTitleStyle}>
-            Partner Tools Are Already Started
-          </h2>
+          <h2 style={ctaTitleStyle}>Become a 304 Affiliate</h2>
 
           <p style={ctaTextStyle}>
-            Use the Partner HQ and Marketing Center to preview what approved
-            partners will see after launch.
+            Apply today to receive your custom affiliate code, gain access to your
+            Affiliate Dashboard, and start earning rewards for helping grow the
+            304 Peptides community.
           </p>
 
           <div style={buttonRowStyle}>
@@ -216,18 +250,17 @@ function ResearchPartners({ onNavigate }) {
               className="primary-btn"
               onClick={() => onNavigate("partnerHQ")}
             >
-              Open Partner HQ
+              Affiliate Dashboard
             </button>
 
             <button
               className="secondary-btn"
               onClick={() => onNavigate("marketingCenter")}
             >
-              Marketing Center
+              Marketing Resources
             </button>
           </div>
         </div>
-
       </section>
     </main>
   );
@@ -342,6 +375,57 @@ const rewardBoxStyle = {
   borderRadius: "16px",
   padding: "16px",
   color: "#c8c8c8",
+};
+
+const benefitsPanelStyle = {
+  display: "grid",
+  gridTemplateColumns: "0.9fr 1.1fr",
+  gap: "30px",
+  alignItems: "center",
+  background:
+    "radial-gradient(circle at top left, rgba(61, 165, 255, 0.14), transparent 38%), rgba(255, 255, 255, 0.035)",
+  border: "1px solid rgba(255, 255, 255, 0.09)",
+  borderRadius: "28px",
+  padding: "38px",
+  boxShadow: "0 30px 80px rgba(0,0,0,0.45)",
+  marginBottom: "30px",
+};
+
+const benefitsIntroStyle = {
+  alignSelf: "start",
+};
+
+const benefitsGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: "14px",
+};
+
+const benefitCardStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: "12px",
+  minHeight: "64px",
+  background: "rgba(255,255,255,0.045)",
+  border: "1px solid rgba(255,255,255,0.09)",
+  borderRadius: "16px",
+  padding: "16px",
+  color: "#ffffff",
+  fontWeight: "800",
+};
+
+const benefitCheckStyle = {
+  width: "30px",
+  height: "30px",
+  flex: "0 0 30px",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  borderRadius: "10px",
+  background: "rgba(61,165,255,0.14)",
+  border: "1px solid rgba(61,165,255,0.35)",
+  color: "#9ed8ff",
+  fontWeight: "900",
 };
 
 const stepsPanelStyle = {

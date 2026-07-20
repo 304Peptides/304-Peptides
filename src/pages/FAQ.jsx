@@ -21,7 +21,7 @@ function FAQ({ onNavigate }) {
         "In the prototype, QR codes are placeholders. Later, each QR code can connect to a product-specific verification page with matching COA and batch data.",
     },
     {
-      question: "How does the Research Partner program work?",
+      question: "How does the Affiliate Program work?",
       answer:
         "Customers can apply after their first completed order. Approved partners can receive a custom code, tracking link, marketing assets, and future reward options.",
     },

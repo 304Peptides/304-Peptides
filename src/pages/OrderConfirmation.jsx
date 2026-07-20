@@ -280,6 +280,8 @@ function OrderConfirmation({
     [rawItems]
   );
 
+  const [copyStatus, setCopyStatus] = useState("");
+
   if (
     !latestOrder
   ) {
@@ -331,7 +333,7 @@ function OrderConfirmation({
                   )
                 }
               >
-                Research Hub
+                Account
               </button>
             </div>
           </section>
@@ -340,7 +342,7 @@ function OrderConfirmation({
     );
   }
 
-  const subtotal =
+  const calculatedMerchandiseSubtotal =
     items.reduce(
       (
         total,
@@ -367,19 +369,62 @@ function OrderConfirmation({
       0
     );
 
+  const merchandiseSubtotal =
+    Number.isFinite(
+      Number(
+        latestOrder.merchandiseSubtotal
+      )
+    )
+      ? Number(
+          latestOrder.merchandiseSubtotal
+        )
+      : calculatedMerchandiseSubtotal;
+
+  const discount =
+    Number.isFinite(
+      Number(
+        latestOrder.discount
+      )
+    )
+      ? Math.max(
+          0,
+          Number(
+            latestOrder.discount
+          )
+        )
+      : 0;
+
+  const discountedSubtotal =
+    Number.isFinite(
+      Number(
+        latestOrder.subtotal
+      )
+    )
+      ? Number(
+          latestOrder.subtotal
+        )
+      : Math.max(
+          0,
+          merchandiseSubtotal -
+            discount
+        );
+
   const shippingFee =
     Number.isFinite(
       Number(latestOrder.shippingFee)
     )
       ? Number(latestOrder.shippingFee)
-      : calculateShippingFee(subtotal);
+      : calculateShippingFee(
+          discountedSubtotal
+        );
 
   const orderTotal =
     Number.isFinite(
       Number(latestOrder.total)
     )
       ? Number(latestOrder.total)
-      : calculateOrderTotal(subtotal);
+      : discountedSubtotal +
+        shippingFee;
 
   const totalQuantity =
     latestOrder.totalQuantity ||
@@ -467,6 +512,33 @@ function OrderConfirmation({
     latestOrder.paymentLabel ||
     "Not selected";
 
+  const couponCode =
+    latestOrder.couponCode ||
+    "";
+
+  const referralCode =
+    latestOrder.referralCode ||
+    "";
+
+  async function handleCopyOrderNumber() {
+    try {
+      await navigator.clipboard.writeText(
+        String(orderNumber)
+      );
+      setCopyStatus("Copied");
+      window.setTimeout(
+        () => setCopyStatus(""),
+        1800
+      );
+    } catch {
+      setCopyStatus("Copy failed");
+      window.setTimeout(
+        () => setCopyStatus(""),
+        1800
+      );
+    }
+  }
+
   return (
     <>
       <style>
@@ -478,134 +550,150 @@ function OrderConfirmation({
       <main className="confirmation-page">
         <section className="confirmation-inner">
           <header className="confirmation-success-panel">
-            <div className="confirmation-check-icon">
-              ✓
+            <div className="confirmation-success-top">
+              <div className="confirmation-check-icon">
+                ✓
+              </div>
+
+              <div className="confirmation-success-copy">
+                <p className="eyebrow">
+                  ORDER REQUEST RECEIVED
+                </p>
+
+                <h1>Request Submitted</h1>
+
+                <p>
+                  We received your order request. Watch{" "}
+                  <strong>{customerEmail}</strong> for the
+                  invoice and payment instructions after
+                  review.
+                </p>
+              </div>
+
+              <div className="confirmation-order-id-card">
+                <span>Order Number</span>
+                <strong>{orderNumber}</strong>
+
+                <button
+                  type="button"
+                  className="confirmation-copy-button"
+                  onClick={handleCopyOrderNumber}
+                >
+                  {copyStatus || "Copy Number"}
+                </button>
+              </div>
             </div>
 
-            <p className="eyebrow">
-              ORDER REQUEST
-              RECEIVED
-            </p>
+            <div className="confirmation-next-steps">
+              <div>
+                <span>1</span>
+                <strong>Request Received</strong>
+                <small>Your order details were recorded.</small>
+              </div>
 
-            <h1>
-              Thank You
-            </h1>
+              <div>
+                <span>2</span>
+                <strong>Invoice Review</strong>
+                <small>Pricing and availability are confirmed.</small>
+              </div>
 
-            <p>
-              Your order
-              request was
-              successfully
-              submitted. Review
-              the details below
-              and watch your
-              email for the
-              invoice and
-              payment
-              instructions.
-            </p>
-
-            <div className="confirmation-order-number">
-              Order #
-              {
-                orderNumber
-              }
+              <div>
+                <span>3</span>
+                <strong>Payment Instructions</strong>
+                <small>Instructions are sent to your email.</small>
+              </div>
             </div>
           </header>
 
           <div className="confirmation-layout">
             <section className="confirmation-details-panel">
-              <p className="eyebrow">
-                ORDER DETAILS
-              </p>
+              <div className="confirmation-section-heading">
+                <div>
+                  <p className="eyebrow">ORDER DETAILS</p>
+                  <h2>Confirmation Summary</h2>
+                </div>
 
-              <h2>
-                Order Summary
-              </h2>
+                <button
+                  type="button"
+                  className="secondary-btn confirmation-print-button"
+                  onClick={() => window.print()}
+                >
+                  Print Confirmation
+                </button>
+              </div>
 
               <div className="confirmation-summary-grid">
                 <SummaryBox
-                  label="Order Number"
-                  value={
-                    orderNumber
-                  }
-                />
-
-                <SummaryBox
                   label="Order Date"
-                  value={
-                    orderDate
-                  }
+                  value={orderDate}
                 />
 
                 <SummaryBox
                   label="Status"
-                  value={
-                    orderStatus
-                  }
+                  value={orderStatus}
                 />
 
                 <SummaryBox
                   label="Total Items"
-                  value={
-                    totalQuantity
-                  }
+                  value={totalQuantity}
+                />
+
+                <SummaryBox
+                  label="Payment Preference"
+                  value={paymentLabel}
                 />
               </div>
 
               <section className="confirmation-customer-panel">
-                <p className="eyebrow">
-                  CUSTOMER
-                  INFORMATION
-                </p>
+                <div className="confirmation-panel-heading">
+                  <div>
+                    <p className="eyebrow">
+                      SHIPPING INFORMATION
+                    </p>
+                    <h2>Delivery Details</h2>
+                  </div>
 
-                <h2>
-                  Shipping
-                  Details
-                </h2>
+                  <span className="confirmation-status-pill">
+                    Address Recorded
+                  </span>
+                </div>
 
                 <div className="confirmation-customer-grid">
                   <SummaryBox
                     label="Name"
-                    value={
-                      customerName
-                    }
+                    value={customerName}
                   />
 
                   <SummaryBox
                     label="Email"
-                    value={
-                      customerEmail
-                    }
+                    value={customerEmail}
                   />
 
                   <div className="confirmation-address-box">
-                    <span>
-                      Shipping
-                      Address
-                    </span>
-
-                    <strong>
-                      {
-                        customerAddress
-                      }
-                    </strong>
+                    <span>Shipping Address</span>
+                    <strong>{customerAddress}</strong>
                   </div>
                 </div>
               </section>
 
               <section className="confirmation-items-panel">
-                <p className="eyebrow">
-                  PRODUCTS
-                  ORDERED
-                </p>
+                <div className="confirmation-panel-heading">
+                  <div>
+                    <p className="eyebrow">
+                      PRODUCTS ORDERED
+                    </p>
+                    <h2>Research Products</h2>
+                  </div>
 
-                <h2>
-                  Research
-                  Products
-                </h2>
+                  <span className="confirmation-status-pill">
+                    {items.length}{" "}
+                    {items.length === 1
+                      ? "Product"
+                      : "Products"}
+                  </span>
+                </div>
 
-                {items.length >
-                0 ? (
+                {items.length > 0 ? (
                   <div className="confirmation-item-stack">
                     {items.map(
                       (
@@ -634,61 +722,47 @@ function OrderConfirmation({
                             className="confirmation-item-card"
                           >
                             <ProductImage
-                              item={
-                                item
-                              }
+                              item={item}
                             />
 
                             <div className="confirmation-item-copy">
                               <p className="confirmation-category">
-                                {
-                                  item.category
-                                }
+                                {item.category}
                               </p>
 
-                              <h3>
-                                {
-                                  item.name
-                                }
-                              </h3>
+                              <h3>{item.name}</h3>
 
                               <p>
-                                {
-                                  item.codeName
-                                }
-
+                                {item.codeName}
                                 {item.codeName &&
                                 item.strength
                                   ? " · "
                                   : ""}
-
-                                {
-                                  item.strength
-                                }
+                                {item.strength}
                               </p>
 
-                              <p>
-                                Quantity:{" "}
-                                {
-                                  quantity
-                                }{" "}
-                                ·{" "}
-                                {
-                                  formatMoney(
+                              <div className="confirmation-item-meta">
+                                <span>
+                                  Qty {quantity}
+                                </span>
+
+                                <span>
+                                  {formatMoney(
                                     price
-                                  )
-                                }{" "}
-                                each
-                              </p>
+                                  )}{" "}
+                                  each
+                                </span>
+                              </div>
                             </div>
 
-                            <strong className="confirmation-line-total">
-                              {
-                                formatMoney(
+                            <div className="confirmation-line-total">
+                              <span>Line Total</span>
+                              <strong>
+                                {formatMoney(
                                   lineTotal
-                                )
-                              }
-                            </strong>
+                                )}
+                              </strong>
+                            </div>
                           </article>
                         );
                       }
@@ -696,11 +770,8 @@ function OrderConfirmation({
                   </div>
                 ) : (
                   <div className="confirmation-no-items">
-                    Product
-                    details were
-                    not included
-                    with this
-                    order record.
+                    Product details were not included with
+                    this order record.
                   </div>
                 )}
               </section>
@@ -708,67 +779,95 @@ function OrderConfirmation({
 
             <aside className="confirmation-side-panel">
               <p className="eyebrow">
-                PRODUCT
-                SUBTOTAL
+                ORDER TOTAL
               </p>
 
-              <h2>
-                {formatMoney(orderTotal)}
-              </h2>
+              <div className="confirmation-total-display">
+                <span>Estimated Total</span>
+                <strong>
+                  {formatMoney(orderTotal)}
+                </strong>
+              </div>
 
-              <SummaryRow
-                label="Products"
-                value={
-                  items.length
-                }
-              />
+              <div className="confirmation-price-breakdown">
+                <SummaryRow
+                  label="Products"
+                  value={items.length}
+                />
 
-              <SummaryRow
-                label="Total Items"
-                value={
-                  totalQuantity
-                }
-              />
+                <SummaryRow
+                  label="Total Items"
+                  value={totalQuantity}
+                />
 
-              <SummaryRow
-                label="Product Subtotal"
-                value={
-                  formatMoney(
-                    subtotal
-                  )
-                }
-              />
+                <SummaryRow
+                  label="Merchandise"
+                  value={formatMoney(
+                    merchandiseSubtotal
+                  )}
+                />
 
-              <SummaryRow
-                label="Shipping"
-                value={
-                  shippingFee === 0
-                    ? "FREE"
-                    : formatMoney(shippingFee)
-                }
-              />
+                {discount > 0 && (
+                  <SummaryRow
+                    label="Discount"
+                    value={`-${formatMoney(
+                      discount
+                    )}`}
+                  />
+                )}
 
-              <SummaryRow
-                label="Order Total"
-                value={formatMoney(orderTotal)}
-              />
+                <SummaryRow
+                  label="Product Total"
+                  value={formatMoney(
+                    discountedSubtotal
+                  )}
+                />
 
-              <SummaryRow
-                label="Payment Preference"
-                value={
-                  paymentLabel
-                }
-              />
+                <SummaryRow
+                  label="Shipping"
+                  value={
+                    shippingFee === 0
+                      ? "FREE"
+                      : formatMoney(
+                          shippingFee
+                        )
+                  }
+                />
+              </div>
+
+              {(couponCode || referralCode) && (
+                <div className="confirmation-code-panel">
+                  {couponCode && (
+                    <div>
+                      <span>Coupon</span>
+                      <strong>{couponCode}</strong>
+                    </div>
+                  )}
+
+                  {referralCode && (
+                    <div>
+                      <span>Affiliate Code</span>
+                      <strong>{referralCode}</strong>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="confirmation-grand-total">
+                <span>Order Total</span>
+                <strong>
+                  {formatMoney(orderTotal)}
+                </strong>
+              </div>
 
               <div className="confirmation-notice-box">
                 <strong>
-                  Payment has
-                  not been
-                  collected.
+                  No payment was collected.
                 </strong>
 
                 <span>
-                  Shipping is $15 for product subtotals under $100 and free at $100 or more. Review the invoice before sending payment.
+                  Review the invoice sent by email before
+                  using the provided payment instructions.
                 </span>
               </div>
 
@@ -781,8 +880,7 @@ function OrderConfirmation({
                   )
                 }
               >
-                Open Research
-                Hub
+                View My Account
               </button>
 
               <button
@@ -794,30 +892,14 @@ function OrderConfirmation({
                   )
                 }
               >
-                Continue
-                Shopping
-              </button>
-
-              <button
-                type="button"
-                className="secondary-btn confirmation-full-button"
-                onClick={() =>
-                  onNavigate(
-                    "researchAgreement"
-                  )
-                }
-              >
-                Research
-                Agreement
+                Continue Shopping
               </button>
             </aside>
           </div>
 
           <div className="confirmation-research-notice">
-            For Research Use
-            Only. Products are
-            not intended for
-            human consumption.
+            <span>RESEARCH USE ONLY</span>
+            Products are not intended for human consumption.
           </div>
         </section>
       </main>
@@ -909,6 +991,8 @@ function SummaryRow({
 }
 
 const orderConfirmationCss = `
+  /* 304 ORDER CONFIRMATION EXPERIENCE UPGRADE */
+
   .confirmation-page,
   .confirmation-page *,
   .confirmation-page *::before,
@@ -919,141 +1003,256 @@ const orderConfirmationCss = `
   .confirmation-page {
     width: 100%;
     max-width: 100%;
-    padding: 90px 60px;
+    padding: 52px 36px 70px;
     overflow-x: hidden;
   }
 
   .confirmation-inner {
     width: 100%;
-    max-width: 1200px;
+    max-width: 1180px;
     margin: 0 auto;
   }
 
   .confirmation-empty-panel,
-  .confirmation-success-panel {
-    padding: 60px;
+  .confirmation-success-panel,
+  .confirmation-details-panel,
+  .confirmation-side-panel {
     border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 30px;
     background:
       radial-gradient(
-        circle at top,
-        rgba(61,165,255,0.2),
-        transparent 42%
+        circle at top left,
+        rgba(61,165,255,0.13),
+        transparent 38%
       ),
       rgba(255,255,255,0.035);
-    box-shadow:
-      0 30px 90px rgba(0,0,0,0.5);
-    text-align: center;
+    box-shadow: 0 24px 70px rgba(0,0,0,0.38);
   }
 
   .confirmation-empty-panel {
-    max-width: 900px;
-    margin: 0 auto;
+    max-width: 820px;
+    margin: 30px auto;
+    padding: 48px;
+    border-radius: 28px;
+    text-align: center;
   }
 
-  .confirmation-success-panel {
-    margin-bottom: 30px;
-  }
-
-  .confirmation-empty-panel h1,
-  .confirmation-success-panel h1 {
-    margin-bottom: 20px;
-    font-size: clamp(44px, 7vw, 62px);
+  .confirmation-empty-panel h1 {
+    margin: 8px 0 14px;
+    font-size: clamp(38px, 6vw, 54px);
     line-height: 1.05;
-    background:
-      linear-gradient(
-        180deg,
-        #ffffff,
-        #9d9d9d
-      );
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: #ffffff;
   }
 
-  .confirmation-empty-panel > p:not(.eyebrow),
-  .confirmation-success-panel > p:not(.eyebrow) {
-    max-width: 780px;
+  .confirmation-empty-panel > p:not(.eyebrow) {
+    max-width: 620px;
     margin: 0 auto;
     color: #c8c8c8;
-    font-size: 19px;
-    line-height: 1.8;
+    font-size: 17px;
+    line-height: 1.7;
   }
 
   .confirmation-button-row {
     display: flex;
     justify-content: center;
-    gap: 16px;
+    gap: 12px;
     flex-wrap: wrap;
-    margin-top: 28px;
+    margin-top: 24px;
+  }
+
+  .confirmation-success-panel {
+    margin-bottom: 22px;
+    padding: 28px;
+    border-radius: 26px;
+  }
+
+  .confirmation-success-top {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) minmax(220px, 280px);
+    gap: 22px;
+    align-items: center;
   }
 
   .confirmation-check-icon {
-    width: 86px;
-    height: 86px;
+    width: 68px;
+    height: 68px;
     display: grid;
     place-items: center;
-    margin: 0 auto 24px;
-    border: 1px solid rgba(61,165,255,0.35);
-    border-radius: 50%;
+    border: 1px solid rgba(61,165,255,0.38);
+    border-radius: 20px;
+    background:
+      linear-gradient(
+        145deg,
+        rgba(61,165,255,0.22),
+        rgba(61,165,255,0.08)
+      );
+    color: #bce7ff;
+    font-size: 34px;
+    font-weight: 900;
+    box-shadow: 0 14px 36px rgba(61,165,255,0.13);
+  }
+
+  .confirmation-success-copy {
+    min-width: 0;
+  }
+
+  .confirmation-success-copy h1 {
+    margin: 5px 0 8px;
+    color: #ffffff;
+    font-size: clamp(34px, 5vw, 50px);
+    line-height: 1.02;
+  }
+
+  .confirmation-success-copy > p:not(.eyebrow) {
+    max-width: 650px;
+    margin: 0;
+    color: #c8c8c8;
+    font-size: 15px;
+    line-height: 1.65;
+  }
+
+  .confirmation-success-copy strong {
+    color: #ffffff;
+    overflow-wrap: anywhere;
+  }
+
+  .confirmation-order-id-card {
+    min-width: 0;
+    display: grid;
+    gap: 6px;
+    padding: 16px;
+    border: 1px solid rgba(61,165,255,0.25);
+    border-radius: 18px;
+    background: rgba(61,165,255,0.09);
+  }
+
+  .confirmation-order-id-card > span,
+  .confirmation-total-display > span,
+  .confirmation-line-total > span,
+  .confirmation-code-panel span,
+  .confirmation-grand-total > span {
+    color: #9ed8ff;
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.9px;
+  }
+
+  .confirmation-order-id-card > strong {
+    color: #ffffff;
+    font-size: 16px;
+    overflow-wrap: anywhere;
+  }
+
+  .confirmation-copy-button {
+    width: 100%;
+    margin-top: 5px;
+    padding: 9px 12px;
+    border: 1px solid rgba(61,165,255,0.28);
+    border-radius: 10px;
+    background: rgba(61,165,255,0.12);
+    color: #bce7ff;
+    font-weight: 900;
+    cursor: pointer;
+    transition:
+      transform 160ms ease,
+      border-color 160ms ease,
+      background 160ms ease;
+  }
+
+  .confirmation-copy-button:hover {
+    transform: translateY(-1px);
+    border-color: rgba(61,165,255,0.52);
+    background: rgba(61,165,255,0.18);
+  }
+
+  .confirmation-next-steps {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 22px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(255,255,255,0.07);
+  }
+
+  .confirmation-next-steps > div {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 10px;
+    align-items: center;
+    padding: 12px;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 14px;
+    background: rgba(0,0,0,0.12);
+  }
+
+  .confirmation-next-steps > div > span {
+    grid-row: 1 / 3;
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border-radius: 9px;
     background: rgba(61,165,255,0.14);
     color: #9ed8ff;
-    font-size: 46px;
     font-weight: 900;
   }
 
-  .confirmation-order-number {
-    display: inline-flex;
-    margin-top: 30px;
-    padding: 15px 24px;
-    border: 1px solid rgba(61,165,255,0.28);
-    border-radius: 999px;
-    background: rgba(61,165,255,0.12);
-    color: #9ed8ff;
-    font-size: 20px;
-    font-weight: 900;
-    overflow-wrap: anywhere;
+  .confirmation-next-steps strong {
+    color: #ffffff;
+    font-size: 13px;
+  }
+
+  .confirmation-next-steps small {
+    margin-top: 2px;
+    color: #8f9ca6;
+    font-size: 11px;
+    line-height: 1.4;
   }
 
   .confirmation-layout {
     display: grid;
     grid-template-columns:
       minmax(0, 1fr)
-      minmax(330px, 370px);
-    gap: 30px;
+      minmax(315px, 350px);
+    gap: 22px;
     align-items: start;
   }
 
   .confirmation-details-panel,
   .confirmation-side-panel {
     min-width: 0;
-    padding: 38px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 30px;
-    background:
-      radial-gradient(
-        circle at top left,
-        rgba(61,165,255,0.14),
-        transparent 35%
-      ),
-      rgba(255,255,255,0.035);
-    box-shadow:
-      0 30px 80px rgba(0,0,0,0.45);
+    padding: 26px;
+    border-radius: 26px;
   }
 
-  .confirmation-details-panel > h2,
-  .confirmation-customer-panel > h2,
-  .confirmation-items-panel > h2 {
-    margin-bottom: 24px;
-    font-size: clamp(29px, 4vw, 38px);
-    line-height: 1.12;
-    background:
-      linear-gradient(
-        180deg,
-        #ffffff,
-        #9d9d9d
-      );
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+  .confirmation-section-heading,
+  .confirmation-panel-heading {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+  }
+
+  .confirmation-section-heading {
+    margin-bottom: 18px;
+  }
+
+  .confirmation-panel-heading {
+    margin-bottom: 16px;
+  }
+
+  .confirmation-section-heading h2,
+  .confirmation-panel-heading h2 {
+    margin: 5px 0 0;
+    color: #ffffff;
+    font-size: clamp(24px, 3vw, 32px);
+    line-height: 1.1;
+  }
+
+  .confirmation-print-button {
+    flex: 0 0 auto;
+    padding: 10px 14px;
   }
 
   .confirmation-summary-grid,
@@ -1061,92 +1260,115 @@ const orderConfirmationCss = `
     display: grid;
     grid-template-columns:
       repeat(2, minmax(0, 1fr));
-    gap: 14px;
+    gap: 10px;
   }
 
   .confirmation-summary-grid {
-    margin-bottom: 30px;
+    margin-bottom: 18px;
   }
 
   .confirmation-summary-box,
   .confirmation-address-box {
     min-width: 0;
     display: grid;
-    gap: 6px;
-    padding: 16px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 16px;
-    background: rgba(255,255,255,0.045);
-    color: #c8c8c8;
+    gap: 5px;
+    padding: 13px 14px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    background: rgba(255,255,255,0.035);
     overflow-wrap: anywhere;
   }
 
   .confirmation-summary-box span,
   .confirmation-address-box span {
-    color: #9ed8ff;
-    font-size: 11px;
+    color: #8dcdf5;
+    font-size: 10px;
     font-weight: 900;
     text-transform: uppercase;
-    letter-spacing: 0.7px;
+    letter-spacing: 0.75px;
   }
 
   .confirmation-summary-box strong,
   .confirmation-address-box strong {
     color: #ffffff;
-    line-height: 1.5;
+    font-size: 14px;
+    line-height: 1.45;
   }
 
   .confirmation-customer-panel,
   .confirmation-items-panel {
-    padding: 26px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 24px;
-    background: rgba(255,255,255,0.035);
+    padding: 20px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 20px;
+    background: rgba(255,255,255,0.025);
   }
 
   .confirmation-customer-panel {
-    margin-bottom: 30px;
+    margin-bottom: 18px;
+  }
+
+  .confirmation-status-pill {
+    flex: 0 0 auto;
+    padding: 7px 10px;
+    border: 1px solid rgba(61,165,255,0.22);
+    border-radius: 999px;
+    background: rgba(61,165,255,0.08);
+    color: #9ed8ff;
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.65px;
   }
 
   .confirmation-address-box {
     grid-column: 1 / -1;
-    border-color: rgba(61,165,255,0.22);
-    background: rgba(61,165,255,0.1);
+    border-color: rgba(61,165,255,0.2);
+    background: rgba(61,165,255,0.07);
   }
 
   .confirmation-item-stack {
     display: grid;
-    gap: 16px;
+    gap: 10px;
   }
 
   .confirmation-item-card {
     min-width: 0;
     display: grid;
     grid-template-columns:
-      110px minmax(0, 1fr) auto;
-    gap: 20px;
+      78px minmax(0, 1fr) auto;
+    gap: 14px;
     align-items: center;
-    padding: 18px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 20px;
-    background: rgba(255,255,255,0.045);
+    padding: 12px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    background: rgba(255,255,255,0.035);
+    transition:
+      transform 160ms ease,
+      border-color 160ms ease,
+      background 160ms ease;
+  }
+
+  .confirmation-item-card:hover {
+    transform: translateY(-1px);
+    border-color: rgba(61,165,255,0.2);
+    background: rgba(61,165,255,0.045);
   }
 
   .confirmation-product-image-wrap {
-    width: 110px;
-    height: 135px;
+    width: 78px;
+    height: 94px;
     display: grid;
     place-items: center;
     overflow: hidden;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 13px;
     background:
       radial-gradient(
         circle at center,
-        rgba(61,165,255,0.13),
-        transparent 65%
+        rgba(61,165,255,0.12),
+        transparent 68%
       ),
-      rgba(0,0,0,0.18);
+      rgba(0,0,0,0.15);
   }
 
   .confirmation-product-image-wrap img {
@@ -1154,19 +1376,19 @@ const orderConfirmationCss = `
     height: 100%;
     display: block;
     object-fit: contain;
-    padding: 8px;
+    padding: 6px;
   }
 
   .confirmation-image-fallback {
-    width: 82px;
-    min-height: 74px;
+    width: 62px;
+    min-height: 56px;
     display: grid;
     align-content: center;
     justify-items: center;
-    gap: 5px;
-    padding: 10px;
-    border: 1px solid rgba(61,165,255,0.35);
-    border-radius: 12px;
+    gap: 3px;
+    padding: 7px;
+    border: 1px solid rgba(61,165,255,0.3);
+    border-radius: 10px;
     background:
       linear-gradient(
         180deg,
@@ -1179,12 +1401,12 @@ const orderConfirmationCss = `
 
   .confirmation-image-fallback strong {
     color: #9ed8ff;
-    font-size: 20px;
+    font-size: 16px;
   }
 
   .confirmation-image-fallback span {
     max-width: 100%;
-    font-size: 10px;
+    font-size: 8px;
     overflow-wrap: anywhere;
   }
 
@@ -1193,66 +1415,101 @@ const orderConfirmationCss = `
   }
 
   .confirmation-category {
-    margin-bottom: 6px;
-    color: #9ed8ff;
-    font-size: 12px;
+    margin: 0 0 4px;
+    color: #8dcdf5;
+    font-size: 9px;
     font-weight: 900;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 0.9px;
   }
 
   .confirmation-item-copy h3 {
-    margin-bottom: 6px;
+    margin: 0 0 4px;
     color: #ffffff;
-    font-size: 24px;
+    font-size: 18px;
     overflow-wrap: anywhere;
   }
 
-  .confirmation-item-copy p:not(.confirmation-category) {
-    margin-top: 4px;
-    color: #aaaaaa;
-    font-size: 14px;
-    line-height: 1.6;
+  .confirmation-item-copy > p:not(.confirmation-category) {
+    margin: 0;
+    color: #9ca6ae;
+    font-size: 12px;
+    line-height: 1.5;
     overflow-wrap: anywhere;
+  }
+
+  .confirmation-item-meta {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+    margin-top: 7px;
+  }
+
+  .confirmation-item-meta span {
+    padding: 4px 7px;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 8px;
+    background: rgba(0,0,0,0.13);
+    color: #c7d0d7;
+    font-size: 10px;
+    font-weight: 800;
   }
 
   .confirmation-line-total {
-    color: #9ed8ff;
-    font-size: 22px;
+    min-width: 90px;
+    display: grid;
+    gap: 3px;
+    justify-items: end;
+    text-align: right;
+  }
+
+  .confirmation-line-total strong {
+    color: #bce7ff;
+    font-size: 18px;
     white-space: nowrap;
   }
 
   .confirmation-no-items {
-    padding: 20px;
-    border: 1px dashed rgba(255,255,255,0.15);
-    border-radius: 16px;
-    color: #aaaaaa;
+    padding: 18px;
+    border: 1px dashed rgba(255,255,255,0.14);
+    border-radius: 14px;
+    color: #9ca6ae;
     line-height: 1.6;
     text-align: center;
   }
 
   .confirmation-side-panel {
     position: sticky;
-    top: 110px;
+    top: 104px;
   }
 
-  .confirmation-side-panel > h2 {
-    margin-bottom: 24px;
-    color: #9ed8ff;
-    font-size: clamp(40px, 6vw, 52px);
-    line-height: 1.05;
+  .confirmation-total-display {
+    display: grid;
+    gap: 5px;
+    margin: 7px 0 17px;
+  }
+
+  .confirmation-total-display strong {
+    color: #bce7ff;
+    font-size: clamp(38px, 5vw, 48px);
+    line-height: 1;
+  }
+
+  .confirmation-price-breakdown {
+    display: grid;
+    gap: 0;
+    padding: 4px 0;
+    border-top: 1px solid rgba(255,255,255,0.07);
+    border-bottom: 1px solid rgba(255,255,255,0.07);
   }
 
   .confirmation-summary-row {
     display: flex;
     justify-content: space-between;
-    gap: 18px;
-    margin-bottom: 12px;
-    padding: 15px;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 14px;
-    background: rgba(255,255,255,0.045);
-    color: #c8c8c8;
+    gap: 16px;
+    padding: 9px 0;
+    color: #aeb8c0;
+    font-size: 13px;
   }
 
   .confirmation-summary-row strong {
@@ -1261,45 +1518,111 @@ const orderConfirmationCss = `
     overflow-wrap: anywhere;
   }
 
+  .confirmation-code-panel {
+    display: grid;
+    gap: 8px;
+    margin-top: 13px;
+  }
+
+  .confirmation-code-panel > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid rgba(61,165,255,0.16);
+    border-radius: 12px;
+    background: rgba(61,165,255,0.05);
+  }
+
+  .confirmation-code-panel strong {
+    color: #ffffff;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+    text-align: right;
+  }
+
+  .confirmation-grand-total {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-end;
+    margin-top: 15px;
+    padding: 14px;
+    border: 1px solid rgba(61,165,255,0.26);
+    border-radius: 15px;
+    background:
+      linear-gradient(
+        135deg,
+        rgba(61,165,255,0.15),
+        rgba(61,165,255,0.06)
+      );
+  }
+
+  .confirmation-grand-total strong {
+    color: #ffffff;
+    font-size: 22px;
+    white-space: nowrap;
+  }
+
   .confirmation-notice-box {
     display: grid;
-    gap: 7px;
-    margin-top: 20px;
-    padding: 16px;
-    border: 1px solid rgba(61,165,255,0.28);
-    border-radius: 16px;
-    background: rgba(61,165,255,0.12);
-    color: #9ed8ff;
-    font-size: 14px;
-    line-height: 1.6;
+    gap: 5px;
+    margin-top: 14px;
+    padding: 13px;
+    border: 1px solid rgba(61,165,255,0.2);
+    border-radius: 14px;
+    background: rgba(61,165,255,0.07);
+    color: #acdfff;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  .confirmation-notice-box strong {
+    color: #ffffff;
   }
 
   .confirmation-full-button {
     width: 100%;
-    margin-top: 14px;
+    margin-top: 10px;
   }
 
   .confirmation-side-panel .primary-btn {
-    margin-top: 24px;
+    margin-top: 18px;
   }
 
   .confirmation-research-notice {
-    margin-top: 30px;
-    padding: 20px;
-    border: 1px solid rgba(61,165,255,0.28);
-    border-radius: 20px;
-    background: rgba(61,165,255,0.12);
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 22px;
+    padding: 13px 18px;
+    border: 1px solid rgba(61,165,255,0.18);
+    border-radius: 14px;
+    background: rgba(61,165,255,0.06);
+    color: #b7c9d5;
+    font-size: 11px;
+    font-weight: 800;
+    text-align: center;
+  }
+
+  .confirmation-research-notice span {
     color: #9ed8ff;
     font-weight: 900;
-    line-height: 1.6;
-    text-align: center;
-    text-transform: uppercase;
-    letter-spacing: 1px;
   }
 
   @media (max-width: 1000px) {
     .confirmation-page {
-      padding: 65px 24px;
+      padding: 42px 22px 60px;
+    }
+
+    .confirmation-success-top {
+      grid-template-columns:
+        auto minmax(0, 1fr);
+    }
+
+    .confirmation-order-id-card {
+      grid-column: 1 / -1;
     }
 
     .confirmation-layout {
@@ -1314,15 +1637,40 @@ const orderConfirmationCss = `
 
   @media (max-width: 720px) {
     .confirmation-page {
-      padding: 44px 12px;
+      padding: 32px 12px 46px;
     }
 
-    .confirmation-empty-panel,
     .confirmation-success-panel,
     .confirmation-details-panel,
     .confirmation-side-panel {
-      padding: 22px 18px;
-      border-radius: 22px;
+      padding: 18px;
+      border-radius: 20px;
+    }
+
+    .confirmation-success-top {
+      grid-template-columns:
+        minmax(0, 1fr);
+      text-align: center;
+    }
+
+    .confirmation-check-icon {
+      margin: 0 auto;
+    }
+
+    .confirmation-next-steps {
+      grid-template-columns:
+        minmax(0, 1fr);
+    }
+
+    .confirmation-section-heading,
+    .confirmation-panel-heading {
+      flex-direction: column;
+    }
+
+    .confirmation-print-button,
+    .confirmation-status-pill {
+      align-self: stretch;
+      text-align: center;
     }
 
     .confirmation-summary-grid,
@@ -1337,28 +1685,24 @@ const orderConfirmationCss = `
 
     .confirmation-item-card {
       grid-template-columns:
-        90px minmax(0, 1fr);
-      align-items: center;
+        68px minmax(0, 1fr);
     }
 
     .confirmation-product-image-wrap {
-      width: 90px;
-      height: 115px;
+      width: 68px;
+      height: 84px;
     }
 
     .confirmation-line-total {
       grid-column: 2;
-    }
-
-    .confirmation-button-row,
-    .confirmation-button-row button {
-      width: 100%;
+      justify-items: start;
+      text-align: left;
     }
   }
 
   @media (max-width: 480px) {
     .confirmation-page {
-      padding: 34px 8px;
+      padding: 24px 8px 38px;
     }
 
     .confirmation-empty-panel,
@@ -1367,7 +1711,7 @@ const orderConfirmationCss = `
     .confirmation-side-panel,
     .confirmation-customer-panel,
     .confirmation-items-panel {
-      padding: 15px;
+      padding: 14px;
     }
 
     .confirmation-item-card {
@@ -1377,19 +1721,45 @@ const orderConfirmationCss = `
 
     .confirmation-product-image-wrap {
       width: 100%;
-      height: 180px;
+      height: 150px;
     }
 
     .confirmation-line-total {
       grid-column: auto;
     }
 
-    .confirmation-summary-row {
+    .confirmation-grand-total {
+      align-items: flex-start;
       flex-direction: column;
     }
+  }
 
-    .confirmation-summary-row strong {
-      text-align: left;
+  @media print {
+    .confirmation-page {
+      padding: 0;
+      color: #000000;
+    }
+
+    .confirmation-print-button,
+    .confirmation-full-button,
+    .confirmation-copy-button {
+      display: none !important;
+    }
+
+    .confirmation-success-panel,
+    .confirmation-details-panel,
+    .confirmation-side-panel,
+    .confirmation-customer-panel,
+    .confirmation-items-panel,
+    .confirmation-summary-box,
+    .confirmation-address-box,
+    .confirmation-item-card {
+      box-shadow: none;
+      break-inside: avoid;
+    }
+
+    .confirmation-side-panel {
+      position: static;
     }
   }
 `;

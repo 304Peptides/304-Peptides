@@ -1,11 +1,11 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 const ADMIN_SESSION_KEY = "304-document-admin-session";
 
 const APPLICATION_FILTERS = [
   ["all", "All Applications"],
   ["pending", "Pending Review"],
-  ["approved", "Approved Partners"],
+  ["approved", "Approved Affiliates"],
   ["suspended", "Suspended Partners"],
   ["denied", "Denied Applications"],
 ];
@@ -587,11 +587,11 @@ async function readJson(response) {
   try {
     result = JSON.parse(text);
   } catch {
-    throw new Error("The protected Partner Program service returned an invalid response.");
+    throw new Error("The protected Affiliate Program service returned an invalid response.");
   }
   if (!response.ok || !result.success) {
     throw new Error(
-      result.error || "The protected Partner Program request could not be completed."
+      result.error || "The protected Affiliate Program request could not be completed."
     );
   }
   return result;
@@ -903,7 +903,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
         setAnalyticsError("");
         setLeaderboardReward(null);
         setIsReady(false);
-        setLoadError(error.message || "Partner records could not be loaded.");
+        setLoadError(error.message || "Affiliate records could not be loaded.");
       } finally {
         setIsLoading(false);
       }
@@ -1779,10 +1779,10 @@ function PartnerHQ({ onNavigate = () => {} }) {
           )
         )
       );
-      setActionMessage(result.message || "The Partner Program record was updated.");
+      setActionMessage(result.message || "The Affiliate Program record was updated.");
       closeActionPanel();
     } catch (error) {
-      setActionError(error.message || "The Partner Program action failed.");
+      setActionError(error.message || "The Affiliate Program action failed.");
       setIsActing(false);
     }
   }
@@ -2434,7 +2434,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
       status === "published"
         ? "publish this campaign to approved partners"
         : status === "archived"
-        ? "archive and remove this campaign from the Partner Marketing Center"
+        ? "archive and remove this campaign from the Affiliate Marketing Center"
         : "return this campaign to draft status";
 
     if (!window.confirm(`Are you sure you want to ${actionText}?`)) return;
@@ -2480,7 +2480,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
         <main className="partner-hq-page">
           <section className="partner-hq-login-card">
             <p className="eyebrow">PROTECTED ADMIN AREA</p>
-            <h1>Partner HQ</h1>
+            <h1>Affiliate Dashboard</h1>
             <p>
               Cloudflare Access protects this route. Enter the same administrator
               secret used by Customer Manager.
@@ -2498,7 +2498,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
               </label>
               {loadError && <Notice type="error">{loadError}</Notice>}
               <button type="submit" className="primary-btn partner-hq-full-button">
-                Unlock Partner HQ
+                Unlock Affiliate Dashboard
               </button>
             </form>
             <button
@@ -2529,7 +2529,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
             </button>
             <div className="partner-hq-topbar-actions">
               <span className="partner-hq-source-pill">
-                {isReady ? "Live Partner Registry" : "Registry Locked"}
+                {isReady ? "Live Affiliate Registry" : "Registry Locked"}
               </span>
               <button
                 type="button"
@@ -2544,7 +2544,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
           <header className="partner-hq-hero">
             <div>
               <p className="eyebrow">304 PEPTIDES ADMIN</p>
-              <h1>Partner HQ</h1>
+              <h1>Affiliate Dashboard</h1>
               <p>
                 Review applications, control partner access, set commission rates,
                 audit referrals, measure referral traffic and conversion, record payouts,
@@ -2557,7 +2557,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
               disabled={isLoading}
               onClick={() => loadPartnerData(adminSecret)}
             >
-              {isLoading ? "Refreshing..." : "Refresh Partner Data"}
+              {isLoading ? "Refreshing..." : "Refresh Affiliate Data"}
             </button>
           </header>
 
@@ -2603,7 +2603,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
               </label>
 
               <label className="partner-hq-field">
-                <span>Partner</span>
+                <span>Affiliate</span>
                 <select
                   value={analyticsPartnerCode}
                   disabled={isLoadingAnalytics}
@@ -2674,7 +2674,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
               <StatCard
                 label="Earned Commission"
                 value={formatMoneyFromCents(analytics.summary.earnedCommissionCents)}
-                detail="Partner commission generated"
+                detail="Affiliate commission generated"
               />
             </section>
 
@@ -2685,7 +2685,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                 emptyText="Tracked partner traffic will appear after referral links are opened."
                 rows={analytics.byPartner}
                 columns={[
-                  { label: "Partner", render: (row) => row.partnerCode || "Unknown" },
+                  { label: "Affiliate", render: (row) => row.partnerCode || "Unknown" },
                   { label: "Clicks", render: (row) => row.totalClicks.toLocaleString("en-US") },
                   { label: "Visitors", render: (row) => row.uniqueVisitors.toLocaleString("en-US") },
                   { label: "Orders", render: (row) => row.attributedOrders.toLocaleString("en-US") },
@@ -3047,7 +3047,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                     onChange={(event) => setAdminNotes(event.target.value)}
                     maxLength="2000"
                     disabled={isActing}
-                    placeholder="Visible only inside protected Partner HQ."
+                    placeholder="Visible only inside protected Affiliate Dashboard."
                   />
                   <small>{adminNotes.length}/2000 characters</small>
                 </label>
@@ -3148,7 +3148,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                   />
                 </label>
                 <label className="partner-hq-field">
-                  <span>Partner Note â€” Optional</span>
+                  <span>Affiliate Note â€” Optional</span>
                   <textarea
                     rows="4"
                     maxLength="1000"
@@ -3170,7 +3170,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                     maxLength="2000"
                     value={issueForm.adminNotes}
                     disabled={isIssuingReward}
-                    placeholder="Visible only in Partner HQ."
+                    placeholder="Visible only in Affiliate Dashboard."
                     onChange={(event) =>
                       setIssueForm((current) => ({
                         ...current,
@@ -3329,7 +3329,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                   />
                 </label>
                 <label className="partner-hq-field">
-                  <span>Partner Note â€” Optional</span>
+                  <span>Affiliate Note â€” Optional</span>
                   <textarea
                     rows="4"
                     maxLength="1000"
@@ -3351,7 +3351,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                     maxLength="2000"
                     value={payoutForm.adminNotes}
                     disabled={isCreatingPayout}
-                    placeholder="Visible only inside protected Partner HQ."
+                    placeholder="Visible only inside protected Affiliate Dashboard."
                     onChange={(event) =>
                       setPayoutForm((current) => ({
                         ...current,
@@ -3392,7 +3392,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
             <div className="partner-hq-section-heading">
               <div>
                 <p className="eyebrow">PAYOUT ELIGIBILITY</p>
-                <h2>Partner Balances</h2>
+                <h2>Affiliate Balances</h2>
               </div>
               <span>
                 Current minimum: <strong>{formatMoneyFromCents(settings.minimumPayoutCents)}</strong>
@@ -3411,7 +3411,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                       <h3>
                         {`${application.firstName || ""} ${application.lastName || ""}`.trim() ||
                           application.email ||
-                          "Partner unavailable"}
+                          "Affiliate unavailable"}
                       </h3>
                       <p className="partner-hq-muted">{application.email}</p>
                     </div>
@@ -3516,7 +3516,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                   <thead>
                     <tr>
                       <th>Rank</th>
-                      <th>Partner</th>
+                      <th>Affiliate</th>
                       <th>Earned Referrals</th>
                       <th>Revenue</th>
                       <th>Commission</th>
@@ -3531,7 +3531,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                         <td>
                           <strong>{entry.partnerCode}</strong>
                           <small>
-                            {`${entry.partnerFirstName || ""} ${entry.partnerLastName || ""}`.trim() || entry.partnerEmail || "Partner"}
+                            {`${entry.partnerFirstName || ""} ${entry.partnerLastName || ""}`.trim() || entry.partnerEmail || "Affiliate"}
                           </small>
                         </td>
                         <td>{entry.referralCount}</td>
@@ -3567,7 +3567,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                 </div>
                 <div className="partner-hq-form-grid">
                   <label className="partner-hq-field">
-                    <span>Partner Note â€” Optional</span>
+                    <span>Affiliate Note â€” Optional</span>
                     <textarea
                       rows="3"
                       maxLength="1000"
@@ -3584,7 +3584,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                       maxLength="2000"
                       value={awardAdminNotes}
                       disabled={isAwardingReward}
-                      placeholder="Visible only in Partner HQ."
+                      placeholder="Visible only in Affiliate Dashboard."
                       onChange={(event) => setAwardAdminNotes(event.target.value)}
                     />
                   </label>
@@ -3626,7 +3626,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                         <p className="eyebrow">{reward.periodKey} Â· {reward.periodType}</p>
                         <h3>{reward.partnerCode}</h3>
                         <p className="partner-hq-muted">
-                          {`${reward.partnerFirstName || ""} ${reward.partnerLastName || ""}`.trim() || reward.partnerEmail || "Partner"}
+                          {`${reward.partnerFirstName || ""} ${reward.partnerLastName || ""}`.trim() || reward.partnerEmail || "Affiliate"}
                         </p>
                       </div>
                       <StatusPill status={reward.status} />
@@ -3641,7 +3641,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                       <QuickDetail label="Delivery" value={reward.deliveryMethod || "Not issued"} />
                       <QuickDetail label="Reference" value={reward.referenceNumber || "Not supplied"} />
                     </div>
-                    {reward.partnerNote && <DetailBlock title="Partner Note" text={reward.partnerNote} highlighted />}
+                    {reward.partnerNote && <DetailBlock title="Affiliate Note" text={reward.partnerNote} highlighted />}
                     {reward.adminNotes && <DetailBlock title="Private Admin Notes" text={reward.adminNotes} privateNote />}
                     {reward.status !== "issued" && (
                       <div className="partner-hq-button-row">
@@ -3917,7 +3917,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
             <div className="partner-hq-section-heading">
               <div>
                 <p className="eyebrow">APPLICATION DIRECTORY</p>
-                <h2>Partner Records</h2>
+                <h2>Affiliate Records</h2>
               </div>
               <span>
                 Showing <strong>{filteredApplications.length}</strong> of{" "}
@@ -3947,7 +3947,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
               </label>
             </div>
             {isLoading ? (
-              <EmptyState title="Loading Applications" text="Retrieving protected Partner Program records." />
+              <EmptyState title="Loading Applications" text="Retrieving protected Affiliate Program records." />
             ) : filteredApplications.length === 0 ? (
               <EmptyState title="No Matching Applications" text="No applications match the current filters." />
             ) : (
@@ -4058,7 +4058,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
             <div className="partner-hq-section-heading">
               <div>
                 <p className="eyebrow">FRAUD & ABUSE REVIEW</p>
-                <h2>Partner Risk Review Queue</h2>
+                <h2>Affiliate Risk Review Queue</h2>
                 <p className="partner-hq-muted">
                   Automated signals identify patterns that may need human review.
                   A flag does not prove abuse, cancel commission, or place a payout
@@ -4572,7 +4572,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                         <p className="eyebrow">{referral.partnerCode}</p>
                         <h3>Order #{referral.orderId}</h3>
                         <p className="partner-hq-muted">
-                          {`${referral.partnerFirstName || ""} ${referral.partnerLastName || ""}`.trim() || referral.partnerEmail || "Partner unavailable"}
+                          {`${referral.partnerFirstName || ""} ${referral.partnerLastName || ""}`.trim() || referral.partnerEmail || "Affiliate unavailable"}
                         </p>
                       </div>
                       <ReferralStatusPill status={referral.commissionStatus} />
@@ -4690,7 +4690,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
             <div className="partner-hq-section-heading">
               <div>
                 <p className="eyebrow">PAYOUT LEDGER</p>
-                <h2>Recorded Partner Payouts</h2>
+                <h2>Recorded Affiliate Payouts</h2>
               </div>
               <span>
                 <strong>{payouts.length}</strong> payout batch(es)
@@ -4722,7 +4722,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                       </span>
                     </div>
                     <div className="partner-hq-referral-grid">
-                      <QuickDetail label="Partner" value={`${payout.partnerFirstName || ""} ${payout.partnerLastName || ""}`.trim() || payout.partnerEmail || payout.partnerCode} />
+                      <QuickDetail label="Affiliate" value={`${payout.partnerFirstName || ""} ${payout.partnerLastName || ""}`.trim() || payout.partnerEmail || payout.partnerCode} />
                       <QuickDetail label="Paid" value={formatDate(payout.paidAt)} />
                       <QuickDetail label="Method" value={payout.paymentMethod || "Unavailable"} />
                       <QuickDetail label="Reference" value={payout.referenceNumber || "Not supplied"} />
@@ -4731,7 +4731,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                       <QuickDetail label="Recorded By" value={payout.createdBy || "Unavailable"} />
                       <QuickDetail label="Recorded" value={formatDate(payout.createdAt)} />
                     </div>
-                    {payout.partnerNote && <DetailBlock title="Partner Note" text={payout.partnerNote} highlighted />}
+                    {payout.partnerNote && <DetailBlock title="Affiliate Note" text={payout.partnerNote} highlighted />}
                     {payout.adminNotes && <DetailBlock title="Private Admin Notes" text={payout.adminNotes} privateNote />}
                   </article>
                 ))}
@@ -4854,16 +4854,16 @@ function EmptyState({ title, text }) {
 }
 
 function getActionTitle(action) {
-  return ({ approve: "Approve Partner Application", deny: "Deny Partner Application", suspend: "Suspend Partner Access", reactivate: "Reactivate Partner Access" }[action] || "Update Partner Record");
+  return ({ approve: "Approve Affiliate Application", deny: "Deny Affiliate Application", suspend: "Suspend Affiliate Access", reactivate: "Reactivate Affiliate Access" }[action] || "Update Affiliate Record");
 }
 
 function getActionButtonLabel(action) {
-  return ({ approve: "Approve Application", deny: "Deny Application", suspend: "Suspend Partner", reactivate: "Reactivate Partner" }[action] || "Save Action");
+  return ({ approve: "Approve Application", deny: "Deny Application", suspend: "Suspend Affiliate", reactivate: "Reactivate Affiliate" }[action] || "Save Action");
 }
 
 function getCustomerMessagePlaceholder(action) {
   if (action === "deny") return "Explain why the application was not approved and what may be changed before reapplying.";
-  if (action === "suspend") return "Explain why Partner Program access was suspended and how the partner may contact support.";
+  if (action === "suspend") return "Explain why Affiliate Program access was suspended and how the partner may contact support.";
   return action === "approve" ? "Optional welcome or approval message shown to the partner." : "Optional reactivation message shown to the partner.";
 }
 

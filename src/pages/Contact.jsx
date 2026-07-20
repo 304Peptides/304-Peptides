@@ -222,7 +222,7 @@ function Contact({ onNavigate = () => {} }) {
                     <option>Certificate Of Analysis</option>
                     <option>Existing Order</option>
                     <option>Account Support</option>
-                    <option>Research Partner Program</option>
+                    <option>Affiliate Program</option>
                     <option>Website Support</option>
                   </select>
                 </label>

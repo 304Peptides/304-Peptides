@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 
 const platformOptions = [
@@ -349,12 +349,12 @@ async function readApiJson(response) {
   try {
     result = JSON.parse(text);
   } catch {
-    throw new Error("The Partner Program service returned an invalid response.");
+    throw new Error("The Affiliate Program service returned an invalid response.");
   }
 
   if (!response.ok || !result.success) {
     const error = new Error(
-      result.error || "The Partner Program request could not be completed."
+      result.error || "The Affiliate Program request could not be completed."
     );
 
     error.status = response.status;
@@ -533,7 +533,7 @@ function PartnerApplication({
       });
     } catch (error) {
       setLeaderboardError(
-        error.message || "Partner leaderboard data could not be loaded."
+        error.message || "Affiliate leaderboard data could not be loaded."
       );
     } finally {
       setIsLeaderboardLoading(false);
@@ -561,7 +561,7 @@ function PartnerApplication({
       setCampaigns(Array.isArray(result.campaigns) ? result.campaigns : []);
     } catch (error) {
       setCampaignError(
-        error.message || "Partner marketing campaigns could not be loaded."
+        error.message || "Affiliate marketing campaigns could not be loaded."
       );
     } finally {
       setIsCampaignsLoading(false);
@@ -624,7 +624,7 @@ function PartnerApplication({
       });
     } catch (error) {
       setSummaryError(
-        error.message || "Partner referral history could not be loaded."
+        error.message || "Affiliate referral history could not be loaded."
       );
     } finally {
       setIsSummaryLoading(false);
@@ -701,7 +701,7 @@ function PartnerApplication({
           } catch (error) {
             if (active) {
               setSummaryError(
-                error.message || "Partner referral history could not be loaded."
+                error.message || "Affiliate referral history could not be loaded."
               );
             }
           } finally {
@@ -711,7 +711,7 @@ function PartnerApplication({
       } catch (error) {
         if (active) {
           setLoadError(
-            error.message || "Partner Program access could not be loaded."
+            error.message || "Affiliate Program access could not be loaded."
           );
         }
       } finally {
@@ -865,7 +865,7 @@ function PartnerApplication({
 
       setApplication(savedApplication);
       setSuccessMessage(
-        result.message || "Your Partner Program application was submitted."
+        result.message || "Your Affiliate Program application was submitted."
       );
 
       if (typeof onSubmitApplication === "function") {
@@ -898,7 +898,7 @@ function PartnerApplication({
       <PageShell>
         <StateCard
           eyebrow="PARTNER PROGRAM"
-          title="Loading Partner Center"
+          title="Loading Affiliate Center"
           text="Checking your secure account eligibility, application, and referral record."
         />
       </PageShell>
@@ -910,7 +910,7 @@ function PartnerApplication({
       <PageShell>
         <StateCard
           eyebrow="PARTNER PROGRAM"
-          title="Partner Center Unavailable"
+          title="Affiliate Center Unavailable"
           text={loadError}
         >
           <div className="partner-button-row">
@@ -951,7 +951,7 @@ function PartnerApplication({
               className="secondary-btn"
               onClick={() => onNavigate("dashboard")}
             >
-              â† Research Hub
+              â† Account
             </button>
 
             <StatusPill status={application.status} />
@@ -959,7 +959,7 @@ function PartnerApplication({
 
           <header className="partner-hero">
             <p className="eyebrow">304 PEPTIDES PARTNER CENTER</p>
-            <h1>{isApproved ? "Referral Dashboard" : "Partner Access Suspended"}</h1>
+            <h1>{isApproved ? "Referral Dashboard" : "Affiliate Access Suspended"}</h1>
             <p>
               {isApproved
                 ? "Share your secure referral link and review attributed orders, pending commissions, and earned commissions."
@@ -1091,7 +1091,7 @@ function PartnerApplication({
                 type="text"
                 value={referralLink}
                 readOnly
-                aria-label="Partner referral link"
+                aria-label="Affiliate referral link"
               />
 
               <button
@@ -1933,7 +1933,7 @@ function PartnerApplication({
             className="secondary-btn"
             onClick={() => onNavigate("dashboard")}
           >
-            â† Research Hub
+            â† Account
           </button>
 
           <span className={eligibility?.eligible ? "partner-eligible" : "partner-ineligible"}>
@@ -1954,7 +1954,7 @@ function PartnerApplication({
           <StateCard
             eyebrow="ELIGIBILITY"
             title="Complete Your First Order Request"
-            text="A secure account-linked order request is required before a Partner Program application can be submitted."
+            text="A secure account-linked order request is required before a Affiliate Program application can be submitted."
           >
             <button
               type="button"
@@ -2091,14 +2091,14 @@ function PartnerApplication({
 
               <section className="partner-agreement">
                 <p className="eyebrow">REQUIRED AGREEMENT</p>
-                <h2>Partner Program Standards</h2>
+                <h2>Affiliate Program Standards</h2>
 
                 <ul>
                   <li>Use research-only language and do not make medical claims.</li>
                   <li>Do not represent yourself as 304 Peptides staff or ownership.</li>
                   <li>Do not use your own code for self-referrals.</li>
                   <li>Do not use spam, deceptive advertising, or misleading discounts.</li>
-                  <li>Partner approval and code access may be suspended for violations.</li>
+                  <li>Affiliate approval and code access may be suspended for violations.</li>
                 </ul>
 
                 <label className="partner-checkbox-row">
@@ -2111,7 +2111,7 @@ function PartnerApplication({
                   />
 
                   <span>
-                    I understand and agree to follow the Partner Program standards
+                    I understand and agree to follow the Affiliate Program standards
                     and research-use restrictions.
                   </span>
                 </label>
@@ -2137,14 +2137,14 @@ function PartnerApplication({
                 {isSubmitting
                   ? "Submitting Application..."
                   : isDenied
-                  ? "Resubmit Partner Application"
-                  : "Submit Partner Application"}
+                  ? "Resubmit Affiliate Application"
+                  : "Submit Affiliate Application"}
               </button>
 
               {!formComplete && !isSubmitting && (
                 <p className="partner-helper">
                   Complete the required fields, confirm code availability, and
-                  accept the Partner Program agreement.
+                  accept the Affiliate Program agreement.
                 </p>
               )}
             </form>
@@ -2171,7 +2171,7 @@ function PartnerApplication({
               </section>
 
               <section className="partner-sidebar-note">
-                <strong>Partner own-code orders</strong>
+                <strong>Affiliate own-code orders</strong>
                 <p>
                   Partners may use their own code for tier progression. These orders
                   earn no commission, discount, payout, leaderboard, or reward credit.
@@ -2181,7 +2181,7 @@ function PartnerApplication({
               <section className="partner-sidebar-note">
                 <strong>For Research Use Only</strong>
                 <p>
-                  Partner content must describe products only within the siteâ€™s
+                  Affiliate content must describe products only within the siteâ€™s
                   research-use framework and must not promote human consumption.
                 </p>
               </section>
@@ -2295,7 +2295,7 @@ function CampaignCard({ campaign, partnerCode }) {
           {campaign.imageUrl ? (
             <img
               src={campaign.imageUrl}
-              alt={campaign.title || "Partner campaign creative"}
+              alt={campaign.title || "Affiliate campaign creative"}
               loading="lazy"
             />
           ) : (

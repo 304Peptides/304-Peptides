@@ -130,6 +130,16 @@ function Cart({
     [subtotal]
   );
 
+  const freeShippingThreshold = 100;
+
+  const freeShippingProgress = Math.min(
+    Math.max(
+      (subtotal / freeShippingThreshold) * 100,
+      0
+    ),
+    100
+  );
+
   const invalidPriceItems = useMemo(
     () =>
       cartItems.filter(
@@ -203,16 +213,6 @@ function Cart({
               select a product to begin.
             </p>
 
-            <div
-              style={
-                purchasingEnabled
-                  ? openStatusStyle
-                  : closedStatusStyle
-              }
-            >
-              {storeStatusLabel}
-            </div>
-
             {!settings.catalogEnabled && (
               <div style={storeNoticeStyle}>
                 Product browsing and purchasing are
@@ -280,21 +280,9 @@ function Cart({
             className="cart-hero-panel"
             style={heroPanelStyle}
           >
-            <div style={heroStatusRowStyle}>
-              <p className="eyebrow">
-                CART
-              </p>
-
-              <span
-                style={
-                  purchasingEnabled
-                    ? openStatusStyle
-                    : closedStatusStyle
-                }
-              >
-                {storeStatusLabel}
-              </span>
-            </div>
+            <p className="eyebrow">
+              CART
+            </p>
 
             <h1
               className="cart-main-title"
@@ -639,7 +627,7 @@ function Cart({
 
                         <button
                           type="button"
-                          className="secondary-btn"
+                          className="secondary-btn cart-remove-button"
                           style={{
                             width: "100%",
                           }}
@@ -673,7 +661,10 @@ function Cart({
                 Summary
               </h2>
 
-              <div style={summaryRowStyle}>
+              <div
+                className="cart-summary-row"
+                style={summaryRowStyle}
+              >
                 <span>
                   Total Products
                 </span>
@@ -683,7 +674,10 @@ function Cart({
                 </strong>
               </div>
 
-              <div style={summaryRowStyle}>
+              <div
+                className="cart-summary-row"
+                style={summaryRowStyle}
+              >
                 <span>
                   Total Items
                 </span>
@@ -693,7 +687,10 @@ function Cart({
                 </strong>
               </div>
 
-              <div style={summaryRowStyle}>
+              <div
+                className="cart-summary-row"
+                style={summaryRowStyle}
+              >
                 <span>
                   Subtotal
                 </span>
@@ -703,7 +700,10 @@ function Cart({
                 </strong>
               </div>
 
-              <div style={summaryRowStyle}>
+              <div
+                className="cart-summary-row"
+                style={summaryRowStyle}
+              >
                 <span>
                   Shipping
                 </span>
@@ -715,7 +715,10 @@ function Cart({
                 </strong>
               </div>
 
-              <div style={summaryRowStyle}>
+              <div
+                className="cart-summary-row cart-summary-total-row"
+                style={summaryRowStyle}
+              >
                 <span>
                   Estimated Total
                 </span>
@@ -725,14 +728,47 @@ function Cart({
                 </strong>
               </div>
 
-              <div style={summaryRowStyle}>
-                <span>
-                  Store Status
-                </span>
+              <div
+                className="cart-shipping-progress"
+                style={shippingProgressCardStyle}
+              >
+                <div
+                  style={shippingProgressHeaderStyle}
+                >
+                  <span>Free Shipping</span>
 
-                <strong>
-                  {storeStatusLabel}
-                </strong>
+                  <strong>
+                    {freeShippingProgress >= 100
+                      ? "Unlocked"
+                      : `${Math.round(
+                          freeShippingProgress
+                        )}%`}
+                  </strong>
+                </div>
+
+                <div
+                  className="cart-shipping-progress-bar"
+                  style={shippingProgressTrackStyle}
+                  aria-label="Free shipping progress"
+                >
+                  <span
+                    className="cart-shipping-progress-fill"
+                    style={{
+                      ...shippingProgressFillStyle,
+                      width: `${freeShippingProgress}%`,
+                    }}
+                  />
+                </div>
+
+                <small
+                  style={shippingProgressTextStyle}
+                >
+                  {freeShippingRemaining > 0
+                    ? `$${freeShippingRemaining.toFixed(
+                        2
+                      )} away from free shipping`
+                    : "Your order qualifies for free shipping"}
+                </small>
               </div>
 
               {!settings.catalogEnabled ? (
@@ -766,7 +802,7 @@ function Cart({
               {checkoutEnabled ? (
                 <button
                   type="button"
-                  className="primary-btn"
+                  className="primary-btn cart-checkout-button"
                   style={{
                     width: "100%",
                     marginTop: "24px",
@@ -869,6 +905,140 @@ const cartResponsiveCss = `
   .cart-page img {
     display: block;
     max-width: 100%;
+  }
+
+  .cart-item {
+    transition:
+      transform 180ms ease,
+      box-shadow 180ms ease,
+      border-color 180ms ease;
+  }
+
+  .cart-item:hover {
+    transform: translateY(-3px);
+    border-color:
+      rgba(61,165,255,0.34) !important;
+    box-shadow:
+      0 22px 48px rgba(0,0,0,0.28);
+  }
+
+  .cart-item button,
+  .cart-summary-panel button {
+    transition:
+      transform 160ms ease,
+      box-shadow 160ms ease,
+      border-color 160ms ease,
+      opacity 160ms ease;
+  }
+
+  .cart-item button:hover:not(:disabled),
+  .cart-summary-panel button:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+
+  .cart-summary-panel {
+    overflow: hidden;
+  }
+
+  .cart-summary-row {
+    transition:
+      transform 160ms ease,
+      border-color 160ms ease;
+  }
+
+  .cart-summary-row:hover {
+    transform: translateX(2px);
+    border-color:
+      rgba(61,165,255,0.24) !important;
+  }
+
+  .cart-summary-total-row {
+    background:
+      linear-gradient(
+        135deg,
+        rgba(61,165,255,0.18),
+        rgba(61,165,255,0.07)
+      ) !important;
+    border-color:
+      rgba(61,165,255,0.34) !important;
+  }
+
+  .cart-summary-total-row strong {
+    color: #ffffff;
+    font-size: 1.08rem;
+  }
+
+  .cart-shipping-progress {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .cart-shipping-progress::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(
+        110deg,
+        transparent 20%,
+        rgba(255,255,255,0.08) 48%,
+        transparent 76%
+      );
+    transform: translateX(-120%);
+    animation:
+      cart-progress-shimmer 3.8s ease-in-out
+      infinite;
+  }
+
+  .cart-shipping-progress-bar {
+    overflow: hidden;
+  }
+
+  .cart-shipping-progress-fill {
+    display: block;
+    transition: width 300ms ease;
+  }
+
+  .cart-checkout-button {
+    min-height: 52px;
+    box-shadow:
+      0 16px 34px rgba(61,165,255,0.22);
+  }
+
+  .cart-checkout-button:hover:not(:disabled) {
+    box-shadow:
+      0 20px 42px rgba(61,165,255,0.3);
+  }
+
+  .cart-remove-button:hover:not(:disabled) {
+    border-color:
+      rgba(255,120,120,0.36) !important;
+  }
+
+  @keyframes cart-progress-shimmer {
+    0%,
+    55% {
+      transform: translateX(-120%);
+    }
+
+    100% {
+      transform: translateX(120%);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cart-item,
+    .cart-item button,
+    .cart-summary-panel button,
+    .cart-summary-row,
+    .cart-shipping-progress-fill {
+      transition: none !important;
+    }
+
+    .cart-shipping-progress::after {
+      animation: none !important;
+    }
   }
 
   @media (max-width: 1000px) {
@@ -999,7 +1169,7 @@ const cartResponsiveCss = `
 `;
 
 const pageStyle = {
-  padding: "90px 60px",
+  padding: "72px 60px",
 };
 
 const pageInnerStyle = {
@@ -1027,11 +1197,11 @@ const heroPanelStyle = {
     "radial-gradient(circle at top, rgba(61,165,255,0.2), transparent 42%), rgba(255,255,255,0.035)",
   border:
     "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "30px",
-  padding: "56px",
+  borderRadius: "28px",
+  padding: "38px 46px",
   boxShadow:
-    "0 30px 80px rgba(0,0,0,0.45)",
-  marginBottom: "30px",
+    "0 26px 70px rgba(0,0,0,0.4)",
+  marginBottom: "24px",
 };
 
 const heroStatusRowStyle = {
@@ -1043,9 +1213,9 @@ const heroStatusRowStyle = {
 };
 
 const titleStyle = {
-  fontSize: "62px",
+  fontSize: "52px",
   lineHeight: "1.05",
-  marginBottom: "20px",
+  marginBottom: "14px",
   background:
     "linear-gradient(180deg, #ffffff, #9d9d9d)",
   WebkitBackgroundClip: "text",
@@ -1053,11 +1223,11 @@ const titleStyle = {
 };
 
 const subtitleStyle = {
-  maxWidth: "760px",
+  maxWidth: "720px",
   margin: "0 auto",
   color: "#c8c8c8",
-  fontSize: "19px",
-  lineHeight: "1.8",
+  fontSize: "16px",
+  lineHeight: "1.65",
 };
 
 const openStatusStyle = {
@@ -1131,7 +1301,7 @@ const cartLayoutStyle = {
   display: "grid",
   gridTemplateColumns:
     "minmax(0, 1fr) minmax(320px, 370px)",
-  gap: "30px",
+  gap: "24px",
   alignItems: "start",
 };
 
@@ -1141,10 +1311,10 @@ const itemsPanelStyle = {
     "radial-gradient(circle at top left, rgba(61,165,255,0.14), transparent 35%), rgba(255,255,255,0.035)",
   border:
     "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "30px",
-  padding: "34px",
+  borderRadius: "28px",
+  padding: "28px",
   boxShadow:
-    "0 30px 80px rgba(0,0,0,0.45)",
+    "0 26px 70px rgba(0,0,0,0.4)",
 };
 
 const sectionHeaderStyle = {
@@ -1168,7 +1338,7 @@ const sectionTitleStyle = {
 
 const itemStackStyle = {
   display: "grid",
-  gap: "20px",
+  gap: "16px",
 };
 
 const cartItemStyle = {
@@ -1176,14 +1346,14 @@ const cartItemStyle = {
   display: "grid",
   gridTemplateColumns:
     "minmax(120px, 140px) minmax(0, 1fr) minmax(170px, 190px)",
-  gap: "22px",
+  gap: "18px",
   alignItems: "center",
   background:
     "rgba(255,255,255,0.045)",
   border:
     "1px solid rgba(255,255,255,0.09)",
-  borderRadius: "24px",
-  padding: "22px",
+  borderRadius: "22px",
+  padding: "18px",
 };
 
 const itemVisualStyle = {
@@ -1279,7 +1449,7 @@ const categoryStyle = {
 
 const itemTitleStyle = {
   color: "#ffffff",
-  fontSize: "28px",
+  fontSize: "25px",
   lineHeight: "1.2",
   marginBottom: "6px",
   overflowWrap: "anywhere",
@@ -1412,19 +1582,19 @@ const summaryPanelStyle = {
   position: "sticky",
   top: "110px",
   background:
-    "radial-gradient(circle at top left, rgba(61,165,255,0.16), transparent 35%), rgba(255,255,255,0.035)",
+    "radial-gradient(circle at top left, rgba(61,165,255,0.2), transparent 38%), rgba(255,255,255,0.04)",
   border:
-    "1px solid rgba(255,255,255,0.09)",
+    "1px solid rgba(61,165,255,0.16)",
   borderRadius: "28px",
-  padding: "32px",
+  padding: "28px",
   boxShadow:
-    "0 30px 80px rgba(0,0,0,0.45)",
+    "0 28px 76px rgba(0,0,0,0.44)",
 };
 
 const summaryTitleStyle = {
-  fontSize: "34px",
+  fontSize: "32px",
   lineHeight: "1.12",
-  marginBottom: "24px",
+  marginBottom: "20px",
   background:
     "linear-gradient(180deg, #ffffff, #9d9d9d)",
   WebkitBackgroundClip: "text",
@@ -1446,6 +1616,55 @@ const summaryRowStyle = {
   padding: "15px",
   color: "#c8c8c8",
   marginBottom: "12px",
+};
+
+const shippingProgressCardStyle = {
+  marginTop: "18px",
+  padding: "16px",
+  borderRadius: "16px",
+  border:
+    "1px solid rgba(61,165,255,0.26)",
+  background:
+    "linear-gradient(145deg, rgba(61,165,255,0.14), rgba(61,165,255,0.05))",
+};
+
+const shippingProgressHeaderStyle = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "14px",
+  marginBottom: "11px",
+  color: "#d9f1ff",
+  fontSize: "13px",
+  fontWeight: "900",
+  textTransform: "uppercase",
+  letterSpacing: "0.7px",
+};
+
+const shippingProgressTrackStyle = {
+  width: "100%",
+  height: "10px",
+  borderRadius: "999px",
+  border:
+    "1px solid rgba(255,255,255,0.08)",
+  background: "rgba(0,0,0,0.38)",
+};
+
+const shippingProgressFillStyle = {
+  height: "100%",
+  borderRadius: "999px",
+  background:
+    "linear-gradient(90deg, #3da5ff, #9ed8ff)",
+  boxShadow:
+    "0 0 20px rgba(61,165,255,0.42)",
+};
+
+const shippingProgressTextStyle = {
+  display: "block",
+  marginTop: "10px",
+  color: "#aebdca",
+  fontSize: "12px",
+  lineHeight: "1.5",
 };
 
 const noticeBoxStyle = {
@@ -1491,15 +1710,15 @@ const disabledCheckoutButtonStyle = {
 };
 
 const researchNoticeStyle = {
-  marginTop: "30px",
+  marginTop: "24px",
   textAlign: "center",
   background:
     "rgba(61,165,255,0.12)",
   border:
     "1px solid rgba(61,165,255,0.28)",
   color: "#9ed8ff",
-  borderRadius: "20px",
-  padding: "20px",
+  borderRadius: "18px",
+  padding: "16px",
   fontWeight: "900",
   lineHeight: "1.6",
   textTransform: "uppercase",

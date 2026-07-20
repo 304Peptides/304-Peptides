@@ -697,7 +697,7 @@ function CreateAccount({
             </p>
 
             <h1>
-              Research Account
+              Account
               Access
             </h1>
 
@@ -708,9 +708,9 @@ function CreateAccount({
               checkout tools,
               account-linked
               order history,
-              the Research Hub,
+              your Account,
               and eligible
-              Partner Program
+              Affiliate Program
               features.
             </p>
 
@@ -1098,12 +1098,12 @@ function CreateAccount({
                 />
 
                 <BenefitBox
-                  title="Research Hub"
+                  title="Account"
                   description="Review your own account-linked order activity across approved devices."
                 />
 
                 <BenefitBox
-                  title="Partner Program"
+                  title="Affiliate Program"
                   description="Access eligible research partner opportunities after meeting program requirements."
                 />
               </div>
