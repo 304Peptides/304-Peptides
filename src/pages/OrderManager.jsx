@@ -1,16 +1,16 @@
 import AdminRecordsManager from "./AdminRecordsManager";
 
-function CustomerManager({
+function OrderManager({
   orders = [],
   onNavigate = () => {},
 }) {
   return (
     <AdminRecordsManager
-      mode="customers"
+      mode="orders"
       orders={orders}
       onNavigate={onNavigate}
     />
   );
 }
 
-export default CustomerManager;
+export default OrderManager;

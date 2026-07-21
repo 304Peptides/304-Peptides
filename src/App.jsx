@@ -39,6 +39,7 @@ const VialLabelGenerator = lazy(() => import("./pages/VialLabelGenerator"));
 const ShippingCenter = lazy(() => import("./pages/ShippingCenter"));
 const COAManager = lazy(() => import("./pages/COAManager"));
 const CustomerManager = lazy(() => import("./pages/CustomerManager"));
+const OrderManager = lazy(() => import("./pages/OrderManager"));
 const SiteSettings = lazy(() => import("./pages/SiteSettings"));
 const LaunchChecklist = lazy(() => import("./pages/LaunchChecklist"));
 const PolicyPage = lazy(() => import("./pages/PolicyPage"));
@@ -1821,10 +1822,9 @@ function App() {
 
       case "orderManager":
         return (
-          <AdminPlaceholder
-            eyebrow="ORDER OPERATIONS"
-            title="Orders"
-            description="The dedicated order-management page is being separated from Customer Manager next. Your existing invoice, payment, partial-shipment, tracking, and email automation remains unchanged."
+          <OrderManager
+            orders={orders}
+            onNavigate={goToPage}
           />
         );
 
@@ -1917,9 +1917,6 @@ function App() {
         return (
           <CustomerManager
             orders={orders}
-            partnerApplication={
-              partnerApplication
-            }
             onNavigate={goToPage}
           />
         );
