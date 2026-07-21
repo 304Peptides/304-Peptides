@@ -18,6 +18,52 @@ export function slugifyCatalogValue(value) {
     .slice(0, 80);
 }
 
+export function isGeneratedCatalogAssetUrl(value) {
+  const normalized =
+    String(value || "").trim();
+
+  if (!normalized) {
+    return false;
+  }
+
+  let pathname =
+    normalized;
+
+  try {
+    pathname =
+      new URL(
+        normalized,
+        "https://catalog.local"
+      ).pathname;
+  } catch {
+    pathname =
+      normalized;
+  }
+
+  return (
+    pathname.startsWith(
+      "/src/assets/"
+    ) ||
+    pathname.startsWith(
+      "/@fs/"
+    ) ||
+    /^\/assets\/.+-[A-Za-z0-9_-]{8,}\.(?:avif|gif|jpe?g|png|svg|webp)$/i.test(
+      pathname
+    )
+  );
+}
+
+export function sanitizeCatalogImageUrl(value) {
+  const normalized =
+    String(value || "").trim();
+
+  return isGeneratedCatalogAssetUrl(
+    normalized
+  )
+    ? ""
+    : normalized;
+}
+
 export function flattenStaticProducts() {
   return staticProducts.flatMap((product) => {
     const productKey =
@@ -144,12 +190,56 @@ export function mergeCatalogRecords(records = [], options = {}) {
       continue;
     }
 
-    const existing = variantsByCode.get(record.codeName) || {};
-    variantsByCode.set(record.codeName, {
+    const existing =
+      variantsByCode.get(
+        record.codeName
+      ) || {};
+
+    const overrideImage =
+      sanitizeCatalogImageUrl(
+        rawRecord?.imageUrl
+      ) ||
+      sanitizeCatalogImageUrl(
+        rawRecord?.image
+      );
+
+    const nextRecord = {
       ...existing,
       ...record,
-      source: existing.codeName ? "override" : "new",
-    });
+      source:
+        existing.codeName
+          ? "override"
+          : "new",
+    };
+
+    if (overrideImage) {
+      nextRecord.image =
+        overrideImage;
+
+      nextRecord.imageUrl =
+        overrideImage;
+    } else if (
+      existing.codeName
+    ) {
+      const staticImage =
+        existing.image ||
+        existing.imageUrl ||
+        "";
+
+      nextRecord.image =
+        staticImage;
+
+      nextRecord.imageUrl =
+        staticImage;
+    } else {
+      nextRecord.image = "";
+      nextRecord.imageUrl = "";
+    }
+
+    variantsByCode.set(
+      record.codeName,
+      nextRecord
+    );
   }
 
   const grouped = new Map();

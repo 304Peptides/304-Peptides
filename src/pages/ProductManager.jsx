@@ -3,6 +3,7 @@ import {
   AVAILABILITY_OPTIONS,
   fetchCatalogOverrides,
   mergeCatalogRecords,
+  sanitizeCatalogImageUrl,
   slugifyCatalogValue,
 } from "../data/catalogRuntime";
 
@@ -72,7 +73,12 @@ function cloneVariant(variant) {
       0,
       Math.floor(Number(variant?.lowStockThreshold || 5))
     ),
-    imageUrl: variant?.imageUrl || variant?.image || "",
+    imageUrl:
+      sanitizeCatalogImageUrl(
+        variant?.imageUrl ||
+        variant?.image ||
+        ""
+      ),
   };
 }
 
@@ -300,6 +306,11 @@ function ProductManager({ onNavigate = () => {} }) {
     const draft = cloneVariant(rawVariant);
     const price = Number(draft.price);
 
+    const imageUrl =
+      sanitizeCatalogImageUrl(
+        draft.imageUrl
+      );
+
     if (!draft.name.trim() || !draft.strength.trim() || !draft.codeName.trim()) {
       throw new Error("Product name, strength, and product code are required.");
     }
@@ -324,8 +335,8 @@ function ProductManager({ onNavigate = () => {} }) {
       description: draft.description.trim(),
       purity: draft.purity.trim() || "≥ 99% Purity",
       composition: draft.composition.trim(),
-      imageUrl: draft.imageUrl.trim(),
-      image: draft.imageUrl.trim(),
+      imageUrl,
+      image: imageUrl,
       price,
       unitCost: Math.max(0, Number(draft.unitCost || 0)),
       quantity: Math.max(0, Math.floor(Number(draft.quantity || 0))),
@@ -468,7 +479,12 @@ function ProductManager({ onNavigate = () => {} }) {
             description: product.description,
             purity: product.purity,
             isBestSeller: product.isBestSeller,
-            imageUrl: first?.imageUrl || first?.image || "",
+            imageUrl:
+              sanitizeCatalogImageUrl(
+                first?.imageUrl ||
+                first?.image ||
+                ""
+              ),
           }
         : {}),
     });
@@ -888,11 +904,11 @@ function VariantEditor({
                 onChange={(event) => setField("purity", event.target.value)}
               />
             </Field>
-            <Field label="Image URL or existing image path">
+            <Field label="Custom image URL (optional)">
               <input
                 value={draft.imageUrl}
                 onChange={(event) => setField("imageUrl", event.target.value)}
-                placeholder="https://… or /assets/…"
+                placeholder="Leave blank to use the bundled product image"
               />
             </Field>
           </div>
