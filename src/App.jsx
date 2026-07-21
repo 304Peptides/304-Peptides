@@ -34,6 +34,7 @@ const PartnerHQ = lazy(() => import("./pages/PartnerHQ"));
 const MarketingCenter = lazy(() => import("./pages/MarketingCenter"));
 const MissionControl = lazy(() => import("./pages/MissionControl"));
 const ProductManager = lazy(() => import("./pages/ProductManager"));
+const InventoryManager = lazy(() => import("./pages/InventoryManager"));
 const CouponManager = lazy(() => import("./pages/CouponManager"));
 const VialLabelGenerator = lazy(() => import("./pages/VialLabelGenerator"));
 const ShippingCenter = lazy(() => import("./pages/ShippingCenter"));
@@ -1839,10 +1840,8 @@ function App() {
 
       case "inventoryManager":
         return (
-          <AdminPlaceholder
-            eyebrow="STORE OPERATIONS"
-            title="Inventory"
-            description="Inventory quantities, preorder availability, incoming stock, and low-stock alerts will be managed here."
+          <InventoryManager
+            onNavigate={goToPage}
           />
         );
 
