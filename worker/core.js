@@ -7852,6 +7852,176 @@ function toCustomerOrderRecord(
 /* ORDER SUBMISSION API                               */
 /* -------------------------------------------------- */
 
+
+const ORDER_POLICY_VERSION =
+  "2026.07.20";
+
+const ORDER_POLICY_EFFECTIVE_DATE =
+  "July 20, 2026";
+
+const REQUIRED_ORDER_POLICY_KEYS =
+  Object.freeze([
+    "terms",
+    "privacy",
+    "shipping",
+    "refunds",
+    "research",
+  ]);
+
+function validateCheckoutPolicyAcceptance(
+  rawAcceptance,
+  request
+) {
+  if (
+    !rawAcceptance ||
+    typeof rawAcceptance !== "object" ||
+    Array.isArray(rawAcceptance)
+  ) {
+    throw new OrderRequestError(
+      "Review and accept the current website policies before submitting the order.",
+      400
+    );
+  }
+
+  const version =
+    cleanText(
+      rawAcceptance.version,
+      50
+    );
+
+  if (
+    version !==
+    ORDER_POLICY_VERSION
+  ) {
+    throw new OrderRequestError(
+      "The website policies were updated. Refresh checkout, review the current policies, and submit again.",
+      409
+    );
+  }
+
+  const requiredConfirmations = [
+    rawAcceptance.termsAccepted,
+    rawAcceptance.privacyAcknowledged,
+    rawAcceptance.shippingPolicyAccepted,
+    rawAcceptance.refundPolicyAccepted,
+    rawAcceptance.researchUseAccepted,
+    rawAcceptance.age21Confirmed,
+  ];
+
+  if (
+    requiredConfirmations.some(
+      (confirmation) =>
+        confirmation !== true
+    )
+  ) {
+    throw new OrderRequestError(
+      "All required policy, research-use, and age confirmations must be accepted.",
+      400
+    );
+  }
+
+  const submittedPolicyKeys =
+    new Set(
+      (
+        Array.isArray(
+          rawAcceptance.policyKeys
+        )
+          ? rawAcceptance.policyKeys
+          : []
+      ).map((policyKey) =>
+        cleanText(
+          policyKey,
+          40
+        ).toLowerCase()
+      )
+    );
+
+  const missingPolicyKey =
+    REQUIRED_ORDER_POLICY_KEYS.find(
+      (policyKey) =>
+        !submittedPolicyKeys.has(
+          policyKey
+        )
+    );
+
+  if (missingPolicyKey) {
+    throw new OrderRequestError(
+      "The complete current policy set must be reviewed before submitting the order.",
+      400
+    );
+  }
+
+  const clientAcceptedAt =
+    cleanText(
+      rawAcceptance.acceptedAt,
+      80
+    );
+
+  const parsedClientAcceptedAt =
+    Date.parse(clientAcceptedAt);
+
+  if (
+    !clientAcceptedAt ||
+    Number.isNaN(
+      parsedClientAcceptedAt
+    )
+  ) {
+    throw new OrderRequestError(
+      "The policy acceptance record is invalid. Refresh checkout and try again.",
+      400
+    );
+  }
+
+  return {
+    version:
+      ORDER_POLICY_VERSION,
+
+    effectiveDate:
+      ORDER_POLICY_EFFECTIVE_DATE,
+
+    acceptedAt:
+      new Date().toISOString(),
+
+    clientAcceptedAt:
+      new Date(
+        parsedClientAcceptedAt
+      ).toISOString(),
+
+    termsAccepted:
+      true,
+
+    privacyAcknowledged:
+      true,
+
+    shippingPolicyAccepted:
+      true,
+
+    refundPolicyAccepted:
+      true,
+
+    researchUseAccepted:
+      true,
+
+    age21Confirmed:
+      true,
+
+    policyKeys: [
+      ...REQUIRED_ORDER_POLICY_KEYS,
+    ],
+
+    source:
+      "checkout",
+
+    userAgent:
+      cleanText(
+        request.headers.get(
+          "User-Agent"
+        ) || "",
+        300
+      ),
+  };
+}
+
 async function handleOrderRequest(
   request,
   env
@@ -7894,11 +8064,24 @@ async function handleOrderRequest(
       requestBody.order ||
       requestBody;
 
-    const protectedOrder =
+    const policyAcceptance =
+      validateCheckoutPolicyAcceptance(
+        submittedOrder
+          ?.policyAcceptance,
+        request
+      );
+
+    const preparedOrder =
       await prepareOrder(
         submittedOrder,
         env
       );
+
+    const protectedOrder = {
+      ...preparedOrder,
+
+      policyAcceptance,
+    };
 
     const customerSession =
       await getCustomerSession(

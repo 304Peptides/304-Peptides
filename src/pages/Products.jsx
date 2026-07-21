@@ -1,3 +1,4 @@
+import brandBadgeLogo from "../assets/images/logo-nav.webp";
 import {
   useEffect,
   useMemo,
@@ -19,7 +20,7 @@ const storageKey =
   "304-site-settings";
 
 const defaultSettings = {
-  storeStatus: "coming-soon",
+  storeStatus: "open",
   catalogEnabled: true,
   guestPricingEnabled: false,
 };
@@ -931,9 +932,18 @@ function Products({
 
                             <div className="products-bottle">
                               <div className="products-label">
-                                <strong>
-                                  304
-                                </strong>
+                                <img
+                                  src={brandBadgeLogo}
+                                  alt=""
+                                  aria-hidden="true"
+                                  style={{
+                                    width: "42px",
+                                    height: "42px",
+                                    display: "block",
+                                    objectFit: "contain",
+                                    borderRadius: "10px",
+                                  }}
+                                />
 
                                 <span>
                                   {

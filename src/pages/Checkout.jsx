@@ -15,6 +15,11 @@ import {
   getFreeShippingRemaining,
 } from "../utils/shipping";
 
+import {
+  POLICY_EFFECTIVE_DATE,
+  POLICY_VERSION,
+} from "../data/policies";
+
 // 304 CHECKOUT EXPERIENCE UPGRADE
 
 const storageKey = "304-site-settings";
@@ -26,7 +31,7 @@ const turnstileScriptId = "cloudflare-turnstile-script";
 let turnstileScriptPromise = null;
 
 const defaultSettings = {
-  storeStatus: "coming-soon",
+  storeStatus: "open",
   catalogEnabled: true,
 };
 
@@ -527,6 +532,8 @@ function Checkout({
     useState(false);
   const [ageAgreement, setAgeAgreement] =
     useState(false);
+  const [policyAgreement, setPolicyAgreement] =
+    useState(false);
   const [isSubmitting, setIsSubmitting] =
     useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -865,6 +872,7 @@ function Checkout({
     Boolean(paymentMethod) &&
     researchAgreement &&
     ageAgreement &&
+    policyAgreement &&
     (isDevelopmentPreview || Boolean(turnstileToken)) &&
     accountEmailMatches &&
     referralReady &&
@@ -876,7 +884,7 @@ function Checkout({
       ? "Store Open"
       : settings.storeStatus === "maintenance"
       ? "Maintenance Mode"
-      : "Coming Soon";
+      : "Unavailable";
 
   function handleChange(event) {
     const { name, value } = event.target;
@@ -1165,6 +1173,9 @@ function Checkout({
     setSubmitError("");
     setIsSubmitting(true);
 
+    const policyAcceptedAt =
+      new Date().toISOString();
+
     const orderPayload = {
       firstName: formData.firstName.trim(),
       lastName: formData.lastName.trim(),
@@ -1176,6 +1187,32 @@ function Checkout({
       preferredPaymentMethod: paymentMethod,
       preferredPaymentLabel:
         selectedPaymentOption?.label || "",
+      policyAcceptance: {
+        version: POLICY_VERSION,
+        effectiveDate:
+          POLICY_EFFECTIVE_DATE,
+        acceptedAt:
+          policyAcceptedAt,
+        termsAccepted:
+          policyAgreement,
+        privacyAcknowledged:
+          policyAgreement,
+        shippingPolicyAccepted:
+          policyAgreement,
+        refundPolicyAccepted:
+          policyAgreement,
+        researchUseAccepted:
+          researchAgreement,
+        age21Confirmed:
+          ageAgreement,
+        policyKeys: [
+          "terms",
+          "privacy",
+          "shipping",
+          "refunds",
+          "research",
+        ],
+      },
       ...(validatedReferralCode
         ? {
             referralCode: validatedReferralCode,
@@ -1877,9 +1914,78 @@ function Checkout({
               <section className="checkout-section-card checkout-agreements-card">
                 <div className="checkout-section-heading checkout-section-heading-compact">
                   <div>
-                    <p className="eyebrow">REQUIRED AGREEMENTS</p>
-                    <h2>Research-Use Confirmation</h2>
+                    <p className="eyebrow">
+                      REQUIRED AGREEMENTS
+                    </p>
+
+                    <h2>
+                      Website Policies and Research Confirmation
+                    </h2>
                   </div>
+
+                  <span
+                    style={{
+                      color: "#9ed8ff",
+                      fontSize: "12px",
+                      fontWeight: "900",
+                    }}
+                  >
+                    Policy version {POLICY_VERSION}
+                  </span>
+                </div>
+
+                <div
+                  aria-label="Checkout policy links"
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: "9px",
+                    marginBottom: "20px",
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="secondary-btn checkout-agreement-button"
+                    disabled={isSubmitting}
+                    onClick={() =>
+                      onNavigate("terms")
+                    }
+                  >
+                    Terms
+                  </button>
+
+                  <button
+                    type="button"
+                    className="secondary-btn checkout-agreement-button"
+                    disabled={isSubmitting}
+                    onClick={() =>
+                      onNavigate("privacy")
+                    }
+                  >
+                    Privacy
+                  </button>
+
+                  <button
+                    type="button"
+                    className="secondary-btn checkout-agreement-button"
+                    disabled={isSubmitting}
+                    onClick={() =>
+                      onNavigate("shippingPolicy")
+                    }
+                  >
+                    Shipping
+                  </button>
+
+                  <button
+                    type="button"
+                    className="secondary-btn checkout-agreement-button"
+                    disabled={isSubmitting}
+                    onClick={() =>
+                      onNavigate("refundPolicy")
+                    }
+                  >
+                    Refunds
+                  </button>
 
                   <button
                     type="button"
@@ -1889,9 +1995,29 @@ function Checkout({
                       onNavigate("researchAgreement")
                     }
                   >
-                    View Agreement
+                    Research Use
                   </button>
                 </div>
+
+                <label className="checkout-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={policyAgreement}
+                    disabled={isSubmitting}
+                    onChange={(event) => {
+                      setSubmitError("");
+                      setPolicyAgreement(
+                        event.target.checked
+                      );
+                    }}
+                  />
+
+                  <span>
+                    I have reviewed and agree to the Terms of Service,
+                    Shipping Policy, and Refund Policy, and I acknowledge
+                    the Privacy Policy.
+                  </span>
+                </label>
 
                 <label className="checkout-checkbox-row">
                   <input
@@ -1907,8 +2033,10 @@ function Checkout({
                   />
 
                   <span>
-                    I understand these products are sold for research use only
-                    and are not intended for human consumption.
+                    I understand these products are sold solely for lawful
+                    research use and are not intended for human consumption,
+                    veterinary use, diagnosis, treatment, or administration
+                    to any person or animal.
                   </span>
                 </label>
 
@@ -1926,8 +2054,9 @@ function Checkout({
                   />
 
                   <span>
-                    I confirm I am at least 21 years old and agree to follow all
-                    applicable laws, rules, and research-use restrictions.
+                    I confirm that I am at least 21 years old, that the
+                    information provided is accurate, and that I will comply
+                    with all applicable laws and research-use restrictions.
                   </span>
                 </label>
               </section>

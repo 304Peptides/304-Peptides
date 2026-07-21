@@ -9,7 +9,7 @@ import {
 const storageKey = "304-site-settings";
 
 const defaultSettings = {
-  storeStatus: "coming-soon",
+  storeStatus: "open",
   catalogEnabled: true,
 };
 
@@ -170,7 +170,7 @@ function Cart({
 
   function formatPrice(price) {
     if (!Number.isFinite(price)) {
-      return "Price Coming Soon";
+      return "Price Unavailable";
     }
 
     return `$${price.toFixed(2)}`;

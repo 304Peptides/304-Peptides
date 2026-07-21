@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import brandLogo from "../assets/images/logo-nav.webp";
 
 const storageKey = "304-site-settings";
 
@@ -98,7 +99,15 @@ function Footer({ onNavigate = () => {} }) {
             onClick={() => navigateTo("home")}
             style={brandButtonStyle}
           >
-            <span style={brandNumberStyle}>304</span>
+            <img
+              src={brandLogo}
+              alt=""
+              aria-hidden="true"
+              width="58"
+              height="58"
+              decoding="async"
+              style={brandNumberStyle}
+            />
 
             <span style={brandNameStyle}>
               {settings.businessName}
@@ -135,12 +144,14 @@ function Footer({ onNavigate = () => {} }) {
 
           <FooterButton
             label="Research Partners"
-            onClick={() => navigateTo("researchPartners")}
+            onClick={() => navigateTo("partners")}
           />
         </div>
 
         <div style={linkColumnStyle}>
-          <span style={columnTitleStyle}>Support</span>
+          <span style={columnTitleStyle}>
+            Policies & Support
+          </span>
 
           <FooterButton
             label="Frequently Asked Questions"
@@ -153,8 +164,33 @@ function Footer({ onNavigate = () => {} }) {
           />
 
           <FooterButton
-            label="Research Agreement"
+            label="Terms of Service"
+            onClick={() => navigateTo("terms")}
+          />
+
+          <FooterButton
+            label="Privacy Policy"
+            onClick={() => navigateTo("privacy")}
+          />
+
+          <FooterButton
+            label="Shipping Policy"
+            onClick={() => navigateTo("shippingPolicy")}
+          />
+
+          <FooterButton
+            label="Refund Policy"
+            onClick={() => navigateTo("refundPolicy")}
+          />
+
+          <FooterButton
+            label="Research Use Policy"
             onClick={() => navigateTo("researchAgreement")}
+          />
+
+          <FooterButton
+            label="Affiliate Terms"
+            onClick={() => navigateTo("affiliateTerms")}
           />
 
           <FooterButton
@@ -286,17 +322,12 @@ const brandButtonStyle = {
 };
 
 const brandNumberStyle = {
-  display: "grid",
+  display: "block",
   width: "58px",
   height: "58px",
-  placeItems: "center",
+  flex: "0 0 58px",
+  objectFit: "contain",
   borderRadius: "17px",
-  border: "1px solid rgba(61,165,255,0.36)",
-  background:
-    "linear-gradient(145deg, rgba(61,165,255,0.2), rgba(61,165,255,0.06))",
-  color: "#9ed8ff",
-  fontSize: "22px",
-  fontWeight: "1000",
   boxShadow: "0 0 24px rgba(61,165,255,0.12)",
 };
 

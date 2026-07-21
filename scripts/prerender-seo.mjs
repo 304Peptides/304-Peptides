@@ -675,13 +675,98 @@ const publicPages = [
 
   {
     route:
+      "/terms",
+
+    title:
+      "Terms of Service | 304 Peptides",
+
+    description:
+      "Review the Terms of Service governing accounts, order requests, invoices, website access, and research-use products.",
+
+    robots:
+      "index, follow, max-image-preview:large",
+
+    type:
+      "website",
+  },
+
+  {
+    route:
+      "/privacy",
+
+    title:
+      "Privacy Policy | 304 Peptides",
+
+    description:
+      "Review how 304 Peptides collects, uses, secures, retains, and shares customer and technical information.",
+
+    robots:
+      "index, follow, max-image-preview:large",
+
+    type:
+      "website",
+  },
+
+  {
+    route:
+      "/shipping-policy",
+
+    title:
+      "Shipping Policy | 304 Peptides",
+
+    description:
+      "Review order processing, shipment estimates, tracking, delays, address requirements, and lost-package procedures.",
+
+    robots:
+      "index, follow, max-image-preview:large",
+
+    type:
+      "website",
+  },
+
+  {
+    route:
+      "/refund-policy",
+
+    title:
+      "Refund and Cancellation Policy | 304 Peptides",
+
+    description:
+      "Review cancellation, refund, damaged-order, incorrect-order, product-integrity, and nonshipment policies.",
+
+    robots:
+      "index, follow, max-image-preview:large",
+
+    type:
+      "website",
+  },
+
+  {
+    route:
       "/research-agreement",
 
     title:
-      "Research Agreement | 304 Peptides",
+      "Research Use and Product Disclaimer | 304 Peptides",
 
     description:
-      "Review the 304 Peptides research-use agreement, customer responsibilities, and product-use restrictions.",
+      "Review research-use restrictions, prohibited uses, customer responsibilities, and the 304 Peptides product disclaimer.",
+
+    robots:
+      "index, follow, max-image-preview:large",
+
+    type:
+      "website",
+  },
+
+  {
+    route:
+      "/affiliate-terms",
+
+    title:
+      "Affiliate Program Terms | 304 Peptides",
+
+    description:
+      "Review Affiliate Program eligibility, promotion, code, attribution, reward, and compliance requirements.",
 
     robots:
       "index, follow, max-image-preview:large",

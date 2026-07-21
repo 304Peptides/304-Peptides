@@ -113,7 +113,7 @@ const storageKey =
 
 const defaultSettings = {
   catalogEnabled: true,
-  storeStatus: "coming-soon",
+  storeStatus: "open",
 };
 
 const featuredCategories = [
@@ -379,15 +379,6 @@ function Home({
       [catalogProducts]
     );
 
-  const storeStatusLabel =
-    settings.storeStatus ===
-    "open"
-      ? "Store Open"
-      : settings.storeStatus ===
-        "maintenance"
-      ? "Maintenance Mode"
-      : "Coming Soon";
-
   const coaStatusLabel =
     documentationLoading
       ? "Checking COAs"
@@ -399,7 +390,7 @@ function Home({
             ? ""
             : "s"
         } Available`
-      : "COAs Coming Soon";
+      : "View Quality";
 
   return (
     <>
@@ -437,17 +428,6 @@ function Home({
                 For Research Use Only.
                 Not intended for human
                 consumption.
-              </span>
-
-              <span
-                className={
-                  settings.storeStatus ===
-                  "open"
-                    ? "home-status-pill home-status-open"
-                    : "home-status-pill"
-                }
-              >
-                {storeStatusLabel}
               </span>
             </div>
 

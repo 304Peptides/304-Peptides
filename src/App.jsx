@@ -41,7 +41,7 @@ const COAManager = lazy(() => import("./pages/COAManager"));
 const CustomerManager = lazy(() => import("./pages/CustomerManager"));
 const SiteSettings = lazy(() => import("./pages/SiteSettings"));
 const LaunchChecklist = lazy(() => import("./pages/LaunchChecklist"));
-const ResearchAgreement = lazy(() => import("./pages/ResearchAgreement"));
+const PolicyPage = lazy(() => import("./pages/PolicyPage"));
 const QRManager = lazy(() => import("./pages/QRManager"));
 const VerificationRecord = lazy(() => import("./pages/VerificationRecord"));
 import { fetchCatalogOverrides } from "./data/catalogRuntime";
@@ -78,7 +78,12 @@ const pagePaths = {
   partners: "/affiliate",
   faq: "/faq",
   contact: "/contact",
+  terms: "/terms",
+  privacy: "/privacy",
+  shippingPolicy: "/shipping-policy",
+  refundPolicy: "/refund-policy",
   researchAgreement: "/research-agreement",
+  affiliateTerms: "/affiliate-terms",
   login: "/login",
   createAccount: "/create-account",
   dashboard: "/dashboard",
@@ -1677,9 +1682,50 @@ function App() {
           />
         );
 
+      case "terms":
+        return (
+          <PolicyPage
+            policyKey="terms"
+            onNavigate={goToPage}
+          />
+        );
+
+      case "privacy":
+        return (
+          <PolicyPage
+            policyKey="privacy"
+            onNavigate={goToPage}
+          />
+        );
+
+      case "shippingPolicy":
+        return (
+          <PolicyPage
+            policyKey="shipping"
+            onNavigate={goToPage}
+          />
+        );
+
+      case "refundPolicy":
+        return (
+          <PolicyPage
+            policyKey="refunds"
+            onNavigate={goToPage}
+          />
+        );
+
       case "researchAgreement":
         return (
-          <ResearchAgreement
+          <PolicyPage
+            policyKey="research"
+            onNavigate={goToPage}
+          />
+        );
+
+      case "affiliateTerms":
+        return (
+          <PolicyPage
+            policyKey="affiliate"
             onNavigate={goToPage}
           />
         );

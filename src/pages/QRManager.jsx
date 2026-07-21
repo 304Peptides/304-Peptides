@@ -1,4 +1,5 @@
-﻿import {
+import brandBadgeLogo from "../assets/images/logo-nav.webp";
+import {
   useEffect,
   useMemo,
   useState,
@@ -999,9 +1000,18 @@ function QRManager({
                                   alt=""
                                 />
                               ) : (
-                                <span>
-                                  304
-                                </span>
+                                <img
+                                  src={brandBadgeLogo}
+                                  alt=""
+                                  aria-hidden="true"
+                                  style={{
+                                    width: "34px",
+                                    height: "34px",
+                                    display: "block",
+                                    objectFit: "contain",
+                                    borderRadius: "8px",
+                                  }}
+                                />
                               )}
                             </div>
 

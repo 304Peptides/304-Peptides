@@ -1,3 +1,4 @@
+import brandBadgeLogo from "../assets/images/logo-nav.webp";
 import {
   useEffect,
   useMemo,
@@ -918,9 +919,18 @@ function DocumentationCard({
             />
           ) : (
             <div className="quality-record-placeholder">
-              <strong>
-                304
-              </strong>
+              <img
+                src={brandBadgeLogo}
+                alt=""
+                aria-hidden="true"
+                style={{
+                  width: "52px",
+                  height: "52px",
+                  display: "block",
+                  objectFit: "contain",
+                  borderRadius: "12px",
+                }}
+              />
 
               <span>
                 {record.codeName}

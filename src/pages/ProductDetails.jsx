@@ -1,3 +1,4 @@
+import brandBadgeLogo from "../assets/images/logo-nav.webp";
 import {
   useEffect,
   useMemo,
@@ -10,7 +11,7 @@ const storageKey =
   "304-site-settings";
 
 const defaultSettings = {
-  storeStatus: "coming-soon",
+  storeStatus: "open",
   catalogEnabled: true,
   guestPricingEnabled: false,
 };
@@ -496,15 +497,6 @@ function ProductDetails({
     isLoggedIn &&
     availability.purchasable;
 
-  const storeStatusLabel =
-    settings.storeStatus ===
-    "open"
-      ? "Store Open"
-      : settings.storeStatus ===
-        "maintenance"
-      ? "Maintenance Mode"
-      : "Coming Soon";
-
   const documentationStatus =
     documentsLoading
       ? "Checking Records"
@@ -598,9 +590,18 @@ function ProductDetails({
 
                   <div className="product-details-bottle">
                     <div className="product-details-label">
-                      <strong>
-                        304
-                      </strong>
+                      <img
+                        src={brandBadgeLogo}
+                        alt=""
+                        aria-hidden="true"
+                        style={{
+                          width: "50px",
+                          height: "50px",
+                          display: "block",
+                          objectFit: "contain",
+                          borderRadius: "12px",
+                        }}
+                      />
 
                       <span>
                         {
@@ -636,15 +637,6 @@ function ProductDetails({
                 </p>
 
                 <div className="product-details-heading-badges">
-                  <span
-                    className={
-                      purchasingEnabled
-                        ? "product-details-store-status product-details-store-open"
-                        : "product-details-store-status"
-                    }
-                  >
-                    {storeStatusLabel}
-                  </span>
 
                   <span
                     className={
@@ -759,16 +751,8 @@ function ProductDetails({
 
               {!purchasingEnabled && (
                 <div className="product-details-store-notice">
-                  Product information
-                  remains available, but
-                  purchasing is
-                  currently disabled
-                  while the store status
-                  is{" "}
-                  <strong>
-                    {storeStatusLabel}
-                  </strong>
-                  .
+                  Product information remains available, but purchasing is
+                  temporarily unavailable.
                 </div>
               )}
 

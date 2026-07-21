@@ -381,7 +381,12 @@ const publicRoutes = [
   "/affiliate",
   "/faq",
   "/contact",
+  "/terms",
+  "/privacy",
+  "/shipping-policy",
+  "/refund-policy",
   "/research-agreement",
+  "/affiliate-terms",
 ];
 
 const productRoutes =

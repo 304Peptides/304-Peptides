@@ -10,14 +10,14 @@ const defaultSettings = {
   supportHours: "Monday–Friday",
   responseTime: "Within 1–2 business days",
 
-  storeStatus: "coming-soon",
+  storeStatus: "open",
   catalogEnabled: true,
   accountCreationEnabled: true,
   guestPricingEnabled: false,
 
-  announcementEnabled: true,
+  announcementEnabled: false,
   announcementMessage:
-    "304 Peptides is preparing for launch. Research Use Only.",
+    "For Research Use Only. Not intended for human consumption.",
 
   footerNotice:
     "For Research Use Only. Not intended for human consumption.",
@@ -253,9 +253,6 @@ function SiteSettings({ onNavigate = () => {} }) {
                 }
                 style={inputStyle}
               >
-                <option value="coming-soon">
-                  Coming Soon
-                </option>
 
                 <option value="open">
                   Store Open

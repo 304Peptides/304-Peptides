@@ -64,14 +64,64 @@ const publicPageSeo = {
     path: "/contact",
   },
 
-  researchAgreement: {
+  terms: {
     title:
-      "Research Agreement | 304 Peptides",
+      "Terms of Service | 304 Peptides",
 
     description:
-      "Review the 304 Peptides research-use agreement, customer responsibilities, and product-use restrictions.",
+      "Review the Terms of Service governing 304 Peptides accounts, order requests, invoices, website access, and research-use products.",
+
+    path: "/terms",
+  },
+
+  privacy: {
+    title:
+      "Privacy Policy | 304 Peptides",
+
+    description:
+      "Review how 304 Peptides collects, uses, secures, retains, and shares customer, account, order, affiliate, and technical information.",
+
+    path: "/privacy",
+  },
+
+  shippingPolicy: {
+    title:
+      "Shipping Policy | 304 Peptides",
+
+    description:
+      "Review 304 Peptides order processing, shipment estimates, tracking, address requirements, delays, damage, and lost-package procedures.",
+
+    path: "/shipping-policy",
+  },
+
+  refundPolicy: {
+    title:
+      "Refund and Cancellation Policy | 304 Peptides",
+
+    description:
+      "Review 304 Peptides cancellation, refund, damaged-order, incorrect-order, product-integrity, and nonshipment policies.",
+
+    path: "/refund-policy",
+  },
+
+  researchAgreement: {
+    title:
+      "Research Use and Product Disclaimer | 304 Peptides",
+
+    description:
+      "Review the 304 Peptides research-use policy, prohibited uses, customer responsibilities, qualification requirements, and product disclaimer.",
 
     path: "/research-agreement",
+  },
+
+  affiliateTerms: {
+    title:
+      "Affiliate Program Terms | 304 Peptides",
+
+    description:
+      "Review the 304 Peptides Affiliate Program rules for eligibility, promotion, codes, referrals, attribution, rewards, and compliance.",
+
+    path: "/affiliate-terms",
   },
 };
 
