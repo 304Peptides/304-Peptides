@@ -35,6 +35,7 @@ const MarketingCenter = lazy(() => import("./pages/MarketingCenter"));
 const MissionControl = lazy(() => import("./pages/MissionControl"));
 const ProductManager = lazy(() => import("./pages/ProductManager"));
 const InventoryManager = lazy(() => import("./pages/InventoryManager"));
+const AccountingManager = lazy(() => import("./pages/AccountingManager"));
 const CouponManager = lazy(() => import("./pages/CouponManager"));
 const VialLabelGenerator = lazy(() => import("./pages/VialLabelGenerator"));
 const ShippingCenter = lazy(() => import("./pages/ShippingCenter"));
@@ -1848,10 +1849,8 @@ function App() {
 
       case "accountingManager":
         return (
-          <AdminPlaceholder
-            eyebrow="BUSINESS OPERATIONS"
-            title="Accounting"
-            description="Sales totals, payments, expenses, affiliate commissions, and reporting will be organized here."
+          <AccountingManager
+            onNavigate={goToPage}
           />
         );
 
