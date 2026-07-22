@@ -1831,10 +1831,11 @@ function App() {
 
       case "affiliateManager":
         return (
-          <AdminPlaceholder
-            eyebrow="AFFILIATE PROGRAM"
-            title="Affiliate Accounts"
-            description="Affiliate applications, active accounts, referral codes, commissions, payouts, and rewards will be managed here."
+          <PartnerHQ
+            onNavigate={goToPage}
+            partnerApplication={
+              partnerApplication
+            }
           />
         );
 
