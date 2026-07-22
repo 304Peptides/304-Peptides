@@ -3276,7 +3276,7 @@ function validateCampaignSlug(value) {
 
   if (slug.length < 3 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
     throw new ApiRequestError(
-      "Campaign slugs must contain 3â€“60 lowercase letters, numbers, or single hyphens.",
+      "Campaign slugs must contain 3–60 lowercase letters, numbers, or single hyphens.",
       400
     );
   }
@@ -3849,7 +3849,7 @@ function validatePartnerCode(value) {
     code.length > MAX_PARTNER_CODE_LENGTH
   ) {
     throw new ApiRequestError(
-      `Partner codes must contain ${MIN_PARTNER_CODE_LENGTH}â€“${MAX_PARTNER_CODE_LENGTH} characters.`,
+      `Partner codes must contain ${MIN_PARTNER_CODE_LENGTH}–${MAX_PARTNER_CODE_LENGTH} characters.`,
       400
     );
   }

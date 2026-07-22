@@ -714,7 +714,7 @@ function QRManager({
             <div class="name">${productName}</div>
 
             <div class="identity">
-              ${codeName} Â· ${strength}
+              ${codeName} · ${strength}
             </div>
 
             <img
@@ -1026,7 +1026,7 @@ function QRManager({
                                 {
                                   record.codeName
                                 }{" "}
-                                Â·{" "}
+                                ·{" "}
                                 {
                                   record.strength
                                 }
@@ -1071,7 +1071,7 @@ function QRManager({
                         {
                           selectedRecord.codeName
                         }{" "}
-                        Â·{" "}
+                        ·{" "}
                         {
                           selectedRecord.strength
                         }

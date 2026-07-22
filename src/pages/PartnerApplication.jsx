@@ -14,12 +14,12 @@ const platformOptions = [
 
 const audienceOptions = [
   "Under 500",
-  "500â€“1,999",
-  "2,000â€“4,999",
-  "5,000â€“9,999",
-  "10,000â€“24,999",
-  "25,000â€“49,999",
-  "50,000â€“99,999",
+  "500–1,999",
+  "2,000–4,999",
+  "5,000–9,999",
+  "10,000–24,999",
+  "25,000–49,999",
+  "50,000–99,999",
   "100,000+",
 ];
 
@@ -138,7 +138,7 @@ function normalizeCode(value) {
 
 function getLocalCodeError(code) {
   if (!code) return "Choose your affiliate code.";
-  if (code.length < 4 || code.length > 20) return "Use 4â€“20 characters.";
+  if (code.length < 4 || code.length > 20) return "Use 4–20 characters.";
   if (!/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(code)) {
     return "Use letters, numbers, and single hyphens only.";
   }
@@ -951,7 +951,7 @@ function PartnerApplication({
               className="secondary-btn"
               onClick={() => onNavigate("dashboard")}
             >
-              â† Account
+              ← Account
             </button>
 
             <StatusPill status={application.status} />
@@ -1179,7 +1179,7 @@ function PartnerApplication({
               <MetricCard
                 label="Attributed Orders"
                 value={analytics.summary.attributedOrders.toLocaleString("en-US")}
-                detail={`${analytics.summary.earnedOrders} earned Â· ${analytics.summary.voidedOrders} voided`}
+                detail={`${analytics.summary.earnedOrders} earned · ${analytics.summary.voidedOrders} voided`}
               />
               <MetricCard
                 label="Conversion Rate"
@@ -1506,11 +1506,11 @@ function PartnerApplication({
                   <p>
                     {formatRewardType(leaderboardData.reward.rewardType)}
                     {leaderboardData.reward.rewardType !== "swag"
-                      ? ` â€” ${formatMoneyFromCents(
+                      ? ` — ${formatMoneyFromCents(
                           leaderboardData.reward.rewardAmountCents
                         )}`
                       : leaderboardData.reward.rewardDescription
-                      ? ` â€” ${leaderboardData.reward.rewardDescription}`
+                      ? ` — ${leaderboardData.reward.rewardDescription}`
                       : ""}
                   </p>
                 </div>
@@ -1550,7 +1550,7 @@ function PartnerApplication({
                         <span>{entry.partnerCode}</span>
                         <small>
                           {entry.referralCount} earned referral(s)
-                          {isCurrentPartner ? " Â· Your code" : ""}
+                          {isCurrentPartner ? " · Your code" : ""}
                         </small>
                       </div>
 
@@ -1933,7 +1933,7 @@ function PartnerApplication({
             className="secondary-btn"
             onClick={() => onNavigate("dashboard")}
           >
-            â† Account
+            ← Account
           </button>
 
           <span className={eligibility?.eligible ? "partner-eligible" : "partner-ineligible"}>
@@ -2001,7 +2001,7 @@ function PartnerApplication({
                   </div>
 
                   <small>
-                    4â€“20 characters. Letters, numbers, and single hyphens only.
+                    4–20 characters. Letters, numbers, and single hyphens only.
                     Codes are not case-sensitive.
                   </small>
 
@@ -2041,7 +2041,7 @@ function PartnerApplication({
                   />
 
                   <label className="partner-field partner-full-field">
-                    <span>Profile or Page URL â€” Optional</span>
+                    <span>Profile or Page URL — Optional</span>
                     <input
                       name="profileUrl"
                       type="url"
@@ -2075,7 +2075,7 @@ function PartnerApplication({
                 </label>
 
                 <label className="partner-field">
-                  <span>Relevant Experience â€” Optional</span>
+                  <span>Relevant Experience — Optional</span>
                   <textarea
                     name="experience"
                     rows="4"
@@ -2181,7 +2181,7 @@ function PartnerApplication({
               <section className="partner-sidebar-note">
                 <strong>For Research Use Only</strong>
                 <p>
-                  Affiliate content must describe products only within the siteâ€™s
+                  Affiliate content must describe products only within the site’s
                   research-use framework and must not promote human consumption.
                 </p>
               </section>

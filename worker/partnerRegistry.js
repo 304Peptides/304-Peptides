@@ -4690,7 +4690,7 @@ function normalizeCampaignSlug(value) {
     !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)
   ) {
     throw new RegistryError(
-      "Campaign slugs must contain 3â€“60 lowercase letters, numbers, or single hyphens.",
+      "Campaign slugs must contain 3–60 lowercase letters, numbers, or single hyphens.",
       400
     );
   }

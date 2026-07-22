@@ -2525,7 +2525,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
               className="secondary-btn"
               onClick={() => onNavigate("missionControl")}
             >
-              â† Mission Control
+              ← Mission Control
             </button>
             <div className="partner-hq-topbar-actions">
               <span className="partner-hq-source-pill">
@@ -2616,7 +2616,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                     )
                     .map((application) => (
                       <option key={application.accountId} value={application.code}>
-                        {application.code} â€” {application.firstName} {application.lastName}
+                        {application.code} — {application.firstName} {application.lastName}
                       </option>
                     ))}
                 </select>
@@ -2659,7 +2659,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
               <StatCard
                 label="Attributed Orders"
                 value={analytics.summary.attributedOrders.toLocaleString("en-US")}
-                detail={`${analytics.summary.earnedOrders} earned Â· ${analytics.summary.voidedOrders} voided`}
+                detail={`${analytics.summary.earnedOrders} earned · ${analytics.summary.voidedOrders} voided`}
               />
               <StatCard
                 label="Conversion Rate"
@@ -3008,7 +3008,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                   <p className="eyebrow">CONFIRM PARTNER ACTION</p>
                   <h2>{getActionTitle(selectedAction)}</h2>
                   <p>
-                    {selectedApplication.firstName} {selectedApplication.lastName} â€”{" "}
+                    {selectedApplication.firstName} {selectedApplication.lastName} —{" "}
                     <strong>{selectedApplication.code}</strong>
                   </p>
                 </div>
@@ -3026,8 +3026,8 @@ function PartnerHQ({ onNavigate = () => {} }) {
                   <span>
                     Customer Message
                     {["deny", "suspend"].includes(selectedAction)
-                      ? " â€” Required"
-                      : " â€” Optional"}
+                      ? " — Required"
+                      : " — Optional"}
                   </span>
                   <textarea
                     rows="5"
@@ -3040,7 +3040,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                   <small>{customerMessage.length}/1000 characters</small>
                 </label>
                 <label className="partner-hq-field">
-                  <span>Private Admin Notes â€” Optional</span>
+                  <span>Private Admin Notes — Optional</span>
                   <textarea
                     rows="5"
                     value={adminNotes}
@@ -3085,10 +3085,10 @@ function PartnerHQ({ onNavigate = () => {} }) {
               <div className="partner-hq-section-heading">
                 <div>
                   <p className="eyebrow">ISSUE LEADERBOARD REWARD</p>
-                  <h2>{rewardToIssue.partnerCode} â€” {rewardToIssue.periodKey}</h2>
+                  <h2>{rewardToIssue.partnerCode} — {rewardToIssue.periodKey}</h2>
                   <p>
                     Record how the {rewardTypeLabel(rewardToIssue.rewardType).toLowerCase()}
-                    reward was delivered. This becomes visible in the partnerâ€™s reward history,
+                    reward was delivered. This becomes visible in the partner’s reward history,
                     except for the private administrator fields.
                   </p>
                 </div>
@@ -3133,7 +3133,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                   />
                 </label>
                 <label className="partner-hq-field">
-                  <span>Reference Number â€” Optional</span>
+                  <span>Reference Number — Optional</span>
                   <input
                     type="text"
                     maxLength="150"
@@ -3148,7 +3148,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                   />
                 </label>
                 <label className="partner-hq-field">
-                  <span>Affiliate Note â€” Optional</span>
+                  <span>Affiliate Note — Optional</span>
                   <textarea
                     rows="4"
                     maxLength="1000"
@@ -3164,7 +3164,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                   />
                 </label>
                 <label className="partner-hq-field">
-                  <span>Private Admin Notes â€” Optional</span>
+                  <span>Private Admin Notes — Optional</span>
                   <textarea
                     rows="4"
                     maxLength="2000"
@@ -3207,7 +3207,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                   <p className="eyebrow">RECORD PARTNER PAYOUT</p>
                   <h2>
                     {payoutPartner.application.firstName}{" "}
-                    {payoutPartner.application.lastName} â€”{" "}
+                    {payoutPartner.application.lastName} —{" "}
                     {payoutPartner.application.code}
                   </h2>
                   <p>
@@ -3252,7 +3252,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                     <span>
                       <strong>Order #{referral.orderId}</strong>
                       <small>
-                        {formatDate(referral.earnedAt || referral.createdAt)} Â·{" "}
+                        {formatDate(referral.earnedAt || referral.createdAt)} ·{" "}
                         {referral.orderStatus}
                       </small>
                     </span>
@@ -3313,7 +3313,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                   />
                 </label>
                 <label className="partner-hq-field">
-                  <span>Reference Number â€” Optional</span>
+                  <span>Reference Number — Optional</span>
                   <input
                     type="text"
                     maxLength="150"
@@ -3329,7 +3329,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                   />
                 </label>
                 <label className="partner-hq-field">
-                  <span>Affiliate Note â€” Optional</span>
+                  <span>Affiliate Note — Optional</span>
                   <textarea
                     rows="4"
                     maxLength="1000"
@@ -3345,7 +3345,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                   />
                 </label>
                 <label className="partner-hq-field">
-                  <span>Private Admin Notes â€” Optional</span>
+                  <span>Private Admin Notes — Optional</span>
                   <textarea
                     rows="4"
                     maxLength="2000"
@@ -3552,7 +3552,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                   <p className="eyebrow">RECORDED WINNER</p>
                   <h3>{leaderboardReward.partnerCode}</h3>
                   <p>
-                    {rewardTypeLabel(leaderboardReward.rewardType)} Â· {formatRewardValue(leaderboardReward)}
+                    {rewardTypeLabel(leaderboardReward.rewardType)} · {formatRewardValue(leaderboardReward)}
                   </p>
                 </div>
                 <StatusPill status={leaderboardReward.status} />
@@ -3567,7 +3567,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                 </div>
                 <div className="partner-hq-form-grid">
                   <label className="partner-hq-field">
-                    <span>Affiliate Note â€” Optional</span>
+                    <span>Affiliate Note — Optional</span>
                     <textarea
                       rows="3"
                       maxLength="1000"
@@ -3578,7 +3578,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                     />
                   </label>
                   <label className="partner-hq-field">
-                    <span>Private Admin Notes â€” Optional</span>
+                    <span>Private Admin Notes — Optional</span>
                     <textarea
                       rows="3"
                       maxLength="2000"
@@ -3623,7 +3623,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                   <article key={reward.rewardId} className="partner-hq-reward-card">
                     <div className="partner-hq-card-title-row">
                       <div>
-                        <p className="eyebrow">{reward.periodKey} Â· {reward.periodType}</p>
+                        <p className="eyebrow">{reward.periodKey} · {reward.periodType}</p>
                         <h3>{reward.partnerCode}</h3>
                         <p className="partner-hq-muted">
                           {`${reward.partnerFirstName || ""} ${reward.partnerLastName || ""}`.trim() || reward.partnerEmail || "Affiliate"}
@@ -3632,7 +3632,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                       <StatusPill status={reward.status} />
                     </div>
                     <div className="partner-hq-referral-grid">
-                      <QuickDetail label="Reward" value={`${rewardTypeLabel(reward.rewardType)} â€” ${formatRewardValue(reward)}`} />
+                      <QuickDetail label="Reward" value={`${rewardTypeLabel(reward.rewardType)} — ${formatRewardValue(reward)}`} />
                       <QuickDetail label="Rank" value={`#${reward.rank}`} />
                       <QuickDetail label="Earned Referrals" value={reward.referralCount} />
                       <QuickDetail label="Commission" value={formatMoneyFromCents(reward.commissionCents)} />
@@ -3763,11 +3763,11 @@ function PartnerHQ({ onNavigate = () => {} }) {
                 </label>
 
                 <label className="partner-hq-field">
-                  <span>Campaign Image URL â€” Optional</span>
+                  <span>Campaign Image URL — Optional</span>
                   <input type="url" maxLength="1000" value={campaignForm.imageUrl} disabled={isSavingCampaign} placeholder="https://..." onChange={(event) => updateCampaignForm("imageUrl", event.target.value)} />
                 </label>
                 <label className="partner-hq-field">
-                  <span>Downloadable Graphic URL â€” Optional</span>
+                  <span>Downloadable Graphic URL — Optional</span>
                   <input type="url" maxLength="1000" value={campaignForm.downloadUrl} disabled={isSavingCampaign} placeholder="https://..." onChange={(event) => updateCampaignForm("downloadUrl", event.target.value)} />
                 </label>
                 <label className="partner-hq-field">
@@ -3779,11 +3779,11 @@ function PartnerHQ({ onNavigate = () => {} }) {
                   <input type="text" maxLength="200" value={campaignForm.destinationPath} disabled={isSavingCampaign} placeholder="/checkout" onChange={(event) => updateCampaignForm("destinationPath", event.target.value)} />
                 </label>
                 <label className="partner-hq-field">
-                  <span>Starts â€” Optional</span>
+                  <span>Starts — Optional</span>
                   <input type="datetime-local" value={campaignForm.startsAt} disabled={isSavingCampaign} onChange={(event) => updateCampaignForm("startsAt", event.target.value)} />
                 </label>
                 <label className="partner-hq-field">
-                  <span>Ends â€” Optional</span>
+                  <span>Ends — Optional</span>
                   <input type="datetime-local" value={campaignForm.endsAt} disabled={isSavingCampaign} onChange={(event) => updateCampaignForm("endsAt", event.target.value)} />
                 </label>
                 <label className="partner-hq-field">
@@ -3878,7 +3878,7 @@ function PartnerHQ({ onNavigate = () => {} }) {
                       {campaign.instagramCopy && <DetailBlock title="Instagram Copy" text={campaign.instagramCopy} />}
                       {campaign.tiktokCopy && <DetailBlock title="TikTok Copy" text={campaign.tiktokCopy} />}
                       {campaign.smsCopy && <DetailBlock title="Text Message Copy" text={campaign.smsCopy} />}
-                      {campaign.emailCopy && <DetailBlock title={`Email Copy${campaign.emailSubject ? ` â€” ${campaign.emailSubject}` : ""}`} text={campaign.emailCopy} />}
+                      {campaign.emailCopy && <DetailBlock title={`Email Copy${campaign.emailSubject ? ` — ${campaign.emailSubject}` : ""}`} text={campaign.emailCopy} />}
                     </div>
                     {campaign.disclaimer && <DetailBlock title="Required Disclaimer" text={campaign.disclaimer} highlighted />}
 

@@ -485,19 +485,19 @@ function Home({
               Why Choose 304 Peptides
             </h2>
             <TrustCard
-              icon="âœ“"
+              icon="✓"
               title="Quality Focused"
               description="Products are organized with clear names, strengths, product codes, research categories, and documentation status."
             />
 
             <TrustCard
-              icon="âš¡"
+              icon="⚡"
               title="Professional Service"
               description="A brand experience focused on clear communication, responsive support, and organized order handling."
             />
 
             <TrustCard
-              icon="ðŸ”’"
+              icon="🔒"
               title="Transparent Experience"
               description="Published batch documentation and COAs remain available through the dedicated Quality section."
             />
@@ -650,7 +650,7 @@ function Home({
                           <span
                             aria-hidden="true"
                           >
-                            â†’
+                            →
                           </span>
                         </button>
                       )
@@ -808,7 +808,7 @@ function Home({
               </p>
 
               <h2 className="home-cta-title">
-                Trust Is Earnedâ€”Not
+                Trust Is Earned—Not
                 Claimed.
               </h2>
 
@@ -951,7 +951,7 @@ function BestSellerCard({
       </h3>
 
       <p className="home-product-code">
-        {product.codeName} Â·{" "}
+        {product.codeName} ·{" "}
         {product.strength}
       </p>
 
