@@ -402,8 +402,8 @@ function Home({
         <section className="home-inner">
           <div className="home-hero">
             <p className="eyebrow">
-              PRECISION â€¢
-              TRANSPARENCY â€¢ QUALITY
+              PRECISION •
+              TRANSPARENCY • QUALITY
             </p>
 
             <h1 className="home-title">
