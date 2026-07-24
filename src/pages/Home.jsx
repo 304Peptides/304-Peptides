@@ -9,111 +9,12 @@ import {
   mergeCatalogRecords,
 } from "../data/catalogRuntime";
 
-const catalogProductImageModules =
-  import.meta.glob(
-    "../assets/images/products/**/*.webp",
-    {
-      eager: true,
-      query: "?url",
-      import: "default",
-    }
-  );
-
-const homeProductImageModules =
-  import.meta.glob(
-    "../assets/images/home-products/**/*.webp",
-    {
-      eager: true,
-      query: "?url",
-      import: "default",
-    }
-  );
-
-const homeProductImageSets =
-  Object.fromEntries(
-    Object.entries(
-      catalogProductImageModules
-    )
-      .map(
-        (
-          [
-            sourcePath,
-            sourceUrl,
-          ]
-        ) => {
-          const relativePath =
-            sourcePath
-              .replace(
-                "../assets/images/products/",
-                ""
-              )
-              .replace(
-                /\.webp$/i,
-                ""
-              );
-
-          const smallPath =
-            `../assets/images/home-products/${relativePath}-480.webp`;
-
-          const largePath =
-            `../assets/images/home-products/${relativePath}-640.webp`;
-
-          const small =
-            homeProductImageModules[
-              smallPath
-            ];
-
-          const large =
-            homeProductImageModules[
-              largePath
-            ];
-
-          return [
-            sourceUrl,
-
-            small && large
-              ? {
-                  small,
-                  large,
-                }
-              : null,
-          ];
-        }
-      )
-      .filter(
-        (
-          [
-            ,
-            imageSet,
-          ]
-        ) =>
-          Boolean(
-            imageSet
-          )
-      )
-  );
-
-function getHomeProductImageSet(
-  image
-) {
-  if (!image) {
-    return null;
-  }
-
-  return (
-    homeProductImageSets[
-      image
-    ] || null
-  );
-}
-
-
 const storageKey =
   "304-site-settings";
 
 const defaultSettings = {
   catalogEnabled: true,
-  storeStatus: "open",
+  storeStatus: "coming-soon",
 };
 
 const featuredCategories = [
@@ -379,6 +280,15 @@ function Home({
       [catalogProducts]
     );
 
+  const storeStatusLabel =
+    settings.storeStatus ===
+    "open"
+      ? "Store Open"
+      : settings.storeStatus ===
+        "maintenance"
+      ? "Maintenance Mode"
+      : "Coming Soon";
+
   const coaStatusLabel =
     documentationLoading
       ? "Checking COAs"
@@ -390,7 +300,7 @@ function Home({
             ? ""
             : "s"
         } Available`
-      : "View Quality";
+      : "COAs Coming Soon";
 
   return (
     <>
@@ -407,20 +317,19 @@ function Home({
             </p>
 
             <h1 className="home-title">
-              Built On Trust.
+              Research Products.
               <br />
-              Backed By Quality.
+              Documented Quality.
             </h1>
 
             <p className="home-subtitle">
-              A modern research
-              storefront built around
-              clean organization,
-              professional service,
-              transparent product
-              presentation, and
-              consistent quality
-              standards.
+              Browse an organized
+              research catalog, compare
+              available strengths, and
+              access batch-specific
+              documentation through one
+              clear, professional
+              storefront.
             </p>
 
             <div className="home-hero-pills">
@@ -428,6 +337,17 @@ function Home({
                 For Research Use Only.
                 Not intended for human
                 consumption.
+              </span>
+
+              <span
+                className={
+                  settings.storeStatus ===
+                  "open"
+                    ? "home-status-pill home-status-open"
+                    : "home-status-pill"
+                }
+              >
+                {storeStatusLabel}
               </span>
             </div>
 
@@ -455,7 +375,7 @@ function Home({
                   )
                 }
               >
-                {coaStatusLabel}
+                Verify A Batch
               </button>
 
               {!settings.catalogEnabled && (
@@ -472,36 +392,64 @@ function Home({
                 </button>
               )}
             </div>
+
+            <div
+              className="home-hero-proof"
+              aria-live="polite"
+            >
+              <span
+                className="home-proof-dot"
+                aria-hidden="true"
+              />
+
+              <span>{coaStatusLabel}</span>
+            </div>
           </div>
 
-          <section
-            className="home-trust-grid"
-            aria-labelledby="home-trust-heading"
+          <div
+            className="home-proof-bar"
+            aria-label="304 Peptides customer commitments"
           >
-            <h2
-              id="home-trust-heading"
-              className="home-visually-hidden"
-            >
-              Why Choose 304 Peptides
-            </h2>
+            <div className="home-proof-item">
+              <span aria-hidden="true">✓</span>
+              <strong>Batch Documentation</strong>
+            </div>
+
+            <div className="home-proof-item">
+              <span aria-hidden="true">✓</span>
+              <strong>Organized Product Data</strong>
+            </div>
+
+            <div className="home-proof-item">
+              <span aria-hidden="true">✓</span>
+              <strong>Responsive Support</strong>
+            </div>
+
+            <div className="home-proof-item">
+              <span aria-hidden="true">✓</span>
+              <strong>Research Use Only</strong>
+            </div>
+          </div>
+
+          <div className="home-trust-grid">
             <TrustCard
-              icon="✓"
-              title="Quality Focused"
-              description="Products are organized with clear names, strengths, product codes, research categories, and documentation status."
+              icon="⌕"
+              title="Batch-Specific Records"
+              description="Published records connect product codes, strengths, batch numbers, laboratories, test dates, and available certificates."
             />
 
             <TrustCard
-              icon="⚡"
-              title="Professional Service"
-              description="A brand experience focused on clear communication, responsive support, and organized order handling."
+              icon="□"
+              title="Clear Catalog Details"
+              description="Product names, strengths, availability, documentation status, and research categories are presented in a consistent format."
             />
 
             <TrustCard
-              icon="🔒"
-              title="Transparent Experience"
-              description="Published batch documentation and COAs remain available through the dedicated Quality section."
+              icon="↗"
+              title="Support When Needed"
+              description="Documentation questions, account assistance, and order support stay easy to find throughout the customer experience."
             />
-          </section>
+          </div>
 
           {settings.catalogEnabled &&
             bestSellers.length >
@@ -724,20 +672,18 @@ function Home({
               </p>
 
               <h2 className="home-section-title">
-                COAs Available In The
-                Quality Tab
+                Verify The Current
+                Batch
               </h2>
 
               <p className="home-section-text">
-                Published certificates,
-                batch numbers, testing
+                Review published
+                certificates, batch
+                numbers, testing
                 laboratories, test
                 dates, and verification
-                links are kept together
-                in the Quality section
-                so the homepage stays
-                focused on the brand and
-                products.
+                links before relying on
+                a product record.
               </p>
 
               <div className="home-quality-status">
@@ -764,7 +710,7 @@ function Home({
                 )
               }
             >
-              View Quality &amp; COAs
+              Search Documentation
             </button>
           </section>
 
@@ -775,18 +721,17 @@ function Home({
               </p>
 
               <h2 className="home-cta-title">
-                Explore The 304
-                Catalog
+                Documentation Up Front.
+                Products Easy To Compare.
               </h2>
 
               <p className="home-cta-text">
                 Browse the research
-                catalog, review product
-                details, select
-                available strengths,
-                and see which products
-                have published
-                documentation.
+                catalog, compare
+                strengths and
+                availability, and check
+                documentation status
+                before moving forward.
               </p>
 
               <button
@@ -869,15 +814,6 @@ function BestSellerCard({
     product.variants?.length ||
     0;
 
-  const homeImageSet =
-    getHomeProductImageSet(
-      product.image
-    );
-
-  const homeImageSource =
-    homeImageSet?.small ||
-    product.image;
-
   return (
     <article className="home-best-seller-card">
       <div className="home-best-seller-badges">
@@ -903,20 +839,8 @@ function BestSellerCard({
         {product.image ? (
           <div className="home-product-image">
             <img
-              src={
-                homeImageSource
-              }
-              srcSet={
-                homeImageSet
-                  ? `${homeImageSet.small} 480w, ${homeImageSet.large} 640w`
-                  : undefined
-              }
-              sizes="(max-width: 650px) calc(100vw - 68px), (max-width: 1100px) 44vw, 260px"
+              src={product.image}
               alt={`${product.name} ${product.strength} research product`}
-              width={640}
-              height={800}
-              loading="lazy"
-              decoding="async"
             />
 
             <div className="home-product-glow" />
@@ -1110,17 +1034,72 @@ const homeCss = `
     margin-top: 28px;
   }
 
-  .home-visually-hidden {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
+  .home-hero-proof {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    margin-top: 20px;
+    color: #c8eaff;
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 0.35px;
+  }
+
+  .home-proof-dot {
+    width: 8px;
+    height: 8px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: #3da5ff;
+    box-shadow: 0 0 16px rgba(61,165,255,0.85);
+  }
+
+  .home-proof-bar {
+    display: grid;
+    grid-template-columns:
+      repeat(4, minmax(0, 1fr));
+    gap: 1px;
+    margin: -8px 18px 28px;
     overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    clip-path: inset(50%);
-    white-space: nowrap;
-    border: 0;
+    border: 1px solid rgba(61,165,255,0.22);
+    border-radius: 20px;
+    background: rgba(61,165,255,0.2);
+    box-shadow: 0 22px 55px rgba(0,0,0,0.32);
+  }
+
+  .home-proof-item {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 17px 14px;
+    background: rgba(8,14,21,0.94);
+    color: #ffffff;
+    text-align: center;
+  }
+
+  .home-proof-item span {
+    width: 24px;
+    height: 24px;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(61,165,255,0.35);
+    border-radius: 999px;
+    background: rgba(61,165,255,0.12);
+    color: #9ed8ff;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .home-proof-item strong {
+    min-width: 0;
+    font-size: 12px;
+    line-height: 1.35;
+    letter-spacing: 0.15px;
   }
 
   .home-trust-grid {
@@ -1610,6 +1589,11 @@ const homeCss = `
   }
 
   @media (max-width: 800px) {
+    .home-proof-bar {
+      grid-template-columns:
+        repeat(2, minmax(0, 1fr));
+    }
+
     .home-trust-grid {
       grid-template-columns:
         minmax(0, 1fr);
@@ -1645,6 +1629,18 @@ const homeCss = `
 
     .home-hero-pills span {
       justify-content: center;
+    }
+
+    .home-proof-bar {
+      grid-template-columns:
+        minmax(0, 1fr);
+      margin: -8px 8px 24px;
+    }
+
+    .home-proof-item {
+      justify-content: flex-start;
+      padding: 14px 16px;
+      text-align: left;
     }
 
     .home-best-seller-grid,
