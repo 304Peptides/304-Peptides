@@ -323,13 +323,8 @@ function Home({
             </h1>
 
             <p className="home-subtitle">
-              Browse an organized
-              research catalog, compare
-              available strengths, and
-              access batch-specific
-              documentation through one
-              clear, professional
-              storefront.
+              From the hills of West Virginia
+              to your research bench.
             </p>
 
             <div className="home-hero-pills">
