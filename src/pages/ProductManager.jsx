@@ -15,7 +15,7 @@ const blankVariant = {
   name: "",
   category: "Additional Research Products",
   description: "",
-  purity: "≥ 99% Purity",
+  purity: "Batch Specific",
   isBestSeller: false,
   codeName: "",
   strength: "",
@@ -333,7 +333,7 @@ function ProductManager({ onNavigate = () => {} }) {
       strength: draft.strength.trim(),
       category: draft.category.trim() || "Additional Research Products",
       description: draft.description.trim(),
-      purity: draft.purity.trim() || "≥ 99% Purity",
+      purity: draft.purity.trim() || "Batch Specific",
       composition: draft.composition.trim(),
       imageUrl,
       image: imageUrl,
@@ -898,10 +898,11 @@ function VariantEditor({
                 }
               />
             </Field>
-            <Field label="Purity display">
+            <Field label="Batch-specific note">
               <input
                 value={draft.purity}
                 onChange={(event) => setField("purity", event.target.value)}
+                placeholder="Example: See published batch record"
               />
             </Field>
             <Field label="Custom image URL (optional)">

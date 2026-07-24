@@ -145,7 +145,7 @@ function product({
   category,
   description,
   isBestSeller = false,
-  purity = "≥ 99% Purity",
+  purity = "Batch Specific",
   variants = [],
   options = {},
 }) {
@@ -213,7 +213,7 @@ export const products = [
       "Metabolic Research",
 
     description:
-      "Research-use product available in multiple strengths with strength-specific imagery and documentation placeholders.",
+      "Research-use catalog item offered in multiple strengths with strength-specific imagery and clearly identified product codes.",
 
     isBestSeller: true,
 
@@ -256,7 +256,7 @@ export const products = [
       "Metabolic Research",
 
     description:
-      "Research-use product available in multiple strengths with strength-specific imagery and verification placeholders.",
+      "Research-use catalog item offered in multiple strengths with strength-specific imagery and clearly identified product codes.",
 
     isBestSeller: true,
 
@@ -313,7 +313,7 @@ export const products = [
       "Metabolic Research",
 
     description:
-      "Research-use product available in multiple strengths with strength-specific imagery and documentation placeholders.",
+      "Research-use catalog item offered in multiple strengths with strength-specific imagery and clearly identified product codes.",
 
     variants: [
       variant(
@@ -367,7 +367,7 @@ export const products = [
       "Metabolic Research",
 
     description:
-      "Research-use product available in multiple strengths with product-specific documentation placeholders.",
+      "Research-use catalog item offered in multiple strengths with product-specific coding.",
 
     variants: [
       variant(
@@ -401,7 +401,7 @@ export const products = [
       "Metabolic Research",
 
     description:
-      "Research-use product organized with multiple strength options and verification placeholders.",
+      "Research-use catalog item organized with multiple strength options and clearly identified product codes.",
 
     variants: [
       variant(
@@ -435,7 +435,7 @@ export const products = [
       "Metabolic Research",
 
     description:
-      "Research-use blend presented with clear product coding and documentation placeholders.",
+      "Research-use blend presented with clear component labeling and product coding.",
 
     variants: [
       variant(
@@ -504,7 +504,7 @@ export const products = [
       "Additional Research Products",
 
     description:
-      "Research-use catalog item with clear labeling and documentation placeholders.",
+      "Research-use catalog item with clear strength labeling and an individual product code.",
 
     variants: [
       variant(
@@ -524,7 +524,7 @@ export const products = [
       "Additional Research Products",
 
     description:
-      "Research-use catalog item with clear labeling and documentation placeholders.",
+      "Research-use catalog item with clear strength labeling and an individual product code.",
 
     variants: [
       variant(
@@ -544,7 +544,7 @@ export const products = [
       "Recovery Research",
 
     description:
-      "Research-use blend with clear product coding and documentation placeholders.",
+      "Research-use blend presented with clear component labeling and product coding.",
 
     variants: [
       variant(
@@ -564,7 +564,7 @@ export const products = [
       "Recovery Research",
 
     description:
-      "Research-use product available in multiple strengths with organized verification placeholders.",
+      "Research-use catalog item offered in multiple strengths with organized product data.",
 
     variants: [
       variant(
@@ -620,7 +620,7 @@ export const products = [
       "Wellness Research",
 
     description:
-      "Research-use product available in multiple strengths with documentation placeholders.",
+      "Research-use catalog item offered in multiple strengths with clearly identified product codes.",
 
     variants: [
       variant(
@@ -647,7 +647,7 @@ export const products = [
       "Cognitive Research",
 
     description:
-      "Research-use catalog item with clear strength labeling and verification placeholders.",
+      "Research-use catalog item with clear strength labeling and an individual product code.",
 
     variants: [
       variant(
@@ -667,7 +667,7 @@ export const products = [
       "Recovery Research",
 
     description:
-      "Research-use product with clear labeling and documentation placeholders.",
+      "Research-use catalog item with clear strength labeling and an individual product code.",
 
     variants: [
       variant(
@@ -716,7 +716,7 @@ export const products = [
       "Hormone Research",
 
     description:
-      "Research-use product available in multiple strengths with documentation placeholders.",
+      "Research-use catalog item offered in multiple strengths with clearly identified product codes.",
 
     variants: [
       variant(
@@ -750,7 +750,7 @@ export const products = [
       "Recovery Research",
 
     description:
-      "Research-use product available in multiple strengths with strength-specific imagery and verification placeholders.",
+      "Research-use catalog item offered in multiple strengths with strength-specific imagery and clearly identified product codes.",
 
     isBestSeller: true,
 
@@ -779,7 +779,7 @@ export const products = [
       "Performance Research",
 
     description:
-      "Research-use product available in multiple strengths with strength-specific imagery and documentation placeholders.",
+      "Research-use catalog item offered in multiple strengths with strength-specific imagery and clearly identified product codes.",
 
     isBestSeller: true,
 
@@ -808,7 +808,7 @@ export const products = [
       "Recovery Research",
 
     description:
-      "Research-use product available in multiple strengths with documentation placeholders.",
+      "Research-use catalog item offered in multiple strengths with clearly identified product codes.",
 
     isBestSeller: true,
 
@@ -922,7 +922,7 @@ export const products = [
       "Cognitive Research",
 
     description:
-      "Research-use product available in multiple strengths with documentation placeholders.",
+      "Research-use catalog item offered in multiple strengths with clearly identified product codes.",
 
     variants: [
       variant(
@@ -976,7 +976,7 @@ export const products = [
       "Hormone Research",
 
     description:
-      "Research-use product available in multiple strengths with documentation placeholders.",
+      "Research-use catalog item offered in multiple strengths with clearly identified product codes.",
 
     variants: [
       variant(
@@ -1065,7 +1065,7 @@ export const products = [
       "Hormone Research",
 
     description:
-      "Research-use product available in multiple strengths with documentation placeholders.",
+      "Research-use catalog item offered in multiple strengths with clearly identified product codes.",
 
     variants: [
       variant(
@@ -1092,7 +1092,7 @@ export const products = [
       "Hormone Research",
 
     description:
-      "Research-use catalog item with clear labeling and verification placeholders.",
+      "Research-use catalog item with clear strength labeling and an individual product code.",
 
     variants: [
       variant(
@@ -1139,7 +1139,7 @@ export const products = [
       "Wellness Research",
 
     description:
-      "Research-use product available in multiple strengths with documentation placeholders.",
+      "Research-use catalog item offered in multiple strengths with clearly identified product codes.",
 
     variants: [
       variant(
@@ -1166,7 +1166,7 @@ export const products = [
       "Wellness Research",
 
     description:
-      "Research-use catalog item with clear labeling and verification placeholders.",
+      "Research-use catalog item with clear strength labeling and an individual product code.",
 
     variants: [
       variant(
@@ -1215,7 +1215,7 @@ export const products = [
       "Wellness Research",
 
     description:
-      "Research-use product available in multiple strengths with documentation placeholders.",
+      "Research-use catalog item offered in multiple strengths with clearly identified product codes.",
 
     isBestSeller: true,
 
@@ -1271,7 +1271,7 @@ export const products = [
       "Recovery Research",
 
     description:
-      "Research-use catalog item with clear labeling and documentation placeholders.",
+      "Research-use catalog item with clear strength labeling and an individual product code.",
 
     variants: [
       variant(

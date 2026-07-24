@@ -1,4 +1,3 @@
-import brandBadgeLogo from "../assets/images/logo-nav.webp";
 import {
   useEffect,
   useMemo,
@@ -12,15 +11,11 @@ import {
   mergeCatalogRecords,
 } from "../data/catalogRuntime";
 
-import {
-  getProductPath,
-} from "../utils/catalogRoutes";
-
 const storageKey =
   "304-site-settings";
 
 const defaultSettings = {
-  storeStatus: "open",
+  storeStatus: "coming-soon",
   catalogEnabled: true,
   guestPricingEnabled: false,
 };
@@ -458,28 +453,6 @@ function Products({
     });
   }
 
-  function handleProductLinkClick(
-    event,
-    resolvedProduct
-  ) {
-    if (
-      event.defaultPrevented ||
-      event.button !== 0 ||
-      event.metaKey ||
-      event.ctrlKey ||
-      event.shiftKey ||
-      event.altKey
-    ) {
-      return;
-    }
-
-    event.preventDefault();
-
-    openProductDetails(
-      resolvedProduct
-    );
-  }
-
   const filteredProducts =
     useMemo(() => {
       const normalizedSearch =
@@ -644,110 +617,148 @@ function Products({
               published.
             </p>
 
+            <div className="products-status-row">
+              <div className="products-research-pill">
+                For Research Use Only.
+                Not intended for human
+                consumption.
+              </div>
 
+              <div
+                className={
+                  purchasingEnabled
+                    ? "products-store-pill products-store-pill-open"
+                    : "products-store-pill"
+                }
+              >
+                {storeStatusLabel}
+              </div>
+
+              <div className="products-document-pill">
+                {documentsLoading
+                  ? "Checking Documentation"
+                  : documentsError
+                  ? "Documentation Unavailable"
+                  : `${publishedDocumentCount} Published Record${
+                      publishedDocumentCount ===
+                      1
+                        ? ""
+                        : "s"
+                    }`}
+              </div>
+
+              <div className="products-document-pill">
+                {catalogLoading
+                  ? "Checking Inventory"
+                  : catalogError
+                  ? "Inventory Status Unavailable"
+                  : "Live Inventory"}
+              </div>
+            </div>
+
+            {!purchasingEnabled && (
+              <div className="products-store-notice">
+                Product browsing
+                remains available, but
+                purchasing is currently
+                disabled while the
+                store status is{" "}
+                <strong>
+                  {storeStatusLabel}
+                </strong>
+                .
+              </div>
+            )}
+
+            {documentsError && (
+              <div className="products-document-error">
+                Product browsing is
+                available, but live
+                documentation status
+                could not be loaded.
+              </div>
+            )}
           </div>
 
-          <details className="products-filter-drawer">
-            <summary className="products-filter-summary">
-              <span className="products-filter-summary-main">
-                <span className="products-filter-icon">
-                  ☰
-                </span>
+          <div className="products-filters">
+            <div>
+              <p className="eyebrow">
+                FILTER PRODUCTS
+              </p>
 
-                <span>
-                  Filters & Search
-                </span>
-              </span>
+              <h2 className="products-section-title">
+                Find Products
+              </h2>
 
-              <span className="products-filter-summary-meta">
-                {activeCategory} ·{" "}
-                {filteredProducts.length} product
-                {filteredProducts.length === 1
+              <p className="products-category-description">
+                {categoryDescriptions[
+                  activeCategory
+                ] ||
+                  categoryDescriptions[
+                    "All Products"
+                  ]}
+              </p>
+            </div>
+
+            <input
+              type="search"
+              className="products-search"
+              placeholder="Search by product, code, strength, category, batch, or laboratory..."
+              value={searchTerm}
+              onChange={(event) =>
+                setSearchTerm(
+                  event.target.value
+                )
+              }
+            />
+
+            <div className="products-category-row">
+              {categoryOptions.map(
+                (category) => (
+                  <button
+                    key={category}
+                    type="button"
+                    className={
+                      activeCategory ===
+                      category
+                        ? "primary-btn"
+                        : "secondary-btn"
+                    }
+                    onClick={() =>
+                      setActiveCategory(
+                        category
+                      )
+                    }
+                  >
+                    {category}
+                  </button>
+                )
+              )}
+            </div>
+
+            <div className="products-results">
+              <span>
+                Showing{" "}
+                <strong>
+                  {
+                    filteredProducts.length
+                  }
+                </strong>{" "}
+                product
+                {filteredProducts.length ===
+                1
                   ? ""
                   : "s"}
               </span>
-            </summary>
 
-            <div className="products-filters">
-              <div>
-                <p className="eyebrow">
-                  FILTER PRODUCTS
-                </p>
-
-                <h2 className="products-section-title">
-                  Find Products
-                </h2>
-
-                <p className="products-category-description">
-                  {categoryDescriptions[
-                    activeCategory
-                  ] ||
-                    categoryDescriptions[
-                      "All Products"
-                    ]}
-                </p>
-              </div>
-
-              <input
-                type="search"
-                className="products-search"
-                placeholder="Search by product, code, strength, category, batch, or laboratory..."
-                value={searchTerm}
-                onChange={(event) =>
-                  setSearchTerm(
-                    event.target.value
-                  )
-                }
-              />
-
-              <div className="products-category-row">
-                {categoryOptions.map(
-                  (category) => (
-                    <button
-                      key={category}
-                      type="button"
-                      className={
-                        activeCategory ===
-                        category
-                          ? "primary-btn"
-                          : "secondary-btn"
-                      }
-                      onClick={() =>
-                        setActiveCategory(
-                          category
-                        )
-                      }
-                    >
-                      {category}
-                    </button>
-                  )
-                )}
-              </div>
-
-              <div className="products-results">
-                <span>
-                  Showing{" "}
-                  <strong>
-                    {
-                      filteredProducts.length
-                    }
-                  </strong>{" "}
-                  product
-                  {filteredProducts.length ===
-                  1
-                    ? ""
-                    : "s"}
-                </span>
-
-                <span>
-                  Active Filter:{" "}
-                  <strong>
-                    {activeCategory}
-                  </strong>
-                </span>
-              </div>
+              <span>
+                Active Filter:{" "}
+                <strong>
+                  {activeCategory}
+                </strong>
+              </span>
             </div>
-          </details>
+          </div>
 
           {filteredProducts.length ===
           0 ? (
@@ -827,14 +838,14 @@ function Products({
                     isLoggedIn &&
                     availability.purchasable;
 
-                  const coaLabel =
+                  const recordLabel =
                     documentsLoading
                       ? "Checking..."
                       : documentsError
                       ? "Unavailable"
                       : hasPublishedDocumentation
                       ? "Published"
-                      : "Not Published";
+                      : "No Record";
 
                   const batchLabel =
                     hasPublishedDocumentation
@@ -843,7 +854,16 @@ function Products({
                       ? "Checking..."
                       : documentsError
                       ? "Unavailable"
-                      : "Not Published";
+                      : "No Record";
+
+                  const labLabel =
+                    hasPublishedDocumentation
+                      ? documentation.labName
+                      : documentsLoading
+                      ? "Checking..."
+                      : documentsError
+                      ? "Unavailable"
+                      : "No Record";
 
                   const verificationLabel =
                     hasPublishedDocumentation
@@ -852,7 +872,7 @@ function Products({
                       ? "Checking..."
                       : documentsError
                       ? "Unavailable"
-                      : "Not Published";
+                      : "No Record";
 
                   return (
                     <article
@@ -887,28 +907,20 @@ function Products({
 
                           {hasPublishedDocumentation && (
                             <span className="products-coa-badge">
-                              COA Published
+                              Batch Record
                             </span>
                           )}
                         </div>
                       </div>
 
-                      <a
+                      <button
+                        type="button"
                         className="products-image-button"
-
-                        href={
-                          getProductPath(
+                        onClick={() =>
+                          openProductDetails(
                             resolvedProduct
                           )
                         }
-
-                        onClick={(event) =>
-                          handleProductLinkClick(
-                            event,
-                            resolvedProduct
-                          )
-                        }
-
                         aria-label={`View ${product.name} ${resolvedProduct.strength}`}
                       >
                         {resolvedProduct.image ? (
@@ -918,10 +930,6 @@ function Products({
                                 resolvedProduct.image
                               }
                               alt={`${product.name} ${resolvedProduct.strength} research product`}
-
-                              loading="lazy"
-
-                              decoding="async"
                             />
 
                             <div className="products-image-glow" />
@@ -932,18 +940,9 @@ function Products({
 
                             <div className="products-bottle">
                               <div className="products-label">
-                                <img
-                                  src={brandBadgeLogo}
-                                  alt=""
-                                  aria-hidden="true"
-                                  style={{
-                                    width: "42px",
-                                    height: "42px",
-                                    display: "block",
-                                    objectFit: "contain",
-                                    borderRadius: "10px",
-                                  }}
-                                />
+                                <strong>
+                                  304
+                                </strong>
 
                                 <span>
                                   {
@@ -965,7 +964,7 @@ function Products({
                             </div>
                           </div>
                         )}
-                      </a>
+                      </button>
 
                       <h2 className="products-product-title">
                         {product.name}
@@ -1029,7 +1028,7 @@ function Products({
 
                                     {variantHasDocument && (
                                       <small>
-                                        COA
+                                        Record
                                       </small>
                                     )}
                                   </button>
@@ -1062,16 +1061,16 @@ function Products({
 
                       <div className="products-status-grid">
                         <StatusBox
-                          label="Purity"
-                          value={
-                            product.purity
+                          label="Record"
+                          value={recordLabel}
+                          ready={
+                            hasPublishedDocumentation
                           }
-                          ready
                         />
 
                         <StatusBox
-                          label="COA"
-                          value={coaLabel}
+                          label="Lab"
+                          value={labLabel}
                           ready={
                             hasPublishedDocumentation
                           }
@@ -1101,8 +1100,8 @@ function Products({
                           <div className="products-document-heading">
                             <div>
                               <span>
-                                Published
-                                Documentation
+                                Published Batch
+                                Record
                               </span>
 
                               <strong>
@@ -1113,7 +1112,7 @@ function Products({
                             </div>
 
                             <span className="products-published-marker">
-                              Verified Record
+                              Public Record
                             </span>
                           </div>
 
@@ -1219,24 +1218,17 @@ function Products({
                       </div>
 
                       <div className="products-button-stack">
-                        <a
+                        <button
+                          type="button"
                           className="secondary-btn"
-
-                          href={
-                            getProductPath(
-                              resolvedProduct
-                            )
-                          }
-
-                          onClick={(event) =>
-                            handleProductLinkClick(
-                              event,
+                          onClick={() =>
+                            openProductDetails(
                               resolvedProduct
                             )
                           }
                         >
                           View Details
-                        </a>
+                        </button>
 
                         {!hasPrice ? (
                           <button
@@ -1282,24 +1274,17 @@ function Products({
                               : " To Cart"}
                           </button>
                         ) : (
-                          <a
+                          <button
+                            type="button"
                             className="primary-btn"
-
-                            href={
-                              getProductPath(
-                                resolvedProduct
-                              )
-                            }
-
-                            onClick={(event) =>
-                              handleProductLinkClick(
-                                event,
+                            onClick={() =>
+                              openProductDetails(
                                 resolvedProduct
                               )
                             }
                           >
                             View Product
-                          </a>
+                          </button>
                         )}
                       </div>
 
@@ -1349,7 +1334,7 @@ const productsCss = `
   .products-page {
     width: 100%;
     max-width: 100%;
-    padding: 38px 24px 64px;
+    padding: 90px 60px;
     overflow-x: hidden;
   }
 
@@ -1361,9 +1346,9 @@ const productsCss = `
 
   .products-hero,
   .products-unavailable {
-    padding: 28px 30px;
+    padding: 64px 56px;
     border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 22px;
+    border-radius: 34px;
     background:
       radial-gradient(
         circle at top,
@@ -1377,7 +1362,7 @@ const productsCss = `
   }
 
   .products-hero {
-    margin-bottom: 18px;
+    margin-bottom: 30px;
   }
 
   .products-unavailable {
@@ -1386,8 +1371,8 @@ const productsCss = `
   }
 
   .products-title {
-    margin-bottom: 10px;
-    font-size: clamp(38px, 6vw, 54px);
+    margin-bottom: 24px;
+    font-size: clamp(46px, 7vw, 72px);
     line-height: 1.02;
     background:
       linear-gradient(
@@ -1400,11 +1385,11 @@ const productsCss = `
   }
 
   .products-subtitle {
-    max-width: 760px;
+    max-width: 850px;
     margin: 0 auto;
     color: #c8c8c8;
-    font-size: 16px;
-    line-height: 1.6;
+    font-size: 20px;
+    line-height: 1.85;
   }
 
   .products-status-row {
@@ -1468,110 +1453,11 @@ const productsCss = `
     color: #ffd1d1;
   }
 
-  .products-filter-drawer {
-    width: 100%;
-    margin-bottom: 22px;
-  }
-
-  .products-filter-summary {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 18px;
-    padding: 15px 18px;
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 16px;
-    background:
-      radial-gradient(
-        circle at top left,
-        rgba(61,165,255,0.14),
-        transparent 45%
-      ),
-      rgba(255,255,255,0.04);
-    box-shadow:
-      0 18px 45px rgba(0,0,0,0.32);
-    color: #ffffff;
-    cursor: pointer;
-    list-style: none;
-    user-select: none;
-  }
-
-  .products-filter-summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .products-filter-summary::marker {
-    content: "";
-  }
-
-  .products-filter-summary-main {
-    display: inline-flex;
-    align-items: center;
-    gap: 11px;
-    font-size: 14px;
-    font-weight: 900;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-  }
-
-  .products-filter-icon {
-    width: 34px;
-    height: 34px;
-    display: inline-grid;
-    place-items: center;
-    flex: 0 0 auto;
-    border: 1px solid rgba(61,165,255,0.3);
-    border-radius: 10px;
-    background: rgba(61,165,255,0.13);
-    color: #9ed8ff;
-    font-size: 17px;
-    line-height: 1;
-  }
-
-  .products-filter-summary-meta {
-    color: #9ed8ff;
-    font-size: 12px;
-    font-weight: 800;
-    text-align: right;
-  }
-
-  .products-filter-drawer[open]
-    .products-filter-summary {
-    border-color: rgba(61,165,255,0.32);
-    border-radius: 16px 16px 10px 10px;
-    background:
-      radial-gradient(
-        circle at top left,
-        rgba(61,165,255,0.2),
-        transparent 48%
-      ),
-      rgba(255,255,255,0.055);
-  }
-
-  .products-filter-drawer
-    .products-filters {
-    margin-top: 10px;
-    margin-bottom: 0;
-  }
-
-  @media (max-width: 650px) {
-    .products-filter-summary {
-      align-items: flex-start;
-      flex-wrap: wrap;
-      padding: 13px 14px;
-    }
-
-    .products-filter-summary-meta {
-      width: 100%;
-      padding-left: 45px;
-      text-align: left;
-    }
-  }
   .products-filters {
-    padding: 22px;
-    margin-bottom: 22px;
+    padding: 34px;
+    margin-bottom: 30px;
     border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 22px;
+    border-radius: 30px;
     background:
       radial-gradient(
         circle at top left,
@@ -1584,8 +1470,8 @@ const productsCss = `
   }
 
   .products-section-title {
-    margin-bottom: 8px;
-    font-size: clamp(28px, 4vw, 34px);
+    margin-bottom: 14px;
+    font-size: clamp(31px, 5vw, 38px);
     line-height: 1.12;
     background:
       linear-gradient(
@@ -1599,15 +1485,15 @@ const productsCss = `
 
   .products-category-description {
     max-width: 850px;
-    margin-bottom: 14px;
+    margin-bottom: 24px;
     color: #c8c8c8;
-    line-height: 1.6;
+    line-height: 1.8;
   }
 
   .products-search {
     width: 100%;
-    padding: 13px 15px;
-    margin-bottom: 14px;
+    padding: 17px;
+    margin-bottom: 22px;
     border: 1px solid rgba(255,255,255,0.12);
     border-radius: 16px;
     outline: none;
@@ -1619,16 +1505,16 @@ const productsCss = `
   .products-category-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 12px;
   }
 
   .products-results {
     display: flex;
     justify-content: space-between;
-    gap: 12px;
+    gap: 16px;
     flex-wrap: wrap;
-    margin-top: 15px;
-    padding: 12px 14px;
+    margin-top: 24px;
+    padding: 16px;
     border: 1px solid rgba(255,255,255,0.09);
     border-radius: 16px;
     background: rgba(255,255,255,0.045);
@@ -1715,8 +1601,6 @@ const productsCss = `
     margin: 0 0 22px;
     border: none;
     background: transparent;
-    color: inherit;
-    text-decoration: none;
     cursor: pointer;
   }
 
@@ -2074,11 +1958,6 @@ const productsCss = `
     margin-top: 18px;
   }
 
-  .products-button-stack > a {
-    width: 100%;
-    text-decoration: none;
-  }
-
   .products-disabled-button {
     width: 100%;
     padding: 14px 18px;
@@ -2116,19 +1995,19 @@ const productsCss = `
 
   @media (max-width: 900px) {
     .products-page {
-      padding: 32px 18px 56px;
+      padding: 65px 24px;
     }
   }
 
   @media (max-width: 650px) {
     .products-page {
-      padding: 24px 10px 46px;
+      padding: 44px 12px;
     }
 
     .products-hero,
     .products-unavailable {
-      padding: 22px 16px;
-      border-radius: 20px;
+      padding: 34px 20px;
+      border-radius: 25px;
     }
 
     .products-filters,
@@ -2159,7 +2038,7 @@ const productsCss = `
 
   @media (max-width: 430px) {
     .products-page {
-      padding: 18px 8px 40px;
+      padding: 34px 8px;
     }
 
     .products-hero,
@@ -2195,7 +2074,7 @@ const productsCss = `
     }
 
     .products-link-button,
-    .products-button-stack > * {
+    .products-button-stack button {
       width: 100%;
     }
   }

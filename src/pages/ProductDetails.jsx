@@ -1,4 +1,3 @@
-import brandBadgeLogo from "../assets/images/logo-nav.webp";
 import {
   useEffect,
   useMemo,
@@ -11,7 +10,7 @@ const storageKey =
   "304-site-settings";
 
 const defaultSettings = {
-  storeStatus: "open",
+  storeStatus: "coming-soon",
   catalogEnabled: true,
   guestPricingEnabled: false,
 };
@@ -497,14 +496,23 @@ function ProductDetails({
     isLoggedIn &&
     availability.purchasable;
 
+  const storeStatusLabel =
+    settings.storeStatus ===
+    "open"
+      ? "Store Open"
+      : settings.storeStatus ===
+        "maintenance"
+      ? "Maintenance Mode"
+      : "Coming Soon";
+
   const documentationStatus =
     documentsLoading
-      ? "Checking Records"
+      ? "Checking Batch Records"
       : documentsError
-      ? "Documentation Unavailable"
+      ? "Batch Records Unavailable"
       : hasPublishedDocumentation
-      ? "Published Documentation"
-      : "No Published Record";
+      ? "Batch Record Published"
+      : "No Public Batch Record";
 
   function handleAddToCart() {
     if (!canPurchase) {
@@ -567,7 +575,7 @@ function ProductDetails({
 
                   {hasPublishedDocumentation && (
                     <span className="product-details-coa-badge">
-                      COA Published
+                      Batch Record Published
                     </span>
                   )}
                 </div>
@@ -590,18 +598,9 @@ function ProductDetails({
 
                   <div className="product-details-bottle">
                     <div className="product-details-label">
-                      <img
-                        src={brandBadgeLogo}
-                        alt=""
-                        aria-hidden="true"
-                        style={{
-                          width: "50px",
-                          height: "50px",
-                          display: "block",
-                          objectFit: "contain",
-                          borderRadius: "12px",
-                        }}
-                      />
+                      <strong>
+                        304
+                      </strong>
 
                       <span>
                         {
@@ -637,6 +636,15 @@ function ProductDetails({
                 </p>
 
                 <div className="product-details-heading-badges">
+                  <span
+                    className={
+                      purchasingEnabled
+                        ? "product-details-store-status product-details-store-open"
+                        : "product-details-store-status"
+                    }
+                  >
+                    {storeStatusLabel}
+                  </span>
 
                   <span
                     className={
@@ -712,7 +720,7 @@ function ProductDetails({
 
                             {variantHasDocumentation && (
                               <small>
-                                COA
+                                Record
                               </small>
                             )}
                           </button>
@@ -751,8 +759,16 @@ function ProductDetails({
 
               {!purchasingEnabled && (
                 <div className="product-details-store-notice">
-                  Product information remains available, but purchasing is
-                  temporarily unavailable.
+                  Product information
+                  remains available, but
+                  purchasing is
+                  currently disabled
+                  while the store status
+                  is{" "}
+                  <strong>
+                    {storeStatusLabel}
+                  </strong>
+                  .
                 </div>
               )}
 
@@ -765,10 +781,9 @@ function ProductDetails({
                 />
 
                 <InformationBox
-                  label="Purity"
+                  label="Batch Record"
                   value={
-                    resolvedProduct.purity ||
-                    "Not listed"
+                    documentationStatus
                   }
                 />
 
@@ -785,6 +800,11 @@ function ProductDetails({
                     resolvedProduct.category
                   }
                 />
+              </div>
+
+              <div className="product-details-batch-notice">
+                Analytical results are batch-specific. Review the published
+                record for the selected product code when one is available.
               </div>
 
               <section className="product-details-verification-panel">
@@ -820,7 +840,7 @@ function ProductDetails({
                     <div className="product-details-loader" />
 
                     <strong>
-                      Checking Published
+                      Checking Batch
                       Records
                     </strong>
 
@@ -838,7 +858,7 @@ function ProductDetails({
                   documentsError && (
                   <div className="product-details-document-error">
                     <strong>
-                      Documentation
+                      Batch Records
                       Unavailable
                     </strong>
 
@@ -865,7 +885,7 @@ function ProductDetails({
                   !hasPublishedDocumentation && (
                   <div className="product-details-document-empty">
                     <strong>
-                      No Published Record
+                      No Public Batch Record
                     </strong>
 
                     <span>
