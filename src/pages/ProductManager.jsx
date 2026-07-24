@@ -493,6 +493,79 @@ function ProductManager({ onNavigate = () => {} }) {
     setMessage("");
   }
 
+  function exportCatalogBackup() {
+    const exportedAt = new Date();
+
+    const records = products.flatMap((product) =>
+      (product.variants || []).map((variant) => ({
+        ...variant,
+        productKey:
+          variant.productKey ||
+          product.productKey ||
+          "",
+        productCodeName:
+          variant.productCodeName ||
+          product.productCodeName ||
+          variant.codeName ||
+          "",
+        name:
+          variant.name ||
+          product.name ||
+          "",
+        category:
+          variant.category ||
+          product.category ||
+          "",
+        description:
+          variant.description ||
+          product.description ||
+          "",
+        purity:
+          variant.purity ||
+          product.purity ||
+          "Batch Specific",
+        isBestSeller:
+          typeof variant.isBestSeller === "boolean"
+            ? variant.isBestSeller
+            : Boolean(product.isBestSeller),
+      }))
+    );
+
+    const exportPayload = {
+      format: "304-catalog-backup",
+      version: 1,
+      exportedAt: exportedAt.toISOString(),
+      productCount: products.length,
+      variantCount: records.length,
+      records,
+    };
+
+    const fileBlob = new Blob(
+      [JSON.stringify(exportPayload, null, 2)],
+      {
+        type: "application/json",
+      }
+    );
+
+    const downloadUrl = URL.createObjectURL(fileBlob);
+    const link = document.createElement("a");
+    const dateStamp = exportedAt.toISOString().slice(0, 10);
+
+    link.href = downloadUrl;
+    link.download = `304-catalog-backup-${dateStamp}.json`;
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    URL.revokeObjectURL(downloadUrl);
+
+    setError("");
+    setMessage(
+      `Catalog backup downloaded with ${records.length} variants.`
+    );
+  }
+
   if (!adminSecret) {
     return (
       <main className="catalog-admin-page">
@@ -556,6 +629,13 @@ function ProductManager({ onNavigate = () => {} }) {
               onClick={() => onNavigate("products")}
             >
               View Storefront
+            </button>
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={exportCatalogBackup}
+            >
+              Export Backup
             </button>
             <button type="button" className="secondary-btn" onClick={signOut}>
               Lock Admin

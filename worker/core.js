@@ -471,6 +471,22 @@ function prepareCatalogRecord(source) {
 
   const existingStatic = getOrderCatalogItem(codeName) || {};
   const now = new Date().toISOString();
+  const description = cleanMultilineText(source.description, 2000);
+  const purity = cleanText(source.purity, 100) || "Batch Specific";
+
+  if (/placeholder/i.test(description)) {
+    throw new ApiRequestError(
+      "Replace placeholder text with a finished product description.",
+      400
+    );
+  }
+
+  if (/\b99(?:\.0+)?\s*%\s*(?:purity|pure)\b/i.test(purity)) {
+    throw new ApiRequestError(
+      'Use "Batch Specific" instead of a blanket 99% purity claim.',
+      400
+    );
+  }
 
   return {
     productKey: normalizeCatalogProductKey(source.productKey, name),
@@ -483,8 +499,8 @@ function prepareCatalogRecord(source) {
       source.category || "Additional Research Products",
       150
     ),
-    description: cleanMultilineText(source.description, 2000),
-    purity: cleanText(source.purity || "≥ 99% Purity", 100),
+    description,
+    purity,
     isBestSeller: source.isBestSeller === true,
     codeName,
     strength,
